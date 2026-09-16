@@ -54,6 +54,12 @@ inventory:
   # `<valkey.valkey.fullnameOverride>.<namespace>.svc:6379`; required when
   # `valkey.enabled` is false.
   valkeyAddress: ""
+  # -- How long the server waits for the store at start (a Go duration),
+  # retrying with backoff, before it gives up and exits; it serves meanwhile,
+  # liveness passing and readiness failing until the store answers, so a
+  # Valkey that starts after the manager — a volume binding late, a restart —
+  # costs no container restart within the window. `"0"` waits for ever.
+  connectTimeout: 5m
   # -- The GitHub organization the inventory covers.
   org: giantswarm
   sweep:

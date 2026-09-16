@@ -38,7 +38,7 @@ type options struct {
 	listen, mcpPath string
 
 	valkeyAddr, org, internalToken string
-	sweepInterval                  time.Duration
+	sweepInterval, connectTimeout  time.Duration
 	sweepEngineChecks, sweepOnce   bool
 	sweepConcurrency, staleDays    int
 	graphqlBudgetFloor             int
@@ -60,6 +60,7 @@ func parseFlags(args []string) (*options, error) {
 	f.StringVar(&o.listen, "listen", envOr("LISTEN", ":8080"), "Listen address (LISTEN)")
 	f.StringVar(&o.mcpPath, "mcp-path", envOr("MCP_PATH", "/mcp"), "MCP endpoint path (MCP_PATH)")
 	f.StringVar(&o.valkeyAddr, "valkey-addr", envOr("VALKEY_ADDR", ""), "host:port of the Valkey the inventory lives in (VALKEY_ADDR)")
+	f.DurationVar(&o.connectTimeout, "inventory-connect-timeout", envDuration("INVENTORY_CONNECT_TIMEOUT", 5*time.Minute), "How long the start waits for the inventory store, retrying with backoff, before the server gives up and exits; it serves meanwhile, not ready. 0 waits for ever (INVENTORY_CONNECT_TIMEOUT)")
 	f.StringVar(&o.org, "org", envOr("INVENTORY_ORG", "giantswarm"), "The GitHub organization the inventory covers (INVENTORY_ORG)")
 	f.DurationVar(&o.sweepInterval, "sweep-interval", envDuration("SWEEP_INTERVAL", 24*time.Hour), "Full inventory sweep every interval; 0 turns the schedule off (SWEEP_INTERVAL)")
 	f.BoolVar(&o.sweepEngineChecks, "sweep-engine-checks", envBoolDefault("SWEEP_ENGINE_CHECKS", true), "Run the engine's set-up checks in read mode for every declared repository during a sweep (SWEEP_ENGINE_CHECKS)")
@@ -139,13 +140,14 @@ func run(ctx context.Context, o *options, log *slog.Logger) error {
 		reader = r
 		log.Warn("reading GitHub with a personal token (GITHUB_TOKEN): development only, it draws from that person's budget")
 	}
+	var store *inventory.Store
 	if o.valkeyAddr != "" {
-		store, err := inventory.Open(o.valkeyAddr)
+		s, err := inventory.New(o.valkeyAddr, log)
 		if err != nil {
 			return err
 		}
-		defer store.Close()
-		deps.Inventory = store
+		defer s.Close()
+		store, deps.Inventory = s, s
 	}
 	var circle *collect.CircleCIClient
 	if o.circleciToken != "" {
@@ -167,10 +169,18 @@ func run(ctx context.Context, o *options, log *slog.Logger) error {
 		}, reader, deps.Inventory, collect.NewEngine(o.org, reader, cc), circleReads, log)
 	}
 	if o.sweepOnce {
+		if store != nil {
+			if err := store.WaitConnected(ctx, o.connectTimeout); err != nil {
+				return err
+			}
+		}
 		return sweepOnce(ctx, deps.Collector)
 	}
 
 	cfg := server.Config{Addr: o.listen, MCPPath: o.mcpPath}
+	if store != nil {
+		cfg.Ready = store.Ping
+	}
 	if o.oauthEnabled {
 		cfg.OAuth = &server.OAuthConfig{
 			BaseURL: o.oauthBaseURL, DexIssuerURL: o.dexIssuerURL, DexClientID: o.dexClientID, DexClientSecret: o.dexClientSecret,
@@ -180,11 +190,27 @@ func run(ctx context.Context, o *options, log *slog.Logger) error {
 	}
 	if deps.Collector != nil {
 		cfg.Internal = deps.Collector.InternalHandler(o.internalToken)
-		go deps.Collector.RunSchedule(ctx, o.sweepInterval)
 	}
 	srv, err := server.New(cfg, tools.NewMCPServer(deps), log)
 	if err != nil {
 		return err
+	}
+	// The store connects while the server already serves: liveness passes,
+	// readiness fails until Valkey answers, the identity tools work
+	// throughout, and the sweep schedule starts on a connected store. A store
+	// that stays away for the whole window ends the run with its error.
+	runCtx, cancel := context.WithCancelCause(ctx)
+	defer cancel(nil)
+	if store != nil {
+		go func() {
+			if err := store.WaitConnected(runCtx, o.connectTimeout); err != nil {
+				cancel(err)
+				return
+			}
+			if deps.Collector != nil {
+				deps.Collector.RunSchedule(runCtx, o.sweepInterval)
+			}
+		}()
 	}
 	readsAs := "none"
 	if reader != nil {
@@ -192,9 +218,13 @@ func run(ctx context.Context, o *options, log *slog.Logger) error {
 	}
 	log.Info("giantswarm-repo-manager starting", "version", deps.Version, "engine", tools.EngineVersion(), "listen", o.listen, "mcp", o.mcpPath,
 		"oauth", o.oauthEnabled, "broker", deps.Broker != nil, "muster", o.musterURL, "githubApp", deps.App != nil, "reads", readsAs,
-		"inventory", o.valkeyAddr, "collector", deps.Collector != nil, "sweepInterval", o.sweepInterval, "engineChecks", o.sweepEngineChecks,
-		"internalEndpoints", deps.Collector != nil && o.internalToken != "")
-	return srv.Run(ctx)
+		"inventory", o.valkeyAddr, "inventoryConnectTimeout", o.connectTimeout, "collector", deps.Collector != nil, "sweepInterval", o.sweepInterval,
+		"engineChecks", o.sweepEngineChecks, "internalEndpoints", deps.Collector != nil && o.internalToken != "")
+	err = srv.Run(runCtx)
+	if cause := context.Cause(runCtx); cause != nil && !errors.Is(cause, context.Canceled) {
+		return cause
+	}
+	return err
 }
 
 // sweepOnce runs one sweep and prints the summary; a budget stop is printed

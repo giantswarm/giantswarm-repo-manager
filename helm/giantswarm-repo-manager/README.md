@@ -8,6 +8,19 @@ subchart (`valkey.*`, its upstream values under `valkey.valkey`). The server
 learns the store's address through `VALKEY_ADDR` — the subchart's Service by
 default, `inventory.valkeyAddress` for a Valkey outside the release.
 
+Valkey may start after the manager — its volume binding late on a fresh
+install, a restart, an upgrade — and the manager tolerates it: the server
+serves at once and connects to the store in the background, retrying with
+backoff for `inventory.connectTimeout` (5m by default; `"0"` waits for ever)
+before it gives up and exits. Until the store answers, liveness passes and
+readiness fails with the reason (`/readyz` answers 503 `not ready: inventory
+unavailable: …`), so the Deployment shows the pod unready but never restarts
+it; the inventory tools and `/internal/*` answer `inventory unavailable`, the
+identity tools (`get_info`, `validate_repository` dry run) keep working. A
+Valkey lost at runtime reads the same way — readiness fails, the pod stays
+up — and the connection re-establishes itself on the next command once
+Valkey is back; the sweep schedule starts on a connected store.
+
 Giant Swarm-specific: it manages the giantswarm org's repositories and ships as
 its own app, not as a component of the `agent-platform` meta chart.
 
@@ -32,6 +45,7 @@ its own app, not as a component of the `agent-platform` meta chart.
 | fullnameOverride | string | `""` | Override the fully qualified app name. |
 | valkey | object | `{"ciliumNetworkPolicy":{"enabled":false},"enabled":true,"valkey":{"deploymentStrategy":"Recreate","fullnameOverride":"giantswarm-repo-manager-valkey","podAnnotations":{"karpenter.sh/do-not-disrupt":"true"},"replicaCount":1},"vpa":{"enabled":false}}` | The inventory store: the Giant Swarm `valkey` app as a subchart (its values live under `valkey.valkey`, the upstream chart's). One replica on an RWO volume with `Recreate`, so a rollout does not deadlock on the volume; the store is a cache — every record is rebuilt from the team files and GitHub — so the restart gap costs nothing. Set `valkey.enabled: false` and `inventory.valkeyAddress` to use a Valkey outside the release. |
 | inventory.valkeyAddress | string | `""` | Address (`host:port`) of the Valkey the inventory lives in, passed to the server as `VALKEY_ADDR`. Empty derives the subchart's Service, `<valkey.valkey.fullnameOverride>.<namespace>.svc:6379`; required when `valkey.enabled` is false. |
+| inventory.connectTimeout | string | `"5m"` | How long the server waits for the store at start (a Go duration), retrying with backoff, before it gives up and exits; it serves meanwhile, liveness passing and readiness failing until the store answers, so a Valkey that starts after the manager — a volume binding late, a restart — costs no container restart within the window. `"0"` waits for ever. |
 | inventory.org | string | `"giantswarm"` | The GitHub organization the inventory covers. |
 | inventory.sweep.interval | string | `"24h"` | Full sweep over the org every interval (a Go duration); `"0"` turns the schedule off. The first sweep runs at start when the last one is older than the interval. |
 | inventory.sweep.engineChecks | bool | `true` | Run the engine's set-up checks in read mode for every accepted declaration during a sweep (REST as the App, about ten calls per repository). A `refresh_repository` always runs them. |

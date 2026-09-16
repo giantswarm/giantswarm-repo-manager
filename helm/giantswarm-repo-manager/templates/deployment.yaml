@@ -43,6 +43,8 @@ spec:
           env:
             - name: VALKEY_ADDR
               value: {{ include "giantswarm-repo-manager.valkeyAddress" . | quote }}
+            - name: INVENTORY_CONNECT_TIMEOUT
+              value: {{ .Values.inventory.connectTimeout | quote }}
             - name: MCP_PATH
               value: {{ .Values.mcp.path | quote }}
             - name: INVENTORY_ORG

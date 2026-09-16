@@ -32,6 +32,13 @@ const (
 	argLimit      = "limit"
 	argVerdict    = "verdict"
 	argNote       = "note"
+	argScope      = "scope"
+	argSearch     = "search"
+	argRenovate   = "renovate"
+	argVisibility = "visibility"
+	argFork       = "fork"
+	argInactive   = "inactiveDays"
+	argDecision   = "decision"
 
 	defaultLimit = 100
 )
@@ -39,15 +46,52 @@ const (
 // DecisionKeep is the one verdict defined.
 const DecisionKeep = "keep"
 
+// Scopes of list_repositories (PRD D7, D9).
+const (
+	ScopeMine       = "mine"
+	ScopeTeam       = "team"
+	ScopeUnassigned = "unassigned"
+	ScopeAll        = "all"
+)
+
+// Renovate filter values.
+const (
+	RenovateConfigured = "configured"
+	RenovateMissing    = "missing"
+	RenovateActive     = "active"
+	RenovateInactive   = "inactive"
+)
+
+// None is the filter value for "without": team none (undeclared), lifecycle
+// none, decision none — and the teams source of a caller without teams.
+const None = "none"
+
+// TeamNone and DecisionNone select the repositories without a declaration or
+// without a decision.
+const (
+	TeamNone     = None
+	DecisionNone = None
+)
+
 func (t *tools) registerInventory(s *mcpserver.MCPServer) {
 	stale := mcp.WithNumber(argStaleDays, mcp.Description("Judge the orphan score against this stale period in days instead of the server's (the score is recomputed from the record's facts)."))
 	s.AddTool(mcp.NewTool(ToolListRepositories,
 		mcp.WithDescription("Read-only. The inventory of the org's repositories from the store: one row per repository with team, lifecycle, "+
-			"orphan score and reasons, finding kinds, set-up state and record age, sorted by orphan score, plus the last sweep's summary. "+
-			"Filter by team, undeclared, minimum orphan score or finding kind; get_repository has the full record."),
+			"visibility, orphan score and reasons, finding kinds, set-up state and record age, sorted by orphan score, plus the last sweep's summary. "+
+			"Scope per caller: mine (the teams you belong to — your GitHub teams through your grant, else your IdP groups), team (the team "+
+			"argument, or your teams), unassigned (on GitHub without a declaration), all. Filters as on the Repositories page: search, renovate, "+
+			"team including none, visibility, fork, lifecycle, inactiveDays, minOrphanScore, decision, finding. get_repository has the full record."),
 		mcp.WithReadOnlyHintAnnotation(true),
-		mcp.WithString(argTeam, mcp.Description("Only repositories declared by this team (slug: team-bumblebee).")),
-		mcp.WithBoolean(argUndeclared, mcp.Description("Only repositories on GitHub without a declaration.")),
+		mcp.WithString(argScope, mcp.Enum(ScopeMine, ScopeTeam, ScopeUnassigned, ScopeAll), mcp.Description("mine | team | unassigned | all (default all).")),
+		mcp.WithString(argTeam, mcp.Description("Only repositories declared by this team (slug: team-bumblebee); none: only undeclared repositories.")),
+		mcp.WithBoolean(argUndeclared, mcp.Description("Only repositories on GitHub without a declaration (same as scope unassigned).")),
+		mcp.WithString(argSearch, mcp.Description("Only repositories whose name or description contains this text (case-insensitive).")),
+		mcp.WithString(argRenovate, mcp.Enum(RenovateConfigured, RenovateMissing, RenovateActive, RenovateInactive), mcp.Description("Renovate state: configured (a renovate.json5), missing, active (a Renovate PR or commit within the stale period), inactive.")),
+		mcp.WithString(argVisibility, mcp.Enum("public", "private"), mcp.Description("Only public or only private repositories.")),
+		mcp.WithBoolean(argFork, mcp.Description("Only forks (true) or only non-forks (false).")),
+		mcp.WithString(argLifecycle, mcp.Description("Only repositories declared with this lifecycle (deprecated, archived, …); none: no lifecycle set.")),
+		mcp.WithNumber(argInactive, mcp.Description("Only repositories whose last commit by a person is older than this many days (or that have none).")),
+		mcp.WithString(argDecision, mcp.Description("Only repositories with this decision (keep), or none.")),
 		mcp.WithNumber(argMinScore, mcp.Description("Only repositories with at least this orphan score (0-100).")),
 		mcp.WithString(argFinding, mcp.Description("Only repositories with a finding of this kind (declared-but-gone, undeclared-on-github, default-icon, gen-circleci-refused, …).")),
 		mcp.WithNumber(argLimit, mcp.Description(fmt.Sprintf("Rows to return (default %d).", defaultLimit))),
@@ -85,7 +129,9 @@ type Row struct {
 	Lifecycle        string           `json:"lifecycle,omitempty"`
 	Visibility       string           `json:"visibility,omitempty"`
 	Archived         bool             `json:"archived"`
+	Fork             bool             `json:"fork,omitempty"`
 	Gone             bool             `json:"gone,omitempty"`
+	Renovate         string           `json:"renovate,omitempty"`
 	LastPersonCommit string           `json:"lastPersonCommit,omitempty"`
 	Orphan           inventory.Orphan `json:"orphan"`
 	Findings         []string         `json:"findings,omitempty"`
@@ -104,6 +150,11 @@ type RowSetup struct {
 
 // Listing is list_repositories' result.
 type Listing struct {
+	Scope string `json:"scope"`
+	// Teams are the caller's teams a mine/team scope was resolved to, and
+	// where they came from (github, idp-groups, argument, none).
+	Teams        []string                `json:"teams,omitempty"`
+	TeamsSource  string                  `json:"teamsSource,omitempty"`
 	Sweep        *inventory.SweepSummary `json:"sweep"`
 	SweepRunning bool                    `json:"sweepRunning"`
 	Total        int                     `json:"total"`
@@ -117,10 +168,10 @@ func (t *tools) listRepositories(ctx context.Context, req mcp.CallToolRequest) (
 		return result(nil, errors.New("inventory store not configured (VALKEY_ADDR)"))
 	}
 	args := req.GetArguments()
-	team, _ := args[argTeam].(string)
-	undeclared, _ := args[argUndeclared].(bool)
-	minScore := number(args, argMinScore, 0)
-	finding, _ := args[argFinding].(string)
+	f, err := t.listFilter(ctx, args)
+	if err != nil {
+		return result(nil, err)
+	}
 	limit := int(number(args, argLimit, defaultLimit))
 	stale, ok := t.stale(args)
 
@@ -129,7 +180,7 @@ func (t *tools) listRepositories(ctx context.Context, req mcp.CallToolRequest) (
 		return result(nil, err)
 	}
 	now := time.Now()
-	out := Listing{Total: len(records), Repositories: []Row{}}
+	out := Listing{Scope: f.scope, Teams: f.teams, TeamsSource: f.teamsSource, Total: len(records), Repositories: []Row{}}
 	if out.Sweep, err = t.d.Inventory.Sweep(ctx); err != nil {
 		return result(nil, err)
 	}
@@ -141,9 +192,7 @@ func (t *tools) listRepositories(ctx context.Context, req mcp.CallToolRequest) (
 		if ok {
 			r.Orphan = inventory.Score(r, stale, now)
 		}
-		if (team != "" && (r.Declaration == nil || r.Declaration.Team != team)) ||
-			(undeclared && (r.Declaration != nil || r.Reality == nil)) ||
-			float64(r.Orphan.Score) < minScore || (finding != "" && !hasFinding(r, finding)) {
+		if !f.matches(r, stale, now) {
 			continue
 		}
 		out.Matched++
@@ -168,7 +217,8 @@ func row(r *inventory.Record, now time.Time) Row {
 		row.Team, row.Lifecycle = r.Declaration.Team, r.Declaration.Lifecycle
 	}
 	if r.Reality != nil {
-		row.Visibility, row.Archived = r.Reality.Visibility, r.Reality.IsArchived
+		row.Visibility, row.Archived, row.Fork = r.Reality.Visibility, r.Reality.IsArchived, r.Reality.IsFork
+		row.Renovate = renovateState(r, r.Orphan.StalePeriod, now)
 		if c := r.Reality.LastPersonCommit; c != nil {
 			row.LastPersonCommit = c.Date.Format("2006-01-02")
 		}

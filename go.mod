@@ -5,7 +5,7 @@ go 1.26.5
 require (
 	github.com/alicebob/miniredis/v2 v2.39.0
 	github.com/bradleyfalzon/ghinstallation/v2 v2.19.0
-	github.com/giantswarm/devctl/v8 v8.64.2
+	github.com/giantswarm/devctl/v8 v8.64.3
 	github.com/giantswarm/mcp-oauth v1.4.1
 	github.com/golang-jwt/jwt/v5 v5.3.1
 	github.com/google/go-github/v92 v92.0.0

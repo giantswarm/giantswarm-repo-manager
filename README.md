@@ -16,14 +16,40 @@ inventory record per repository in Valkey — declaration, reality, set-up state
 exposes it, with the repository lifecycle, as MCP tools with the prefix `giantswarm-repo-manager`
 (`x_giantswarm-repo-manager_<tool>` through muster):
 
-| Tool | Purpose | State |
-|---|---|---|
-| `get_info` | the identity chain of the call: caller, GitHub grant (proven with a read), App identity, inventory store, engine, write modes | shipped |
-| `create_repository` | a declaration added to the team file; the dry run is the engine's validation (rendered entry, implied template, name check) | dry run shipped, `commit` next |
-| `list_repositories`, `get_repository` | the inventory: one row per repository (team, orphan score with reasons, finding kinds, set-up state, record age) with the last sweep's summary; the full record of one repository — declaration, GitHub reality, CircleCI, Renovate, catalog, mapping, the engine's read-mode checks and the last reconciler run, findings, decision. Both rescore for another `stalePeriodDays`. Shape in [`docs/inventory-record.md`](docs/inventory-record.md) | shipped |
-| `refresh_repository`, `decide_repository` | rebuild one record now; leave a decision note (`keep`, with text) as the caller — annotations of the cache, nothing on GitHub | shipped |
-| `validate_repository` | the dry run of a declaration | next slices |
-| `update_repository`, `transfer_repository`, `set_lifecycle`, `approve_change`, `reconcile_repository` | the rest of the lifecycle | next slices |
+| Tool | Purpose |
+|---|---|
+| `get_info` | the identity chain of the call: caller, GitHub grant (proven with a read), App identity, inventory store, engine, write modes |
+| `list_repositories`, `get_repository` | the inventory: one row per repository (team, lifecycle, visibility, Renovate state, orphan score with reasons, finding kinds, set-up state, record age) with the last sweep's summary, scoped per caller — `mine` (the caller's teams: their GitHub teams through the grant, else the IdP groups), `team`, `unassigned`, `all` — and filtered as on the Repositories page (search, renovate, team incl. none, visibility, fork, lifecycle, inactiveDays, minOrphanScore, decision, finding); the full record of one repository. Shape in [`docs/inventory-record.md`](docs/inventory-record.md) |
+| `refresh_repository`, `decide_repository` | rebuild one record now; leave a decision note (`keep`, with text) as the caller — annotations of the cache, nothing on GitHub |
+| `validate_repository` | the dry run of one or more new declarations: the engine's rendered entries with defaults, the implied template and options, the name check through the App, the creation rules' refusals as data, and the guard notices a person sees before any pull request exists (`team-review` for an author outside the owning team and team-planeteers, `batch-review` above three entries) |
+| `create_repository` | the creation-only pull request adding the entries to `repositories/<team>.yaml` as the caller — machine-approved by giantswarm/github's Validate workflow when no notice stands |
+| `update_repository` | the entry replaced by the one passed (held to the schema, not the creation rules), one pull request as the caller |
+| `transfer_repository` | the entry moved between two team files in one pull request naming the giving and the receiving team; the ask to the receiving team's channel, a notice to the giving team's |
+| `set_lifecycle` | `deprecated` or `archived` set on the entry; the ask to the owning team's channel |
+| `approve_change` | the caller's GitHub team membership checked (the team named in the pull request), then the approving review submitted as the caller — what the Slack ask's Approve button calls as the clicking member |
+| `reconcile_repository` | the reconciler workflow (`reconcile-repositories.yaml` in giantswarm/github) dispatched for one repository as the caller; the run reports back through `/internal/refresh` and the completion message ("repository · catalog entity · first release") reaches the team's channel |
+
+Every tool's description and input schema, as muster exposes them: [`docs/tools.md`](docs/tools.md).
+
+**Writes are pull requests.** Every write tool takes `dryRun` and `mode`. `dryRun: true` returns the plan —
+the entry as it will read, the schema's verdict, the pull request and the ask that would follow — and
+writes nothing. `mode: "commit"` is the only write mode: a branch and a pull request in giantswarm/github,
+committed and opened with the caller's own GitHub grant, so the author is the person. `mode: "apply"` is
+refused for every write: a repository changed on GitHub without its declaration is the drift the reconciler
+reports. Team files are edited byte for byte — header comment, comments on entries and the authors' key
+order stay; only the one entry changes.
+
+**Existing entries are held to the schema, not the creation rules.** `gen.flavours`, `gen.language` and
+`gen.ci.generate` are mandatory for an entry the reconciler *creates*; for a declared repository the
+inventory validates the entry against the schema alone (the engine's checks then run for it), and the
+creation rules appear only in `validate_repository`'s dry run for an added entry.
+
+**Asks and messages go through Swarmgeist.** Lifecycle and transfer asks are posted to klaus-gateway's
+team-review endpoint (`POST /reviews`, an Approve button calling `approve_change` as the clicking member),
+notices and completion messages to `POST /notices`; the channel comes from the team's policy file
+(`repository-setup/<team>.yaml`, `slackChannel`), mapped to its Slack ID through `reviews.channels` when
+the file carries a name. Authentication is this pod's projected ServiceAccount token (audience
+`klaus-gateway`). An undelivered ask is reported in the result; approving on GitHub is equivalent.
 
 ## The pattern
 
@@ -75,6 +101,17 @@ the budget runs low. The record, its findings and the orphan score are described
 
 ## What the tests prove
 
+- **The tools** (`internal/e2e/tools_test.go`, a fake giantswarm/github with contents, git data, pull requests,
+  reviews and dispatches, a fake klaus-gateway): `validate_repository` renders an accepted entry with its template and
+  refuses a bad one as data, carries `team-review` for an outsider and `batch-review` for four entries;
+  `create_repository` with `dryRun` opens nothing; `mode: apply` is refused on every write; a commit opens the pull
+  request under the person's login (a person without a grant is told to connect GitHub); a transfer's pull request
+  touches both files and names both teams, the ask reaches the receiving team's channel and the notice the giving
+  team's; `set_lifecycle: archived` opens the pull request and posts the ask whose Approve calls
+  `approve_change`; `approve_change` refuses the outsider and lands the member's review; `update_repository` rewrites
+  one entry and leaves the rest of the file byte-identical; `list_repositories` scopes per caller (GitHub teams, IdP
+  groups) and applies the page's filters; `reconcile_repository` dispatches the workflow as the person and the
+  reconciler's report back posts the completion message.
 - `go test ./...` — the write framework refuses `mode: apply` for every registered write tool and
   advertises `commit` alone; the dry run is the engine's result; and, in `internal/e2e`, the whole
   identity chain against fakes: a forwarded `id_token` from a fake Dex is validated, exchanged at a fake

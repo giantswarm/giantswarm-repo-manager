@@ -47,7 +47,7 @@ func newFakeIdP(t *testing.T, clientID string) *fakeIdP {
 		writeJSON(w, http.StatusOK, map[string]any{
 			"issuer": idp.issuer, "authorization_endpoint": idp.issuer + "/auth", "token_endpoint": idp.issuer + "/token",
 			"jwks_uri": idp.issuer + "/keys", "userinfo_endpoint": idp.issuer + "/userinfo",
-			"response_types_supported": []string{"code"}, "subject_types_supported": []string{"public"},
+			"response_types_supported": []string{"code"}, "subject_types_supported": []string{kPublic},
 			"id_token_signing_alg_values_supported": []string{"RS256"}, "scopes_supported": []string{"openid", "email", "profile", "groups"},
 		})
 	})
@@ -135,7 +135,7 @@ func newFakeBroker(t *testing.T, clientID, clientSecret string, grants map[strin
 			oauthError(w, http.StatusUnauthorized, "invalid_client", "")
 			return
 		}
-		if r.FormValue("grant_type") != "urn:ietf:params:oauth:grant-type:token-exchange" || r.FormValue("audience") != "github" {
+		if r.FormValue("grant_type") != "urn:ietf:params:oauth:grant-type:token-exchange" || r.FormValue("audience") != kGitHub {
 			oauthError(w, http.StatusBadRequest, "invalid_request", "grant_type or audience")
 			return
 		}
@@ -166,15 +166,33 @@ func newFakeBroker(t *testing.T, clientID, clientSecret string, grants map[strin
 type fakeGitHub struct {
 	*httptest.Server
 	logins map[string]string // person access token → login
+	// teams are each login's team slugs in the org (GET /user/teams).
+	teams map[string][]string
 	// org answers GraphQL for the fake org (the inventory reads).
 	org *fakeOrg
+	// files is the fake giantswarm/github: team files, policy files, pull
+	// requests, reviews, dispatches.
+	files *fakeTeamFiles
 }
 
 func newFakeGitHub(t *testing.T, logins map[string]string) *fakeGitHub {
 	t.Helper()
-	g := &fakeGitHub{logins: logins, org: &fakeOrg{remaining: 5000, now: time.Now()}}
+	g := &fakeGitHub{logins: logins, teams: map[string][]string{}, org: &fakeOrg{remaining: 5000, now: time.Now()}, files: newFakeTeamFiles()}
 	mux := http.NewServeMux()
 	mux.HandleFunc("POST /api/v3/graphql", g.org.handle)
+	g.files.register(mux, g)
+	mux.HandleFunc("GET /api/v3/user/teams", func(w http.ResponseWriter, r *http.Request) {
+		login, ok := g.logins[bearer(r)]
+		if !ok {
+			ghMessage(w, http.StatusUnauthorized, "Bad credentials")
+			return
+		}
+		var out []map[string]any
+		for _, slug := range g.teams[login] {
+			out = append(out, map[string]any{kSlug: slug, "organization": map[string]any{kLogin: org}})
+		}
+		writeJSON(w, http.StatusOK, out)
+	})
 	mux.HandleFunc("GET /api/v3/app", func(w http.ResponseWriter, r *http.Request) {
 		if bearer(r) == "" {
 			ghMessage(w, http.StatusUnauthorized, "app JWT required")

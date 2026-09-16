@@ -30,7 +30,7 @@ func TestSweepFillsOneRecordPerRepository(t *testing.T) {
 	if err != nil {
 		t.Fatalf("sweep: %v", err)
 	}
-	if sum.Repositories != 5 || sum.Declared != 2 || sum.Undeclared != 2 || sum.Gone != 1 || sum.Archived != 1 || sum.EngineChecks != 1 || sum.Removed != 1 {
+	if sum.Repositories != 5 || sum.Declared != 2 || sum.Undeclared != 2 || sum.Gone != 1 || sum.Archived != 1 || sum.EngineChecks != 2 || sum.Removed != 1 {
 		t.Errorf("summary: %+v", sum)
 	}
 	if sum.GraphQL.Calls != 3 || sum.GraphQL.Cost != 3*fakeGraphQLCost || sum.GraphQL.Remaining == 0 || sum.Duration == "" {
@@ -39,8 +39,8 @@ func TestSweepFillsOneRecordPerRepository(t *testing.T) {
 	if n, _ := st.store.Count(ctx); n != 5 {
 		t.Errorf("records: %d, want 5", n)
 	}
-	if st.checker.calls.Load() != 1 || st.circle.Calls() != 4 {
-		t.Errorf("engine checks %d (want 1), circleci calls %d (want 4)", st.checker.calls.Load(), st.circle.Calls())
+	if st.checker.calls.Load() != 2 || st.circle.Calls() != 4 {
+		t.Errorf("engine checks %d (want 2: present and legacy, both accepted by the schema), circleci calls %d (want 4)", st.checker.calls.Load(), st.circle.Calls())
 	}
 
 	present := st.record(t, repoPresent)
@@ -68,7 +68,9 @@ func TestSweepFillsOneRecordPerRepository(t *testing.T) {
 		t.Errorf("gone: reality %v findings %+v", gone.Reality, gone.Findings)
 	}
 	legacy := st.record(t, repoLegacy)
-	if legacy.Declaration == nil || legacy.Declaration.Accepted || !hasKind(legacy, inventory.FindingDeclarationRefused) || !strings.Contains(legacy.Setup.CheckError, "creation rules") {
+	// An existing declaration is held to the schema alone: the legacy -app
+	// name is a creation rule, not a finding, and the checks run for it.
+	if legacy.Declaration == nil || !legacy.Declaration.Accepted || hasKind(legacy, inventory.FindingDeclarationRefused) || legacy.Setup.CheckError != "" {
 		t.Errorf("legacy: %+v setup %+v findings %+v", legacy.Declaration, legacy.Setup, legacy.Findings)
 	}
 	stray := st.record(t, repoStray)
@@ -117,7 +119,7 @@ func TestInventoryToolsAndReconcilerRefresh(t *testing.T) {
 		t.Errorf("list undeclared: %+v", undeclared.Repositories)
 	}
 	var mine tools.Listing
-	st.callJSON(t, c, tools.ToolListRepositories, map[string]any{"team": team, "limit": 2}, &mine)
+	st.callJSON(t, c, tools.ToolListRepositories, map[string]any{argTeam: team, "limit": 2}, &mine)
 	if mine.Matched != 3 || mine.Shown != 2 {
 		t.Errorf("list team: matched %d shown %d", mine.Matched, mine.Shown)
 	}

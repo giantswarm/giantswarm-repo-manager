@@ -135,3 +135,12 @@ plus the MCPServer's required audiences, comma-separated without duplicates.
 {{- if not $auds }}{{- $auds = list (include "giantswarm-repo-manager.dexClientID" .) }}{{- end }}
 {{- concat $auds .Values.muster.mcpServer.auth.requiredAudiences | uniq | compact | join "," }}
 {{- end }}
+
+{{/*
+Slack channel IDs by policy-file channel name, as name=ID pairs.
+*/}}
+{{- define "giantswarm-repo-manager.reviewChannels" -}}
+{{- $pairs := list }}
+{{- range $name, $id := .Values.reviews.channels }}{{- $pairs = append $pairs (printf "%s=%s" $name $id) }}{{- end }}
+{{- join "," $pairs }}
+{{- end }}

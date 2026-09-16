@@ -128,6 +128,18 @@ spec:
                   name: {{ . }}
                   key: token
             {{- end }}
+            - name: TEAM_FILES_REPOSITORY
+              value: {{ .Values.teamFiles.repository | quote }}
+            - name: TEAM_FILES_REF
+              value: {{ .Values.teamFiles.ref | quote }}
+            {{- if .Values.reviews.gatewayURL }}
+            - name: REVIEWS_URL
+              value: {{ .Values.reviews.gatewayURL | quote }}
+            - name: REVIEWS_TOKEN_FILE
+              value: /var/run/secrets/klaus-gateway/token
+            - name: REVIEWS_CHANNELS
+              value: {{ include "giantswarm-repo-manager.reviewChannels" . | quote }}
+            {{- end }}
             {{- with .Values.extraEnv }}
             {{- toYaml . | nindent 12 }}
             {{- end }}
@@ -166,6 +178,11 @@ spec:
               mountPath: /etc/giantswarm-repo-manager/github-app
               readOnly: true
             {{- end }}
+            {{- if .Values.reviews.gatewayURL }}
+            - name: klaus-gateway-token
+              mountPath: /var/run/secrets/klaus-gateway
+              readOnly: true
+            {{- end }}
       volumes:
         - name: tmp
           emptyDir: {}
@@ -181,6 +198,15 @@ spec:
             items:
               - key: private-key
                 path: private-key
+        {{- end }}
+        {{- if .Values.reviews.gatewayURL }}
+        - name: klaus-gateway-token
+          projected:
+            sources:
+              - serviceAccountToken:
+                  audience: {{ .Values.reviews.audience | quote }}
+                  expirationSeconds: 600
+                  path: token
         {{- end }}
       {{- with .Values.nodeSelector }}
       nodeSelector:

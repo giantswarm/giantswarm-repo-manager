@@ -148,9 +148,9 @@ func TestCreateRepositoryDryRunIsTheEngineValidation(t *testing.T) {
 		t.Errorf("refusal should be data naming the -app suffix: isError=%v %s", isErr, text)
 	}
 
-	// commit is not delivered by this slice: named as such, nothing written.
+	// commit without a caller: nobody to open the pull request as.
 	text, isErr = call(t, c, ToolCreateRepository, map[string]any{ArgMode: string(ModeCommit), argTeam: testTeam, argEntry: validEntry})
-	if !isErr || !strings.Contains(text, ErrNotImplemented.Error()) {
+	if !isErr || !strings.Contains(text, "needs a caller") {
 		t.Errorf("commit: isError=%v %s", isErr, text)
 	}
 }

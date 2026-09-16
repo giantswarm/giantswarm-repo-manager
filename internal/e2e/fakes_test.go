@@ -132,16 +132,16 @@ func newFakeBroker(t *testing.T, clientID, clientSecret string, grants map[strin
 	mux.HandleFunc("POST /oauth/token", func(w http.ResponseWriter, r *http.Request) {
 		id, secret, ok := r.BasicAuth()
 		if !ok || id != b.clientID || secret != b.clientSecret {
-			writeJSON(w, http.StatusUnauthorized, map[string]any{"error": "invalid_client"})
+			oauthError(w, http.StatusUnauthorized, "invalid_client", "")
 			return
 		}
 		if r.FormValue("grant_type") != "urn:ietf:params:oauth:grant-type:token-exchange" || r.FormValue("audience") != "github" {
-			writeJSON(w, http.StatusBadRequest, map[string]any{"error": "invalid_request", "error_description": "grant_type or audience"})
+			oauthError(w, http.StatusBadRequest, "invalid_request", "grant_type or audience")
 			return
 		}
 		claims := jwt.MapClaims{}
 		if _, _, err := jwt.NewParser().ParseUnverified(r.FormValue("subject_token"), claims); err != nil {
-			writeJSON(w, http.StatusBadRequest, map[string]any{"error": "invalid_grant"})
+			oauthError(w, http.StatusBadRequest, "invalid_grant", "")
 			return
 		}
 		b.mu.Lock()
@@ -150,7 +150,7 @@ func newFakeBroker(t *testing.T, clientID, clientSecret string, grants map[strin
 		sub, _ := claims["sub"].(string)
 		tok, ok := b.grants[sub]
 		if !ok {
-			writeJSON(w, http.StatusBadRequest, map[string]any{"error": "invalid_target", "error_description": "no grant"})
+			oauthError(w, http.StatusBadRequest, "invalid_target", "no grant")
 			return
 		}
 		writeJSON(w, http.StatusOK, map[string]any{"access_token": tok, "issued_token_type": tokenTypeAccessToken, "token_type": "Bearer", "expires_in": 3500})
@@ -200,6 +200,11 @@ func newFakeGitHub(t *testing.T, logins map[string]string) *fakeGitHub {
 
 func bearer(r *http.Request) string {
 	return strings.TrimSpace(strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer "))
+}
+
+// oauthError is an RFC 6749 error response.
+func oauthError(w http.ResponseWriter, status int, code, description string) {
+	writeJSON(w, status, map[string]any{"error": code, "error_description": description})
 }
 
 // ghMessage is GitHub's error body shape.

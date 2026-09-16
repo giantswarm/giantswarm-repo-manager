@@ -22,7 +22,7 @@ import (
 
 var newEntry = map[string]any{
 	kName: "shiny-service", kComponentType: kService,
-	kGen: map[string]any{"language": "go", kFlavours: []any{kApp}, "ci": map[string]any{kChartName: "shiny-service"}},
+	kGen: map[string]any{kLanguage: kGo, kFlavours: []any{kApp}, kCI: map[string]any{kChartName: "shiny-service"}},
 }
 
 // TestValidateRepositoryRendersAndRefuses: the dry run renders an accepted
@@ -38,7 +38,7 @@ func TestValidateRepositoryRendersAndRefuses(t *testing.T) {
 		t.Errorf("member's valid entry: %+v notices=%v teams=%v/%s", v.Result, v.Notices, v.AuthorTeams, v.TeamsSource)
 	}
 
-	bad := map[string]any{kName: "shiny-app", kComponentType: kService, kGen: map[string]any{"language": "go", kFlavours: []any{kApp}}}
+	bad := map[string]any{kName: "shiny-app", kComponentType: kService, kGen: map[string]any{kLanguage: kGo, kFlavours: []any{kApp}}}
 	st.callJSON(t, asAlice, tools.ToolValidateRepository, map[string]any{argTeam: team, argEntry: bad}, &v)
 	if v.Accepted || len(v.Entries) != 1 || len(v.Entries[0].Problems) == 0 {
 		t.Errorf("refusal should be data: %+v", v.Result)
@@ -52,7 +52,7 @@ func TestValidateRepositoryRendersAndRefuses(t *testing.T) {
 
 	four := []any{}
 	for _, n := range []string{"a-one", "a-two", "a-three", "a-four"} {
-		e := map[string]any{kName: n, kComponentType: kService, kGen: map[string]any{"language": "go", kFlavours: []any{"generic"}}}
+		e := map[string]any{kName: n, kComponentType: kService, kGen: map[string]any{kLanguage: kGo, kFlavours: []any{"generic"}}}
 		four = append(four, e)
 	}
 	st.callJSON(t, asAlice, tools.ToolValidateRepository, map[string]any{argTeam: team, "entries": four}, &v)
@@ -73,7 +73,7 @@ func TestCreateDryRunOpensNothingAndApplyIsRefusedEverywhere(t *testing.T) {
 		t.Errorf("dry run opened %d pull requests", n)
 	}
 	for _, tool := range tools.WriteToolNames() {
-		text, isErr := call(t, c, tool, map[string]any{argMode: "apply", argTeam: team, argEntry: newEntry, kRepository: repoPresent, argToTeam: teamPlaneteers, argLifecycle: "archived", argPullRequest: 1})
+		text, isErr := call(t, c, tool, map[string]any{argMode: modeApply, argTeam: team, argEntry: newEntry, kRepository: repoPresent, argToTeam: teamPlaneteers, argLifecycle: "archived", argPullRequest: 1})
 		if !isErr || !strings.Contains(text, `mode "apply" is refused`) {
 			t.Errorf("%s: apply should be refused: isError=%v %s", tool, isErr, text)
 		}
@@ -88,7 +88,7 @@ func TestCreateDryRunOpensNothingAndApplyIsRefusedEverywhere(t *testing.T) {
 // told to connect GitHub and nothing opens.
 func TestCreateCommitOpensThePullRequestAsThePerson(t *testing.T) {
 	st := newStack(t)
-	bob := st.as(t, st.idp.mint(t, "bob", "bob@example.com"))
+	bob := st.as(t, st.idp.mint(t, bob, "bob@example.com"))
 	text, isErr := call(t, bob, tools.ToolCreateRepository, map[string]any{argMode: modeCommit, argTeam: team, argEntry: newEntry})
 	if !isErr || !strings.Contains(text, "connect GitHub") {
 		t.Errorf("bob without a grant: isError=%v %s", isErr, text)
@@ -128,7 +128,7 @@ func TestTransferNamesBothTeams(t *testing.T) {
 		t.Errorf("transfer pull request %q\n%s\n--- from ---\n%s\n--- to ---\n%s", pr.Title, pr.Body, from, to)
 	}
 	asks, notices := st.gw.posted()
-	if len(asks) != 1 || asks[0]["channel"] != planeteersChannel || asks[0]["team"] != teamPlaneteers || len(notices) != 1 || notices[0]["channel"] != bumblebeeChannel ||
+	if len(asks) != 1 || asks[0][kChannel] != planeteersChannel || asks[0]["team"] != teamPlaneteers || len(notices) != 1 || notices[0][kChannel] != bumblebeeChannel ||
 		out.Ask == nil || !out.Ask.Delivered || out.Notice == nil || !out.Notice.Delivered {
 		t.Errorf("asks=%v notices=%v out=%+v", asks, notices, out)
 	}
@@ -147,7 +147,7 @@ func TestSetLifecycleArchivedAndApproveChange(t *testing.T) {
 		t.Errorf("archive pull request %q\n%s", pr.Title, file)
 	}
 	asks, _ := st.gw.posted()
-	if len(asks) != 1 || asks[0]["channel"] != bumblebeeChannel || !strings.Contains(asks[0]["text"].(string), "Archive") || !strings.Contains(asks[0]["text"].(string), "superseded") {
+	if len(asks) != 1 || asks[0][kChannel] != bumblebeeChannel || !strings.Contains(asks[0]["text"].(string), "Archive") || !strings.Contains(asks[0]["text"].(string), "superseded") {
 		t.Fatalf("ask: %v", asks)
 	}
 	approve := asks[0]["approve"].(map[string]any)
@@ -176,7 +176,7 @@ func TestUpdateRepositoryReplacesOneEntry(t *testing.T) {
 	st := newStack(t)
 	c := st.as(t, st.idp.mint(t, alice, aliceEmail))
 	entry := map[string]any{"name": repoPresent, kComponentType: kService, "description": "now described",
-		kGen: map[string]any{"language": "go", kFlavours: []any{kApp}, "ci": map[string]any{kChartName: repoPresent}}}
+		kGen: map[string]any{kLanguage: kGo, kFlavours: []any{kApp}, kCI: map[string]any{kChartName: repoPresent}}}
 	var plan tools.Plan
 	st.callJSON(t, c, tools.ToolUpdateRepository, map[string]any{argDryRun: true, kRepository: repoPresent, argEntry: entry}, &plan)
 	if !plan.Accepted || !strings.Contains(plan.Entry, "now described") || strings.Contains(plan.Before, "described") || plan.Team != team {
@@ -233,7 +233,7 @@ func TestListScopesPerCaller(t *testing.T) {
 		{map[string]any{argScope: "team", argTeam: teamPlaneteers}, org + "/planet-service"},
 		{map[string]any{argTeam: "none"}, org + "/" + repoStray},
 		{map[string]any{"search": "stray thing"}, org + "/" + repoStray},
-		{map[string]any{"visibility": "private"}, org + "/planet-service"},
+		{map[string]any{kVisibility: "private"}, org + "/planet-service"},
 		{map[string]any{"fork": true}, org + "/planet-service"},
 		{map[string]any{argLifecycle: "deprecated"}, org + "/planet-service"},
 		{map[string]any{"inactiveDays": 365, argScope: "team", argTeam: teamPlaneteers}, org + "/planet-service"},
@@ -247,7 +247,7 @@ func TestListScopesPerCaller(t *testing.T) {
 	// bob has no grant: his teams come from the IdP groups (the fake Dex
 	// puts everyone in team-bumblebee).
 	var l tools.Listing
-	st.callJSON(t, st.as(t, st.idp.mint(t, "bob", "bob@example.com")), tools.ToolListRepositories, map[string]any{argScope: "mine"}, &l)
+	st.callJSON(t, st.as(t, st.idp.mint(t, bob, "bob@example.com")), tools.ToolListRepositories, map[string]any{argScope: "mine"}, &l)
 	if l.TeamsSource != "idp-groups" || strings.Join(l.Teams, ",") != team || l.Matched != 2 {
 		t.Errorf("bob's scope mine: teams=%v/%s matched=%d", l.Teams, l.TeamsSource, l.Matched)
 	}
@@ -282,7 +282,7 @@ func TestReconcileDispatchesAsThePersonAndTheCompletionMessageFollows(t *testing
 		t.Fatalf("record after the run: %v %s", err, body)
 	}
 	_, notices := st.gw.posted()
-	if len(notices) != 1 || notices[0]["channel"] != bumblebeeChannel || !strings.Contains(notices[0]["text"].(string), "*Reconciled* `"+org+"/"+repoPresent+"`") ||
+	if len(notices) != 1 || notices[0][kChannel] != bumblebeeChannel || !strings.Contains(notices[0]["text"].(string), "*Reconciled* `"+org+"/"+repoPresent+"`") ||
 		!strings.Contains(notices[0]["text"].(string), "catalog entity: present") || notices[0]["link"] != run.RunURL {
 		t.Errorf("completion message: %v", notices)
 	}

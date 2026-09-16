@@ -45,6 +45,15 @@ const (
 	kFlavours      = "flavours"
 	kService       = "service"
 	kGen           = "gen"
+	kLanguage      = "language"
+	kGo            = "go"
+	kCI            = "ci"
+	kChannel       = "channel"
+	kVisibility    = "visibility"
+	kFile          = "file"
+	kID            = "id"
+	modeApply      = "apply"
+	bob            = "bob"
 )
 
 const planeteersFile = `# Planeteers' repositories.
@@ -110,13 +119,13 @@ func (f *fakeTeamFiles) register(mux *http.ServeMux, g *fakeGitHub) {
 		defer f.mu.Unlock()
 		p := r.PathValue("path")
 		if c, ok := f.files[p]; ok {
-			writeJSON(w, http.StatusOK, map[string]any{kType: "file", kName: path.Base(p), kPath: p, kSHA: "blob-" + p, "encoding": "base64", "content": base64.StdEncoding.EncodeToString(c)})
+			writeJSON(w, http.StatusOK, map[string]any{kType: kFile, kName: path.Base(p), kPath: p, kSHA: "blob-" + p, "encoding": "base64", "content": base64.StdEncoding.EncodeToString(c)})
 			return
 		}
 		var dir []map[string]any
 		for name := range f.files {
 			if path.Dir(name) == p {
-				dir = append(dir, map[string]any{kType: "file", kName: path.Base(name), kPath: name})
+				dir = append(dir, map[string]any{kType: kFile, kName: path.Base(name), kPath: name})
 			}
 		}
 		if dir == nil {
@@ -218,7 +227,7 @@ func (f *fakeTeamFiles) register(mux *http.ServeMux, g *fakeGitHub) {
 			return
 		}
 		pr.Reviews = append(pr.Reviews, fakeReview{User: login, Event: req.Event, Body: req.Body})
-		writeJSON(w, http.StatusOK, map[string]any{"id": len(pr.Reviews), "state": "APPROVED", "html_url": fmt.Sprintf("https://github.com/%s/github/pull/%d#pullrequestreview-%d", org, pr.Number, len(pr.Reviews)), "user": map[string]any{kLogin: login}})
+		writeJSON(w, http.StatusOK, map[string]any{kID: len(pr.Reviews), "state": "APPROVED", "html_url": fmt.Sprintf("https://github.com/%s/github/pull/%d#pullrequestreview-%d", org, pr.Number, len(pr.Reviews)), "user": map[string]any{kLogin: login}})
 	})
 	mux.HandleFunc("POST "+base+"/actions/workflows/{file}/dispatches", func(w http.ResponseWriter, r *http.Request) {
 		body, _ := io.ReadAll(r.Body)
@@ -267,10 +276,10 @@ func (g *fakeGateway) handler() http.Handler {
 			}
 			g.mu.Lock()
 			defer g.mu.Unlock()
-			out := map[string]any{"channel": body["channel"], "ts": "1726512345.000100"}
+			out := map[string]any{kChannel: body[kChannel], "ts": "1726512345.000100"}
 			if kind == "review" {
 				g.asks = append(g.asks, body)
-				out["id"] = fmt.Sprintf("review-%d", len(g.asks))
+				out[kID] = fmt.Sprintf("review-%d", len(g.asks))
 			} else {
 				g.notices = append(g.notices, body)
 			}

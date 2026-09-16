@@ -215,7 +215,7 @@ func TestIdentityChain(t *testing.T) {
 // connected GitHub — no grant, a pointer to muster, nothing else fails.
 func TestPersonWithoutGrantIsToldToConnect(t *testing.T) {
 	st := newStack(t)
-	info := getInfo(t, st.as(t, st.idp.mint(t, "bob", "bob@example.com")))
+	info := getInfo(t, st.as(t, st.idp.mint(t, bob, "bob@example.com")))
 	if info.Caller == nil || info.Caller.Subject != "bob" {
 		t.Errorf("caller: %+v", info.Caller)
 	}
@@ -253,7 +253,7 @@ func TestUnauthenticatedCallIsRefused(t *testing.T) {
 func TestWritesAsThePerson(t *testing.T) {
 	st := newStack(t)
 	c := st.as(t, st.idp.mint(t, alice, aliceEmail))
-	entry := map[string]any{kName: "example-service", "componentType": kService, kGen: map[string]any{"language": "go", kFlavours: []any{kApp}, "ci": map[string]any{kChartName: "example-service"}}}
+	entry := map[string]any{kName: "example-service", "componentType": kService, kGen: map[string]any{kLanguage: kGo, kFlavours: []any{kApp}, kCI: map[string]any{kChartName: "example-service"}}}
 
 	text, isErr := call(t, c, tools.ToolCreateRepository, map[string]any{tools.ArgMode: "apply", argTeam: team, argEntry: entry})
 	if !isErr || text != tools.ApplyRefusal {

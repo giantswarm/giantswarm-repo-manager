@@ -1,0 +1,34 @@
+apiVersion: v2
+name: giantswarm-repo-manager
+description: Giant Swarm's repository set-up service — an MCP server behind muster that lists, validates, creates and reconciles the giantswarm org's repositories as the person, with its own Valkey for the inventory
+type: application
+version: 0.1.0
+appVersion: "0.1.0"
+home: https://github.com/giantswarm/giantswarm-repo-manager
+icon: https://s.giantswarm.io/app-icons/giantswarm/1/dark.svg
+sources:
+  - https://github.com/giantswarm/giantswarm-repo-manager
+keywords:
+  - mcp
+  - repositories
+  - github
+  - agent-platform
+maintainers:
+  - name: Giant Swarm
+    email: team-bumblebee@giantswarm.io
+annotations:
+  # Team ownership (OCI-compliant format)
+  io.giantswarm.application.team: bumblebee
+  # Giant Swarm-specific: the giantswarm org's repositories, of no use to
+  # other Agent Platform users.
+  io.giantswarm.application.audience: giantswarm
+  # App is managed/supported by Giant Swarm
+  io.giantswarm.application.managed: "true"
+# The inventory store: the Giant Swarm `valkey` app as a subchart, pinned
+# exactly. Chart.lock mirrors the pin; `helm dependency build` resolves it
+# (charts/ is not committed), never `helm dependency update`.
+dependencies:
+  - name: valkey
+    version: "0.1.4"
+    repository: oci://gsoci.azurecr.io/charts/giantswarm
+    condition: valkey.enabled

@@ -1,0 +1,15 @@
+# local builds
+/giantswarm-repo-manager
+/giantswarm-repo-manager-linux-*
+/giantswarm-repo-manager-darwin-*
+/giantswarm-repo-manager-windows-*
+/build/
+/dist/
+# Helm pulls the dependency archives here; Chart.lock is the committed pin.
+/helm/*/charts/
+# Python bytecode (ATS test runs)
+__pycache__/
+# editor / OS
+.idea/
+.vscode/
+.DS_Store

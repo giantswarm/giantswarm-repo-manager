@@ -1,0 +1,110 @@
+# Default values for giantswarm-repo-manager.
+
+# -- Number of replicas. The server holds its state in Valkey; more than one
+# is fine.
+replicaCount: 1
+
+image:
+  # -- Image registry.
+  registry: gsoci.azurecr.io
+  # -- Image repository.
+  repository: giantswarm/giantswarm-repo-manager
+  # -- Image pull policy.
+  pullPolicy: IfNotPresent
+  # -- Image tag. Defaults to the chart appVersion.
+  tag: ""
+
+# -- Image pull secrets.
+imagePullSecrets: []
+# -- Override the chart name.
+nameOverride: ""
+# -- Override the fully qualified app name.
+fullnameOverride: ""
+
+# -- The inventory store: the Giant Swarm `valkey` app as a subchart (its
+# values live under `valkey.valkey`, the upstream chart's). One replica on an
+# RWO volume with `Recreate`, so a rollout does not deadlock on the volume;
+# the store is a cache — every record is rebuilt from the team files and
+# GitHub — so the restart gap costs nothing. Set `valkey.enabled: false` and
+# `inventory.valkeyAddress` to use a Valkey outside the release.
+valkey:  # @schema skipProperties: true; additionalProperties: true
+  enabled: true
+  ciliumNetworkPolicy:
+    enabled: false
+  vpa:
+    enabled: false
+  valkey:
+    fullnameOverride: giantswarm-repo-manager-valkey
+    replicaCount: 1
+    deploymentStrategy: Recreate
+    podAnnotations:
+      karpenter.sh/do-not-disrupt: "true"
+
+inventory:
+  # -- Address (`host:port`) of the Valkey the inventory lives in, passed to
+  # the server as `VALKEY_ADDR`. Empty derives the subchart's Service,
+  # `<valkey.valkey.fullnameOverride>.<namespace>.svc:6379`; required when
+  # `valkey.enabled` is false.
+  valkeyAddress: ""
+
+serviceAccount:
+  # -- Create a ServiceAccount.
+  create: true
+  # -- Annotations on the ServiceAccount.
+  annotations: {}  # @schema additionalProperties: true
+  # -- ServiceAccount name (generated when empty).
+  name: ""
+
+# -- Annotations on the pod.
+podAnnotations: {}  # @schema additionalProperties: true
+# -- Labels on the pod.
+podLabels: {}  # @schema additionalProperties: true
+
+# -- Pod security context.
+podSecurityContext:
+  runAsNonRoot: true
+  runAsUser: 1000
+  runAsGroup: 1000
+  fsGroup: 1000
+  seccompProfile:
+    type: RuntimeDefault
+
+# -- Container security context.
+securityContext:
+  readOnlyRootFilesystem: true
+  allowPrivilegeEscalation: false
+  runAsNonRoot: true
+  runAsUser: 1000
+  runAsGroup: 1000
+  capabilities:
+    drop:
+      - ALL
+  seccompProfile:
+    type: RuntimeDefault
+
+service:
+  # -- Service type.
+  type: ClusterIP
+  # -- Service port (the container listens on 8080).
+  port: 8080
+
+# -- Container resources.
+resources:
+  requests:
+    cpu: 50m
+    memory: 64Mi
+  limits:
+    cpu: 500m
+    memory: 256Mi
+
+# -- Extra container arguments.
+extraArgs: []
+# -- Extra environment variables.
+extraEnv: []  # @schema item: object ; itemProperties: {name: {type: string}, value: {type: string}, valueFrom: {type: object, additionalProperties: true}}
+
+# -- Node selector.
+nodeSelector: {}  # @schema additionalProperties: true
+# -- Tolerations.
+tolerations: []  # @schema item: object ; itemProperties: {key: {type: string}, operator: {type: string}, value: {type: string}, effect: {type: string}, tolerationSeconds: {type: integer}}
+# -- Affinity.
+affinity: {}  # @schema additionalProperties: true

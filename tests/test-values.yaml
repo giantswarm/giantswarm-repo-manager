@@ -1,0 +1,8 @@
+# Values for chart tests / local installs on kind: the defaults, with the
+# Valkey subchart's PodMonitor off — the monitoring.coreos.com CRDs are not on
+# the ATS cluster.
+valkey:
+  valkey:
+    metrics:
+      podMonitor:
+        enabled: false

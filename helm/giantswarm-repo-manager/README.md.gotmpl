@@ -1,0 +1,17 @@
+{{ template "chart.header" . }}
+{{ template "chart.deprecationWarning" . }}
+
+{{ template "chart.description" . }}
+
+The chart deploys the server as one Deployment behind a ClusterIP Service and
+brings the inventory's store with it: the Giant Swarm `valkey` app as a
+subchart (`valkey.*`, its upstream values under `valkey.valkey`). The server
+learns the store's address through `VALKEY_ADDR` — the subchart's Service by
+default, `inventory.valkeyAddress` for a Valkey outside the release.
+
+Giant Swarm-specific: it manages the giantswarm org's repositories and ships as
+its own app, not as a component of the `agent-platform` meta chart.
+
+{{ template "chart.requirementsSection" . }}
+
+{{ template "chart.valuesSection" . }}

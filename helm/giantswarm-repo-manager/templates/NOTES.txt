@@ -1,0 +1,9 @@
+giantswarm-repo-manager is running.
+
+  Health : http://{{ include "giantswarm-repo-manager.fullname" . }}.{{ .Release.Namespace }}.svc.cluster.local:{{ .Values.service.port }}/healthz
+  Valkey : {{ include "giantswarm-repo-manager.valkeyAddress" . }}
+
+Try it:
+
+  kubectl -n {{ .Release.Namespace }} port-forward svc/{{ include "giantswarm-repo-manager.fullname" . }} 8080:{{ .Values.service.port }}
+  curl -s localhost:8080/readyz

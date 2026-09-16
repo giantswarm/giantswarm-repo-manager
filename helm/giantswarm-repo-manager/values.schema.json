@@ -1,0 +1,312 @@
+{
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {
+        "affinity": {
+            "type": "object",
+            "description": "Affinity.",
+            "additionalProperties": true
+        },
+        "baseDomain": {
+            "type": "string"
+        },
+        "bootstrapMode": {
+            "type": "object",
+            "additionalProperties": true
+        },
+        "chartOperator": {
+            "type": "object",
+            "additionalProperties": true
+        },
+        "ciliumNetworkPolicy": {
+            "type": "object",
+            "additionalProperties": true
+        },
+        "cluster": {
+            "type": "object",
+            "additionalProperties": true
+        },
+        "clusterCA": {
+            "type": "string"
+        },
+        "clusterCIDR": {
+            "type": "string"
+        },
+        "clusterDNSIP": {
+            "type": "string"
+        },
+        "clusterID": {
+            "type": "string"
+        },
+        "extraArgs": {
+            "type": "array",
+            "description": "Extra container arguments."
+        },
+        "extraEnv": {
+            "type": "array",
+            "description": "Extra environment variables.",
+            "items": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                    "name": {
+                        "type": "string"
+                    },
+                    "value": {
+                        "type": "string"
+                    },
+                    "valueFrom": {
+                        "type": "object",
+                        "additionalProperties": true
+                    }
+                }
+            }
+        },
+        "fullnameOverride": {
+            "type": "string",
+            "description": "Override the fully qualified app name."
+        },
+        "gcpProject": {
+            "type": "string"
+        },
+        "global": {
+            "type": [
+                "object",
+                "null"
+            ],
+            "description": "Global values shared between all subcharts",
+            "$comment": "Added automatically by 'helm schema' to allow this chart to be used as a Helm dependency, as this schema would otherwise not allow Helm's special 'global' values key."
+        },
+        "image": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+                "pullPolicy": {
+                    "type": "string",
+                    "description": "Image pull policy."
+                },
+                "registry": {
+                    "type": "string",
+                    "description": "Image registry."
+                },
+                "repository": {
+                    "type": "string",
+                    "description": "Image repository."
+                },
+                "tag": {
+                    "type": "string",
+                    "description": "Image tag. Defaults to the chart appVersion."
+                }
+            }
+        },
+        "imagePullSecrets": {
+            "type": "array",
+            "description": "Image pull secrets."
+        },
+        "inventory": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+                "valkeyAddress": {
+                    "type": "string",
+                    "description": "Address (`host:port`) of the Valkey the inventory lives in, passed to the server as `VALKEY_ADDR`. Empty derives the subchart's Service, `<valkey.valkey.fullnameOverride>.<namespace>.svc:6379`; required when `valkey.enabled` is false."
+                }
+            }
+        },
+        "nameOverride": {
+            "type": "string",
+            "description": "Override the chart name."
+        },
+        "nodeSelector": {
+            "type": "object",
+            "description": "Node selector.",
+            "additionalProperties": true
+        },
+        "podAnnotations": {
+            "type": "object",
+            "description": "Annotations on the pod.",
+            "additionalProperties": true
+        },
+        "podLabels": {
+            "type": "object",
+            "description": "Labels on the pod.",
+            "additionalProperties": true
+        },
+        "podSecurityContext": {
+            "type": "object",
+            "description": "Pod security context.",
+            "additionalProperties": false,
+            "properties": {
+                "fsGroup": {
+                    "type": "integer"
+                },
+                "runAsGroup": {
+                    "type": "integer"
+                },
+                "runAsNonRoot": {
+                    "type": "boolean"
+                },
+                "runAsUser": {
+                    "type": "integer"
+                },
+                "seccompProfile": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "properties": {
+                        "type": {
+                            "type": "string"
+                        }
+                    }
+                }
+            }
+        },
+        "provider": {
+            "type": "string"
+        },
+        "replicaCount": {
+            "type": "integer",
+            "description": "Number of replicas. The server holds its state in Valkey; more than one is fine."
+        },
+        "resources": {
+            "type": "object",
+            "description": "Container resources.",
+            "additionalProperties": false,
+            "properties": {
+                "limits": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "properties": {
+                        "cpu": {
+                            "type": "string"
+                        },
+                        "memory": {
+                            "type": "string"
+                        }
+                    }
+                },
+                "requests": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "properties": {
+                        "cpu": {
+                            "type": "string"
+                        },
+                        "memory": {
+                            "type": "string"
+                        }
+                    }
+                }
+            }
+        },
+        "securityContext": {
+            "type": "object",
+            "description": "Container security context.",
+            "additionalProperties": false,
+            "properties": {
+                "allowPrivilegeEscalation": {
+                    "type": "boolean"
+                },
+                "capabilities": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "properties": {
+                        "drop": {
+                            "type": "array",
+                            "items": {
+                                "type": "string"
+                            }
+                        }
+                    }
+                },
+                "readOnlyRootFilesystem": {
+                    "type": "boolean"
+                },
+                "runAsGroup": {
+                    "type": "integer"
+                },
+                "runAsNonRoot": {
+                    "type": "boolean"
+                },
+                "runAsUser": {
+                    "type": "integer"
+                },
+                "seccompProfile": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "properties": {
+                        "type": {
+                            "type": "string"
+                        }
+                    }
+                }
+            }
+        },
+        "service": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+                "type": {
+                    "type": "string",
+                    "description": "Service type."
+                },
+                "port": {
+                    "type": "integer",
+                    "description": "Service port (the container listens on 8080)."
+                }
+            }
+        },
+        "serviceAccount": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+                "annotations": {
+                    "type": "object",
+                    "description": "Annotations on the ServiceAccount.",
+                    "additionalProperties": true
+                },
+                "create": {
+                    "type": "boolean",
+                    "description": "Create a ServiceAccount."
+                },
+                "name": {
+                    "type": "string",
+                    "description": "ServiceAccount name (generated when empty)."
+                }
+            }
+        },
+        "subscriptionID": {
+            "type": "string"
+        },
+        "tolerations": {
+            "type": "array",
+            "description": "Tolerations.",
+            "items": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                    "effect": {
+                        "type": "string"
+                    },
+                    "key": {
+                        "type": "string"
+                    },
+                    "operator": {
+                        "type": "string"
+                    },
+                    "tolerationSeconds": {
+                        "type": "integer"
+                    },
+                    "value": {
+                        "type": "string"
+                    }
+                }
+            }
+        },
+        "valkey": {
+            "type": "object",
+            "description": "The inventory store: the Giant Swarm `valkey` app as a subchart (its values live under `valkey.valkey`, the upstream chart's). One replica on an RWO volume with `Recreate`, so a rollout does not deadlock on the volume; the store is a cache — every record is rebuilt from the team files and GitHub — so the restart gap costs nothing. Set `valkey.enabled: false` and `inventory.valkeyAddress` to use a Valkey outside the release.",
+            "additionalProperties": true
+        }
+    }
+}

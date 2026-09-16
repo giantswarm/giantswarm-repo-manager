@@ -253,7 +253,7 @@ func TestUnauthenticatedCallIsRefused(t *testing.T) {
 func TestWritesAsThePerson(t *testing.T) {
 	st := newStack(t)
 	c := st.as(t, st.idp.mint(t, alice, aliceEmail))
-	entry := map[string]any{kName: "example-service", "componentType": "service", "gen": map[string]any{"language": "go", "flavours": []any{kApp}, "ci": map[string]any{"chartName": "example-service"}}}
+	entry := map[string]any{kName: "example-service", "componentType": kService, "gen": map[string]any{"language": "go", kFlavours: []any{kApp}, "ci": map[string]any{kChartName: "example-service"}}}
 
 	text, isErr := call(t, c, tools.ToolCreateRepository, map[string]any{tools.ArgMode: "apply", argTeam: team, argEntry: entry})
 	if !isErr || text != tools.ApplyRefusal {

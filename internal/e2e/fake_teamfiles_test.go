@@ -37,6 +37,13 @@ const (
 	kPath          = "path"
 	kType          = "type"
 	kGitHub        = "github"
+	kSHA           = "sha"
+	kRef           = "ref"
+	kChartName     = "chartName"
+	argPullRequest = "pullRequest"
+	argToTeam      = "toTeam"
+	kFlavours      = "flavours"
+	kService       = "service"
 )
 
 const planeteersFile = `# Planeteers' repositories.
@@ -102,7 +109,7 @@ func (f *fakeTeamFiles) register(mux *http.ServeMux, g *fakeGitHub) {
 		defer f.mu.Unlock()
 		p := r.PathValue("path")
 		if c, ok := f.files[p]; ok {
-			writeJSON(w, http.StatusOK, map[string]any{kType: "file", kName: path.Base(p), kPath: p, "sha": "blob-" + p, "encoding": "base64", "content": base64.StdEncoding.EncodeToString(c)})
+			writeJSON(w, http.StatusOK, map[string]any{kType: "file", kName: path.Base(p), kPath: p, kSHA: "blob-" + p, "encoding": "base64", "content": base64.StdEncoding.EncodeToString(c)})
 			return
 		}
 		var dir []map[string]any
@@ -121,7 +128,7 @@ func (f *fakeTeamFiles) register(mux *http.ServeMux, g *fakeGitHub) {
 		f.mu.Lock()
 		defer f.mu.Unlock()
 		if sha, ok := f.refs[r.PathValue("ref")]; ok {
-			writeJSON(w, http.StatusOK, map[string]any{"ref": "refs/" + r.PathValue("ref"), "object": map[string]any{"sha": sha, kType: modeCommit}})
+			writeJSON(w, http.StatusOK, map[string]any{kRef: "refs/" + r.PathValue(kRef), "object": map[string]any{kSHA: sha, kType: modeCommit}})
 			return
 		}
 		ghMessage(w, http.StatusNotFound, "Not Found")
@@ -139,7 +146,7 @@ func (f *fakeTeamFiles) register(mux *http.ServeMux, g *fakeGitHub) {
 			files[e.Path] = []byte(e.Content)
 		}
 		f.trees[sha] = files
-		writeJSON(w, http.StatusCreated, map[string]any{"sha": sha})
+		writeJSON(w, http.StatusCreated, map[string]any{kSHA: sha})
 	})
 	mux.HandleFunc("POST "+base+"/git/commits", func(w http.ResponseWriter, r *http.Request) {
 		var req struct {
@@ -150,7 +157,7 @@ func (f *fakeTeamFiles) register(mux *http.ServeMux, g *fakeGitHub) {
 		defer f.mu.Unlock()
 		sha := fmt.Sprintf("commit%d", len(f.commits)+1)
 		f.commits[sha] = req.Tree
-		writeJSON(w, http.StatusCreated, map[string]any{"sha": sha})
+		writeJSON(w, http.StatusCreated, map[string]any{kSHA: sha})
 	})
 	mux.HandleFunc("POST "+base+"/git/refs", func(w http.ResponseWriter, r *http.Request) {
 		var req struct{ Ref, SHA string }
@@ -158,7 +165,7 @@ func (f *fakeTeamFiles) register(mux *http.ServeMux, g *fakeGitHub) {
 		f.mu.Lock()
 		defer f.mu.Unlock()
 		f.refs[strings.TrimPrefix(req.Ref, "refs/")] = req.SHA
-		writeJSON(w, http.StatusCreated, map[string]any{"ref": req.Ref})
+		writeJSON(w, http.StatusCreated, map[string]any{kRef: req.Ref})
 	})
 	mux.HandleFunc("POST "+base+"/pulls", func(w http.ResponseWriter, r *http.Request) {
 		login, ok := g.logins[bearer(r)]
@@ -232,7 +239,7 @@ func (f *fakeTeamFiles) pull(r *http.Request) *fakePullRequest {
 
 func (f *fakeTeamFiles) pullJSON(pr *fakePullRequest) map[string]any {
 	return map[string]any{"number": pr.Number, "title": pr.Title, "body": pr.Body, "html_url": fmt.Sprintf("https://github.com/%s/github/pull/%d", org, pr.Number),
-		"user": map[string]any{kLogin: pr.Author}, "head": map[string]any{"ref": pr.Head}, "created_at": time.Now().UTC().Format(time.RFC3339)}
+		"user": map[string]any{kLogin: pr.Author}, "head": map[string]any{kRef: pr.Head}, "created_at": time.Now().UTC().Format(time.RFC3339)}
 }
 
 // fakeGateway is klaus-gateway's team-review endpoint: it admits one bearer

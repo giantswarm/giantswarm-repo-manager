@@ -21,8 +21,8 @@ import (
 // broker, Dex, klaus-gateway's team-review endpoint and a seeded store.
 
 var newEntry = map[string]any{
-	"name": "shiny-service", kComponentType: "service",
-	"gen": map[string]any{"language": "go", "flavours": []any{kApp}, "ci": map[string]any{"chartName": "shiny-service"}},
+	kName: "shiny-service", kComponentType: kService,
+	"gen": map[string]any{"language": "go", kFlavours: []any{kApp}, "ci": map[string]any{kChartName: "shiny-service"}},
 }
 
 // TestValidateRepositoryRendersAndRefuses: the dry run renders an accepted
@@ -38,7 +38,7 @@ func TestValidateRepositoryRendersAndRefuses(t *testing.T) {
 		t.Errorf("member's valid entry: %+v notices=%v teams=%v/%s", v.Result, v.Notices, v.AuthorTeams, v.TeamsSource)
 	}
 
-	bad := map[string]any{"name": "shiny-app", kComponentType: "service", "gen": map[string]any{"language": "go", "flavours": []any{kApp}}}
+	bad := map[string]any{kName: "shiny-app", kComponentType: kService, "gen": map[string]any{"language": "go", kFlavours: []any{kApp}}}
 	st.callJSON(t, asAlice, tools.ToolValidateRepository, map[string]any{argTeam: team, argEntry: bad}, &v)
 	if v.Accepted || len(v.Entries) != 1 || len(v.Entries[0].Problems) == 0 {
 		t.Errorf("refusal should be data: %+v", v.Result)
@@ -52,7 +52,7 @@ func TestValidateRepositoryRendersAndRefuses(t *testing.T) {
 
 	four := []any{}
 	for _, n := range []string{"a-one", "a-two", "a-three", "a-four"} {
-		e := map[string]any{"name": n, kComponentType: "service", "gen": map[string]any{"language": "go", "flavours": []any{"generic"}}}
+		e := map[string]any{kName: n, kComponentType: kService, "gen": map[string]any{"language": "go", kFlavours: []any{"generic"}}}
 		four = append(four, e)
 	}
 	st.callJSON(t, asAlice, tools.ToolValidateRepository, map[string]any{argTeam: team, "entries": four}, &v)
@@ -73,7 +73,7 @@ func TestCreateDryRunOpensNothingAndApplyIsRefusedEverywhere(t *testing.T) {
 		t.Errorf("dry run opened %d pull requests", n)
 	}
 	for _, tool := range tools.WriteToolNames() {
-		text, isErr := call(t, c, tool, map[string]any{argMode: "apply", argTeam: team, argEntry: newEntry, "repository": repoPresent, "toTeam": teamPlaneteers, argLifecycle: "archived", "pullRequest": 1})
+		text, isErr := call(t, c, tool, map[string]any{argMode: "apply", argTeam: team, argEntry: newEntry, kRepository: repoPresent, argToTeam: teamPlaneteers, argLifecycle: "archived", argPullRequest: 1})
 		if !isErr || !strings.Contains(text, `mode "apply" is refused`) {
 			t.Errorf("%s: apply should be refused: isError=%v %s", tool, isErr, text)
 		}
@@ -114,13 +114,13 @@ func TestTransferNamesBothTeams(t *testing.T) {
 	st := newStack(t)
 	c := st.as(t, st.idp.mint(t, alice, aliceEmail))
 	var plan tools.Plan
-	st.callJSON(t, c, tools.ToolTransferRepository, map[string]any{argDryRun: true, "repository": repoPresent, "toTeam": teamPlaneteers}, &plan)
+	st.callJSON(t, c, tools.ToolTransferRepository, map[string]any{argDryRun: true, kRepository: repoPresent, argToTeam: teamPlaneteers}, &plan)
 	if plan.Team != teamPlaneteers || plan.FromTeam != team || len(plan.PullRequest.Files) != 2 || plan.Ask == nil || !plan.Ask.Deliverable || plan.Ask.Channel != planeteersChannel ||
 		plan.Notice == nil || plan.Notice.Channel != bumblebeeChannel || plan.PullRequest.As != alice {
 		t.Fatalf("plan: %+v ask=%+v notice=%+v", plan, plan.Ask, plan.Notice)
 	}
 	var out tools.Committed
-	st.callJSON(t, c, tools.ToolTransferRepository, map[string]any{argMode: modeCommit, "repository": repoPresent, "toTeam": teamPlaneteers}, &out)
+	st.callJSON(t, c, tools.ToolTransferRepository, map[string]any{argMode: modeCommit, kRepository: repoPresent, argToTeam: teamPlaneteers}, &out)
 	pr := st.ghs.files.pullRequests()[0]
 	from, to := string(pr.Files["repositories/"+team+".yaml"]), string(pr.Files["repositories/"+teamPlaneteers+".yaml"])
 	if strings.Contains(from, repoPresent) || !strings.Contains(from, repoLegacy) || !strings.Contains(to, "- name: "+repoPresent) || !strings.Contains(to, "planet-service") ||
@@ -140,7 +140,7 @@ func TestSetLifecycleArchivedAndApproveChange(t *testing.T) {
 	st := newStack(t)
 	c := st.as(t, st.idp.mint(t, alice, aliceEmail))
 	var out tools.Committed
-	st.callJSON(t, c, tools.ToolSetLifecycle, map[string]any{argMode: modeCommit, "repository": repoPresent, argLifecycle: "archived", "reason": "superseded"}, &out)
+	st.callJSON(t, c, tools.ToolSetLifecycle, map[string]any{argMode: modeCommit, kRepository: repoPresent, argLifecycle: "archived", "reason": "superseded"}, &out)
 	pr := st.ghs.files.pullRequests()[0]
 	file := string(pr.Files["repositories/"+team+".yaml"])
 	if !strings.Contains(file, "lifecycle: archived") || !strings.Contains(file, "- name: "+repoLegacy) || !strings.Contains(pr.Title, "archive "+repoPresent) {
@@ -159,12 +159,12 @@ func TestSetLifecycleArchivedAndApproveChange(t *testing.T) {
 	}
 
 	// The clicking member is carol — not in team-bumblebee: refused, no review.
-	text, isErr := call(t, st.as(t, st.idp.mint(t, carol, "carol@example.com")), tools.ToolApproveChange, map[string]any{argMode: modeCommit, "pullRequest": pr.Number})
+	text, isErr := call(t, st.as(t, st.idp.mint(t, carol, "carol@example.com")), tools.ToolApproveChange, map[string]any{argMode: modeCommit, argPullRequest: pr.Number})
 	if !isErr || !strings.Contains(text, "not a member") || len(pr.Reviews) != 0 {
 		t.Errorf("carol: isError=%v %s reviews=%v", isErr, text, pr.Reviews)
 	}
 	var a tools.Approval
-	st.callJSON(t, c, tools.ToolApproveChange, map[string]any{argMode: modeCommit, "pullRequest": pr.Number}, &a)
+	st.callJSON(t, c, tools.ToolApproveChange, map[string]any{argMode: modeCommit, argPullRequest: pr.Number}, &a)
 	if !a.Member || a.Team != team || a.ReviewURL == "" || len(pr.Reviews) != 1 || pr.Reviews[0].User != alice || pr.Reviews[0].Event != "APPROVE" {
 		t.Errorf("alice's approval: %+v reviews=%v", a, pr.Reviews)
 	}
@@ -175,15 +175,15 @@ func TestSetLifecycleArchivedAndApproveChange(t *testing.T) {
 func TestUpdateRepositoryReplacesOneEntry(t *testing.T) {
 	st := newStack(t)
 	c := st.as(t, st.idp.mint(t, alice, aliceEmail))
-	entry := map[string]any{"name": repoPresent, kComponentType: "service", "description": "now described",
-		"gen": map[string]any{"language": "go", "flavours": []any{kApp}, "ci": map[string]any{"chartName": repoPresent}}}
+	entry := map[string]any{"name": repoPresent, kComponentType: kService, "description": "now described",
+		"gen": map[string]any{"language": "go", kFlavours: []any{kApp}, "ci": map[string]any{kChartName: repoPresent}}}
 	var plan tools.Plan
-	st.callJSON(t, c, tools.ToolUpdateRepository, map[string]any{argDryRun: true, "repository": repoPresent, argEntry: entry}, &plan)
+	st.callJSON(t, c, tools.ToolUpdateRepository, map[string]any{argDryRun: true, kRepository: repoPresent, argEntry: entry}, &plan)
 	if !plan.Accepted || !strings.Contains(plan.Entry, "now described") || strings.Contains(plan.Before, "described") || plan.Team != team {
 		t.Fatalf("plan: %+v", plan)
 	}
 	var out tools.Committed
-	st.callJSON(t, c, tools.ToolUpdateRepository, map[string]any{argMode: modeCommit, "repository": repoPresent, argEntry: entry}, &out)
+	st.callJSON(t, c, tools.ToolUpdateRepository, map[string]any{argMode: modeCommit, kRepository: repoPresent, argEntry: entry}, &out)
 	file := string(st.ghs.files.pullRequests()[0].Files["repositories/"+team+".yaml"])
 	tail := teamFile[strings.Index(teamFile, "- name: "+repoGone):]
 	if !strings.HasPrefix(file, "# yaml-language-server") || !strings.Contains(file, "description: now described") || !strings.HasSuffix(file, tail) {
@@ -191,7 +191,7 @@ func TestUpdateRepositoryReplacesOneEntry(t *testing.T) {
 	}
 	// A schema refusal is data in the dry run and an error in commit.
 	entry["visibility"] = "secret"
-	st.callJSON(t, c, tools.ToolUpdateRepository, map[string]any{argDryRun: true, "repository": repoPresent, argEntry: entry}, &plan)
+	st.callJSON(t, c, tools.ToolUpdateRepository, map[string]any{argDryRun: true, kRepository: repoPresent, argEntry: entry}, &plan)
 	if plan.Accepted || len(plan.Problems) == 0 {
 		t.Errorf("visibility secret should be refused: %+v", plan)
 	}
@@ -258,11 +258,11 @@ func TestReconcileDispatchesAsThePersonAndTheCompletionMessageFollows(t *testing
 	st := newStack(t)
 	c := st.as(t, st.idp.mint(t, alice, aliceEmail))
 	var d tools.Dispatch
-	st.callJSON(t, c, tools.ToolReconcileRepository, map[string]any{argDryRun: true, "repository": repoPresent}, &d)
+	st.callJSON(t, c, tools.ToolReconcileRepository, map[string]any{argDryRun: true, kRepository: repoPresent}, &d)
 	if d.Dispatched || d.As != alice || d.Workflow != "reconcile-repositories.yaml" || len(st.ghs.files.dispatches) != 0 {
 		t.Fatalf("dry run: %+v dispatches=%v", d, st.ghs.files.dispatches)
 	}
-	st.callJSON(t, c, tools.ToolReconcileRepository, map[string]any{argMode: modeCommit, "repository": repoPresent, argTeam: team}, &d)
+	st.callJSON(t, c, tools.ToolReconcileRepository, map[string]any{argMode: modeCommit, kRepository: repoPresent, argTeam: team}, &d)
 	ds := st.ghs.files.dispatches
 	if !d.Dispatched || len(ds) != 1 || ds[0]["workflow"] != "reconcile-repositories.yaml" || ds[0]["as"] != alice || ds[0]["ref"] != mainBranch ||
 		ds[0]["inputs"].(map[string]any)["repository"] != repoPresent || ds[0]["inputs"].(map[string]any)["team"] != team {

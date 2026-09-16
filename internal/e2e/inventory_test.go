@@ -70,7 +70,7 @@ func TestSweepFillsOneRecordPerRepository(t *testing.T) {
 	legacy := st.record(t, repoLegacy)
 	// An existing declaration is held to the schema alone: the legacy -app
 	// name is a creation rule, not a finding, and the checks run for it.
-	if legacy.Declaration == nil || !legacy.Declaration.Accepted || hasKind(legacy, inventory.FindingDeclarationRefused) || legacy.Setup.CheckError != "" {
+	if legacy.Declaration == nil || !legacy.Declaration.Accepted || hasKind(legacy, string(reconcile.FindingEntryRefused)) || legacy.Setup.CheckError != "" {
 		t.Errorf("legacy: %+v setup %+v findings %+v", legacy.Declaration, legacy.Setup, legacy.Findings)
 	}
 	stray := st.record(t, repoStray)

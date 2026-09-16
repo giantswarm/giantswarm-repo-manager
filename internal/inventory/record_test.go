@@ -1,6 +1,8 @@
 package inventory
 
 import (
+	"github.com/giantswarm/devctl/v8/pkg/reposetup"
+	"github.com/giantswarm/devctl/v8/pkg/reposetup/reconcile"
 	"strings"
 	"testing"
 	"time"
@@ -56,9 +58,11 @@ func TestFindingsDeclaredGoneAndUndeclared(t *testing.T) {
 	if len(stray.Findings) != 1 || stray.Findings[0].Kind != FindingUndeclaredOnGitHub {
 		t.Errorf("stray: %+v", stray.Findings)
 	}
-	refused := &Record{Repository: "giantswarm/legacy", Reality: &Reality{}, Declaration: &Declaration{Team: "t", Problems: []string{"name: must not end in -app"}}}
+	entry := reposetup.Entry{Name: "legacy", Problems: []reposetup.Problem{{Field: "name", Message: "must not end in -app"}}}
+	refused := &Record{Repository: "giantswarm/legacy", Reality: &Reality{}, Declaration: &Declaration{Team: "t", Problems: []string{"name: must not end in -app"}},
+		Setup: Setup{Checks: reconcile.Refused(reconcile.Request{Team: "t", Entry: entry}, now)}}
 	refused.Finalize(0, now)
-	if len(refused.Findings) != 1 || refused.Findings[0].Kind != FindingDeclarationRefused {
+	if len(refused.Findings) != 1 || refused.Findings[0].Kind != string(reconcile.FindingEntryRefused) || refused.Findings[0].Source != FindingSourceEngine {
 		t.Errorf("refused: %+v", refused.Findings)
 	}
 }

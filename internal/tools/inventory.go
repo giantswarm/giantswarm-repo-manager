@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"github.com/giantswarm/devctl/v8/pkg/reposetup/reconcile"
 	"sort"
 	"strings"
 	"time"
@@ -93,7 +94,7 @@ func (t *tools) registerInventory(s *mcpserver.MCPServer) {
 		mcp.WithNumber(argInactive, mcp.Description("Only repositories whose last commit by a person is older than this many days (or that have none).")),
 		mcp.WithString(argDecision, mcp.Description("Only repositories with this decision (keep), or none.")),
 		mcp.WithNumber(argMinScore, mcp.Description("Only repositories with at least this orphan score (0-100).")),
-		mcp.WithString(argFinding, mcp.Description("Only repositories with a finding of this kind (declared-but-gone, undeclared-on-github, default-icon, gen-circleci-refused, …).")),
+		mcp.WithString(argFinding, mcp.Description("Only repositories with a finding of this kind (declared-but-gone, undeclared-on-github, entry-refused, gen-circleci-refused, default-icon, …).")),
 		mcp.WithNumber(argLimit, mcp.Description(fmt.Sprintf("Rows to return (default %d).", defaultLimit))),
 		stale,
 	), t.listRepositories)
@@ -142,7 +143,10 @@ type Row struct {
 
 // RowSetup is the set-up state in one line.
 type RowSetup struct {
-	Converged *bool  `json:"converged,omitempty"`
+	Converged *bool `json:"converged,omitempty"`
+	// Refused says the engine refused the entry: the checks are its Refused
+	// result, no step ran (findings entry-refused, gen-circleci-refused).
+	Refused   bool   `json:"refused,omitempty"`
 	CheckedAt string `json:"checkedAt,omitempty"`
 	LastRun   string `json:"lastRun,omitempty"`
 	Error     string `json:"error,omitempty"`
@@ -229,6 +233,7 @@ func row(r *inventory.Record, now time.Time) Row {
 	if r.Setup.Checks != nil {
 		c := r.Setup.Checks.Converged
 		row.Setup.Converged = &c
+		row.Setup.Refused = r.Setup.Checks.Step(reconcile.StepEntry) != nil
 	}
 	if r.Setup.CheckedAt != nil {
 		row.Setup.CheckedAt = r.Setup.CheckedAt.Format(time.RFC3339)

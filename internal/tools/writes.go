@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/giantswarm/devctl/v8/pkg/reposetup"
+	"github.com/giantswarm/devctl/v8/pkg/reposetup/reconcile"
 	"github.com/mark3labs/mcp-go/mcp"
 
 	"github.com/giantswarm/giantswarm-repo-manager/internal/review"
@@ -615,6 +616,9 @@ type Dispatch struct {
 	RunsURL    string `json:"runsUrl"`
 	// Then says how the result comes back.
 	Then string `json:"then"`
+	// Findings is the inventory's refusal of the entry when its last check
+	// refused it: the run would report the refusal and run no step.
+	Findings []reconcile.Finding `json:"findings,omitempty"`
 }
 
 func (t *tools) reconcileRepository() WriteTool {
@@ -648,6 +652,13 @@ func (t *tools) dispatch(ctx context.Context, args map[string]any, run bool) (*D
 	}
 	d := &Dispatch{Workflow: teamfiles.ReconcilerWorkflow, Inputs: inputs,
 		Then: "the workflow posts the run to this server's /internal/refresh: get_repository then shows setup.lastRun, and the team's channel gets the completion message"}
+	if t.d.Inventory != nil {
+		key, _ := t.repositoryKey(args)
+		if rec, err := t.d.Inventory.Get(ctx, key); err == nil && rec.Setup.Checks != nil && rec.Setup.Checks.Step(reconcile.StepEntry) != nil {
+			d.Findings = rec.Setup.Checks.Findings()
+			d.Then = "the inventory's last check refused the entry (findings): unless the team file changed since, the run reports the refusal and runs no step — fix the entry with update_repository first; " + d.Then
+		}
+	}
 	p, err := t.person(ctx)
 	if err != nil {
 		return nil, err

@@ -173,7 +173,7 @@ Read-only. The inventory of the org's repositories from the store: one row per r
       "type": "string"
     },
     "finding": {
-      "description": "Only repositories with a finding of this kind (declared-but-gone, undeclared-on-github, default-icon, gen-circleci-refused, …).",
+      "description": "Only repositories with a finding of this kind (declared-but-gone, undeclared-on-github, entry-refused, gen-circleci-refused, default-icon, …).",
       "type": "string"
     },
     "fork": {
@@ -424,7 +424,7 @@ WRITES (as you, through your GitHub grant). Change the configuration of a declar
 
 ## `validate_repository`
 
-Read-only. The dry run of declaring one or more new repositories for a team, exactly what create_repository would put in the pull request: each entry rendered with the schema's defaults, the implied template (giantswarm/template for Go, template-app for a chart, the minimal scaffold otherwise) and its options, whether the name is free on GitHub, and the refusals of the creation rules as data (entries[].problems). Plus the guard notices a person sees before any pull request exists: team-review when the author is outside the owning team and team-planeteers, batch-review above three entries, names-unchecked without the App. Writes nothing. Use it before create_repository; for an existing repository's state use get_repository.
+Read-only. The dry run of declaring one or more new repositories for a team, exactly what create_repository would put in the pull request: each entry rendered with the schema's defaults, the implied template (giantswarm/template for Go, template-app for a chart, the minimal scaffold otherwise) and its options, whether the name is free on GitHub, and the refusals of the creation rules as data (entries[].problems, and as the engine's findings entry-refused / gen-circleci-refused). Plus the guard notices a person sees before any pull request exists: team-review when the author is outside the owning team and team-planeteers, batch-review above three entries, names-unchecked without the App. Writes nothing. Use it before create_repository; for an existing repository's state use get_repository.
 
 ```json
 {

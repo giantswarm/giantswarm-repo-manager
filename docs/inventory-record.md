@@ -92,7 +92,7 @@ posts it unchanged as `lastRun.result`, with the run's URL and the time it finis
   "setup": {
     "checks": { "…": "reconcile.Result in mode check — what devctl repo status prints" },
     "checkedAt": "…",
-    "checkError": "",                   // why checks is missing (refused declaration, no read identity, …)
+    "checkError": "",                   // why checks is missing (no read identity, …); a refused entry has checks = the engine's Refused result
     "lastRun": {"result": {"…": "reconcile.Result"}, "runUrl": "…", "timestamp": "…"}
   },
   "orphan": {
@@ -113,10 +113,11 @@ posts it unchanged as `lastRun.result`, with the run's URL and the time it finis
 ### Findings
 
 The inventory's own kinds (`source: inventory`): `declared-but-gone` (declaration, no repository), `undeclared-on-github`
-(repository, no declaration — archived ones included), `declaration-refused` (the engine's creation rules refuse the
-entry, so its set-up checks cannot run). The engine's kinds pass through with `source: engine`: `repository-missing`,
-`renamed`, `gen-circleci-refused`, `abs-prerequisite`, `default-icon`, `red-release`, `renovate-missing`,
-`archived-undeclared`, `pending-pull-request`, `unchecked`.
+(repository, no declaration — archived ones included). The engine's kinds pass through with `source: engine`:
+`entry-refused` and `gen-circleci-refused` (the engine refuses the entry — `setup.checks` is its `Refused` result, the
+`entry` step reported and no step run, one finding per problem naming the field to fix), `repository-missing`, `renamed`,
+`abs-prerequisite`, `default-icon`, `red-release`, `renovate-missing`, `archived-undeclared`, `pending-pull-request`,
+`unchecked`.
 
 ### Orphan score
 

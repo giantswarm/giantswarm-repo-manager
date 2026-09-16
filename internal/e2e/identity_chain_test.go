@@ -80,6 +80,10 @@ func newStack(t *testing.T) *stack {
 		t.Fatal(err)
 	}
 	t.Cleanup(store.Close)
+	// The CI job's Valkey is shared by every test: start from nothing.
+	if err := store.Clear(context.Background()); err != nil {
+		t.Fatal(err)
+	}
 	// A record no sweep of the fake org produces: get_info counts it, the
 	// sweep removes it.
 	if err := store.Put(context.Background(), &inventory.Record{Repository: org + "/giantswarm-repo-manager", Name: "giantswarm-repo-manager", Declaration: &inventory.Declaration{Team: team}, RefreshedAt: time.Now()}); err != nil {

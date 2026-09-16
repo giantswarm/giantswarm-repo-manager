@@ -185,5 +185,21 @@ func (s *Store) Sweep(ctx context.Context) (*SweepSummary, error) {
 	return &sum, nil
 }
 
+// Clear removes every record and the sweep summary — the store is a cache,
+// so a forced rebuild (and a test on a shared Valkey) starts from nothing.
+func (s *Store) Clear(ctx context.Context) error {
+	keys, err := s.Keys(ctx)
+	if err != nil {
+		return err
+	}
+	if err := s.Delete(ctx, keys...); err != nil {
+		return err
+	}
+	if err := s.client.Do(ctx, s.client.B().Del().Key(SweepKey).Build()).Error(); err != nil {
+		return fmt.Errorf("inventory: delete sweep: %w", err)
+	}
+	return nil
+}
+
 // Close releases the connection.
 func (s *Store) Close() { s.client.Close() }

@@ -3,10 +3,25 @@
 ## Build and test
 
 ```sh
-make test               # go test ./...
+make test               # go test ./... (unit tests and internal/e2e on an in-process Valkey)
+make test-e2e           # internal/e2e alone; VALKEY_ADDR=host:port runs it against a real store
+make scenario-test      # muster's scenario harness on tests/scenarios (needs `muster` on PATH)
 make build-linux-amd64  # the binary the Dockerfile expects
 make docker-build       # a local image, giantswarm-repo-manager:dev
 ```
+
+`internal/e2e` starts the server in-process behind fakes — a Dex (TLS, RS256 tokens), muster's token
+broker, GitHub — and calls it through a real MCP client with the forwarded `id_token` as the bearer.
+`tests/scenarios` are muster scenarios (`muster test --config tests/scenarios`); the CI job
+`scenario-test` (`.circleci/custom.yml`) runs both against a Valkey service container.
+
+## Running locally
+
+Every flag has an environment variable (`giantswarm-repo-manager -h`). Without OAuth the server answers
+anonymously — `get_info` reports no caller and no grant; with `--enable-oauth` it needs a Dex
+(`--dex-issuer-url`, `--dex-client-id`, `--dex-client-secret`, `--oauth-trusted-audiences`) and a public
+base URL. The broker client (`--muster-url`, `--broker-client-id`, `--broker-client-secret`), the App
+(`--github-app-*`) and the store (`--valkey-addr`) are each optional and reported by `get_info`.
 
 The image only assembles the runtime around the binary CircleCI's `go-build` produces; it is not a
 multi-stage build.

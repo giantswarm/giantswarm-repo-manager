@@ -1,0 +1,63 @@
+# Repo-owned additions to the generated .circleci/workflows.yml. The setup
+# workflow in config.yml deep-merges this file into it at pipeline runtime;
+# devctl never touches it.
+#
+#   - scenario-test: the identity-chain proofs against a seeded Valkey
+#     (service container) — muster's scenario harness with a mocked GitHub for
+#     the muster half (tests/scenarios), and the server half against fakes
+#     (internal/e2e) with VALKEY_ADDR pointing at the real store. `make test`
+#     runs the same Go tests on an in-process store; this job is the one with
+#     the real Valkey and the harness.
+version: 2.1
+
+jobs:
+  scenario-test:
+    docker:
+      - image: cimg/go:1.26
+      - image: valkey/valkey:8-alpine
+        name: valkey
+    resource_class: medium
+    environment:
+      MUSTER_VERSION: v5.25.1
+      VALKEY_ADDR: valkey:6379
+    steps:
+      - checkout
+      - restore_cache:
+          keys:
+            - go-mod-v1-{{ checksum "go.sum" }}
+      - run:
+          name: Install muster
+          command: |
+            set -euo pipefail
+            curl -sSfL -o /tmp/muster "https://github.com/giantswarm/muster/releases/download/${MUSTER_VERSION}/muster-linux-amd64"
+            sudo install -m 0755 /tmp/muster /usr/local/bin/muster
+            muster version
+      - run:
+          name: Wait for Valkey
+          command: |
+            set -euo pipefail
+            for i in $(seq 1 30); do
+              if (exec 3<>/dev/tcp/valkey/6379) 2>/dev/null; then exit 0; fi
+              sleep 1
+            done
+            echo "valkey did not come up" >&2; exit 1
+      - run:
+          name: Scenario tests (muster harness, mocked GitHub)
+          command: make scenario-test
+      - run:
+          name: Identity chain against the seeded Valkey
+          command: go test -count=1 -v ./internal/e2e/...
+      - save_cache:
+          key: go-mod-v1-{{ checksum "go.sum" }}
+          paths:
+            - /home/circleci/go/pkg/mod
+
+workflows:
+  build:
+    jobs:
+    # Independent of go-build: the proofs need the harness and the store, not
+    # the image. Same tag filter as the other test jobs.
+    - scenario-test:
+        filters:
+          tags:
+            only: /^v.*/

@@ -16,6 +16,16 @@ docker-build: build-linux-amd64 ## Build a local dev image (TAG=giantswarm-repo-
 test-race: ## Run tests with the race detector.
 	go test -race ./...
 
+.PHONY: test-e2e
+test-e2e: ## The identity-chain proofs against fakes (VALKEY_ADDR=host:port for a real store, else in-process).
+	go test -count=1 -v ./internal/e2e/...
+
+MUSTER_TEST_FLAGS ?= --base-port 18000 --parallel 1 --readiness-timeout 60s --fail-fast
+
+.PHONY: scenario-test
+scenario-test: ## Run the muster scenarios in tests/scenarios (needs the muster binary on PATH).
+	muster test --config tests/scenarios $(MUSTER_TEST_FLAGS)
+
 ##@ Helm
 
 .PHONY: helm-deps
@@ -35,7 +45,3 @@ helm-schema: ## Regenerate values.schema.json (needs the helm schema plugin and 
 	helm schema --config $(CHART_DIR)/.schema.yaml
 	python3 -c 'import json,sys; h=lambda o: {**{k:v for k,v in o.items() if k!="additionalProperties"},"unevaluatedProperties":False} if ("$$ref" in o and o.get("additionalProperties") is False) else o; p=sys.argv[1]; f=open(p,encoding="utf-8"); d=json.load(f,object_hook=h); f.close(); f=open(p,"w",encoding="utf-8"); json.dump(d,f); f.close()' $(CHART_DIR)/values.schema.json
 	schemalint normalize $(CHART_DIR)/values.schema.json -o $(CHART_DIR)/values.schema.json --force
-
-.PHONY: helm-docs
-helm-docs: ## Regenerate the chart README.
-	helm-docs --chart-search-root=helm --sort-values-order=file

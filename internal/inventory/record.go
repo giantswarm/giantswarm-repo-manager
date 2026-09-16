@@ -283,7 +283,7 @@ func (r Record) WithAge(now time.Time) Record {
 }
 
 func (r *Record) findings() []Finding {
-	var out []Finding
+	out := []Finding{}
 	switch {
 	case r.Declaration != nil && r.Reality == nil:
 		out = append(out, Finding{Kind: FindingDeclaredButGone, Source: FindingSourceInventory,

@@ -51,6 +51,8 @@ func (c *Collector) InternalHandler(token string) http.Handler {
 		}
 		rec, err := c.Refresh(r.Context(), req.Repository, req.LastRun, source)
 		switch {
+		case errors.Is(err, inventory.ErrUnavailable):
+			writeJSON(w, http.StatusServiceUnavailable, errBody(err.Error()))
 		case errors.Is(err, inventory.ErrNotFound):
 			writeJSON(w, http.StatusNotFound, errBody(err.Error()))
 		case err != nil:

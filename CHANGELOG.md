@@ -25,6 +25,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- The server no longer exits when the inventory store is not reachable at start (it crash-looped for 20 minutes on the first gazelle rollout while Valkey came up late): it serves at once and connects to Valkey in the background, retrying with backoff for `inventory.connectTimeout` (`INVENTORY_CONNECT_TIMEOUT`, 5m; `0` waits for ever). Until the store answers, readiness fails with the reason, the inventory tools and `/internal/*` answer `inventory unavailable` (503), and the identity tools work; the sweep schedule starts on the connected store. A Valkey lost at runtime reads the same way and is reconnected by the client (#6).
 - Secrets read from the environment are trimmed: a Secret created from a file carries the file's trailing newline, which muster's broker answered with `invalid_client`.
 
 

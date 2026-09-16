@@ -26,6 +26,9 @@ type Config struct {
 	// Internal, when set, serves /internal/ — the reconciler's refresh trigger
 	// and the sweep control, authenticated by their own static token.
 	Internal http.Handler
+	// Ready, when set, is what /readyz asks: an error makes the probe fail
+	// (503 with the reason) while the process stays up and keeps serving.
+	Ready func(context.Context) error
 }
 
 // InternalPrefix is where Internal is mounted.
@@ -48,10 +51,11 @@ func New(cfg Config, mcpSrv *mcpserver.MCPServer, log *slog.Logger) (*Server, er
 	}
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /healthz", ok)
-	// Readiness does not track Valkey, GitHub or muster: the endpoint stays
-	// reachable so clients read a failure from get_info instead of an unready
-	// Service.
-	mux.HandleFunc("GET /readyz", ok)
+	// Readiness is the store's: a Valkey that is not there yet or is lost
+	// keeps the pod unready — the Deployment shows it — while the process
+	// stays up and answers the identity tools. GitHub and muster are not
+	// tracked; their failures are read from get_info.
+	mux.HandleFunc("GET /readyz", readiness(cfg.Ready))
 
 	s := &Server{log: log}
 	if cfg.OAuth != nil {
@@ -81,6 +85,25 @@ func ok(w http.ResponseWriter, _ *http.Request) {
 	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
 	w.WriteHeader(http.StatusOK)
 	_, _ = w.Write([]byte("ok\n"))
+}
+
+// readinessTimeout bounds one readiness check; the chart's probe allows 5 s.
+const readinessTimeout = 3 * time.Second
+
+// readiness answers /readyz from check; nil is always ready.
+func readiness(check func(context.Context) error) http.HandlerFunc {
+	if check == nil {
+		return ok
+	}
+	return func(w http.ResponseWriter, r *http.Request) {
+		ctx, cancel := context.WithTimeout(r.Context(), readinessTimeout)
+		defer cancel()
+		if err := check(ctx); err != nil {
+			http.Error(w, "not ready: "+err.Error(), http.StatusServiceUnavailable)
+			return
+		}
+		ok(w, r)
+	}
 }
 
 // guard requires an authenticated caller when OAuth is on.

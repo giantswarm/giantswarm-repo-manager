@@ -100,7 +100,7 @@ func (i *fakeIdP) mint(t *testing.T, sub, email string) string {
 	now := time.Now()
 	tok := jwt.NewWithClaims(jwt.SigningMethodRS256, jwt.MapClaims{
 		"iss": i.issuer, "sub": sub, "aud": i.clientID, "exp": now.Add(time.Hour).Unix(), "iat": now.Unix(),
-		"email": email, "email_verified": true, "name": strings.ToUpper(sub[:1]) + sub[1:], "groups": []string{"team-bumblebee"},
+		kEmail: email, "email_verified": true, kName: strings.ToUpper(sub[:1]) + sub[1:], "groups": []string{"team-bumblebee"},
 	})
 	tok.Header["kid"] = keyID
 	s, err := tok.SignedString(i.key)
@@ -166,18 +166,21 @@ func newFakeBroker(t *testing.T, clientID, clientSecret string, grants map[strin
 type fakeGitHub struct {
 	*httptest.Server
 	logins map[string]string // person access token → login
+	// org answers GraphQL for the fake org (the inventory reads).
+	org *fakeOrg
 }
 
 func newFakeGitHub(t *testing.T, logins map[string]string) *fakeGitHub {
 	t.Helper()
-	g := &fakeGitHub{logins: logins}
+	g := &fakeGitHub{logins: logins, org: &fakeOrg{remaining: 5000, now: time.Now()}}
 	mux := http.NewServeMux()
+	mux.HandleFunc("POST /api/v3/graphql", g.org.handle)
 	mux.HandleFunc("GET /api/v3/app", func(w http.ResponseWriter, r *http.Request) {
 		if bearer(r) == "" {
 			ghMessage(w, http.StatusUnauthorized, "app JWT required")
 			return
 		}
-		writeJSON(w, http.StatusOK, map[string]any{"id": 17164699, "slug": "giantswarm-align-files"})
+		writeJSON(w, http.StatusOK, map[string]any{"id": 17164699, kSlug: "giantswarm-align-files"})
 	})
 	mux.HandleFunc("POST /api/v3/app/installations/{id}/access_tokens", func(w http.ResponseWriter, _ *http.Request) {
 		writeJSON(w, http.StatusCreated, map[string]any{"token": "installation-token", "expires_at": time.Now().Add(time.Hour).UTC().Format(time.RFC3339)})
@@ -188,7 +191,7 @@ func newFakeGitHub(t *testing.T, logins map[string]string) *fakeGitHub {
 			ghMessage(w, http.StatusUnauthorized, "Bad credentials")
 			return
 		}
-		writeJSON(w, http.StatusOK, map[string]any{"login": login, "id": 1})
+		writeJSON(w, http.StatusOK, map[string]any{kLogin: login, "id": 1})
 	})
 	mux.HandleFunc("GET /api/v3/repos/{owner}/{repo}", func(w http.ResponseWriter, _ *http.Request) {
 		ghMessage(w, http.StatusNotFound, "Not Found")

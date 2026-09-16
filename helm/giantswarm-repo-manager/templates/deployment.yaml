@@ -45,6 +45,25 @@ spec:
               value: {{ include "giantswarm-repo-manager.valkeyAddress" . | quote }}
             - name: MCP_PATH
               value: {{ .Values.mcp.path | quote }}
+            - name: INVENTORY_ORG
+              value: {{ .Values.inventory.org | quote }}
+            - name: SWEEP_INTERVAL
+              value: {{ .Values.inventory.sweep.interval | quote }}
+            - name: SWEEP_ENGINE_CHECKS
+              value: {{ .Values.inventory.sweep.engineChecks | quote }}
+            - name: SWEEP_CONCURRENCY
+              value: {{ .Values.inventory.sweep.concurrency | int64 | quote }}
+            - name: GRAPHQL_BUDGET_FLOOR
+              value: {{ .Values.inventory.sweep.graphqlBudgetFloor | int64 | quote }}
+            - name: ORPHAN_STALE_DAYS
+              value: {{ .Values.inventory.orphan.staleDays | int64 | quote }}
+            {{- with .Values.inventory.internal.existingSecret }}
+            - name: INTERNAL_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: {{ . }}
+                  key: token
+            {{- end }}
             {{- if .Values.oauth.enabled }}
             - name: OAUTH_ENABLED
               value: "true"

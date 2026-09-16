@@ -14,6 +14,7 @@ import (
 	"os"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/alicebob/miniredis/v2"
 	"github.com/mark3labs/mcp-go/client"
@@ -21,6 +22,7 @@ import (
 	"github.com/mark3labs/mcp-go/mcp"
 
 	"github.com/giantswarm/giantswarm-repo-manager/internal/broker"
+	"github.com/giantswarm/giantswarm-repo-manager/internal/collect"
 	"github.com/giantswarm/giantswarm-repo-manager/internal/gh"
 	"github.com/giantswarm/giantswarm-repo-manager/internal/inventory"
 	"github.com/giantswarm/giantswarm-repo-manager/internal/server"
@@ -37,12 +39,27 @@ const (
 	alice        = "alice"
 	aliceEmail   = "alice@example.com"
 	testVersion  = "test"
+	// internalToken authenticates the reconciler's trigger.
+	internalToken = "internal-secret" // #nosec G101 -- test fixture
 )
 
 type stack struct {
-	idp *fakeIdP
-	brk *fakeBroker
-	srv *httptest.Server
+	idp     *fakeIdP
+	brk     *fakeBroker
+	ghs     *fakeGitHub
+	srv     *httptest.Server
+	app     *gh.App
+	store   *inventory.Store
+	col     *collect.Collector
+	checker *fakeChecker
+	circle  *fakeCircleCI
+	log     *slog.Logger
+}
+
+// newCollector builds another collector over the same store and fakes, with
+// a GraphQL budget floor.
+func (st *stack) newCollector(floor int) *collect.Collector {
+	return collect.New(collect.Options{Org: org, EngineChecks: true, Concurrency: 2, BudgetFloor: floor}, st.app.Reader(), st.store, st.checker, st.circle, st.log)
 }
 
 func newStack(t *testing.T) *stack {
@@ -63,7 +80,9 @@ func newStack(t *testing.T) *stack {
 		t.Fatal(err)
 	}
 	t.Cleanup(store.Close)
-	if err := store.Put(context.Background(), "giantswarm/giantswarm-repo-manager", []byte(`{"team":"team-bumblebee"}`)); err != nil {
+	// A record no sweep of the fake org produces: get_info counts it, the
+	// sweep removes it.
+	if err := store.Put(context.Background(), &inventory.Record{Repository: org + "/giantswarm-repo-manager", Name: "giantswarm-repo-manager", Declaration: &inventory.Declaration{Team: team}, RefreshedAt: time.Now()}); err != nil {
 		t.Fatal(err)
 	}
 
@@ -75,20 +94,23 @@ func newStack(t *testing.T) *stack {
 	if err != nil {
 		t.Fatal(err)
 	}
-	mcpSrv := tools.NewMCPServer(tools.Deps{Version: testVersion, GitHubAPIURL: apiURL, Broker: bc, App: app, Inventory: store, CircleCIConfigured: true, Log: log})
+	st := &stack{idp: idp, brk: brk, ghs: ghs, app: app, store: store, checker: &fakeChecker{}, circle: &fakeCircleCI{}, log: log}
+	st.col = st.newCollector(0)
+	mcpSrv := tools.NewMCPServer(tools.Deps{Version: testVersion, GitHubAPIURL: apiURL, Broker: bc, App: app, Inventory: store, Collector: st.col, CircleCIConfigured: true, Log: log})
 
 	// The OAuth base URL is this server's own; the listener is httptest's,
 	// so the metadata issuer is loopback http.
 	s, err := server.New(server.Config{Addr: "127.0.0.1:0", MCPPath: "/mcp", OAuth: &server.OAuthConfig{
 		BaseURL: "http://127.0.0.1:1", DexIssuerURL: idp.issuer, DexClientID: "giantswarm-repo-manager", DexClientSecret: "x", DexCAFile: idp.caFile(t),
 		DexAllowPrivateIP: true, TrustedAudiences: []string{dexClient}, SSOAllowPrivateIPs: true,
-	}}, mcpSrv, log)
+	}, Internal: st.col.InternalHandler(internalToken)}, mcpSrv, log)
 	if err != nil {
 		t.Fatal(err)
 	}
 	hs := httptest.NewServer(s.Handler())
 	t.Cleanup(hs.Close)
-	return &stack{idp: idp, brk: brk, srv: hs}
+	st.srv = hs
+	return st
 }
 
 // as connects an MCP client the way muster does for the person: the forwarded
@@ -208,7 +230,7 @@ func TestUnauthenticatedCallIsRefused(t *testing.T) {
 func TestWritesAsThePerson(t *testing.T) {
 	st := newStack(t)
 	c := st.as(t, st.idp.mint(t, alice, aliceEmail))
-	entry := map[string]any{"name": "example-service", "componentType": "service", "gen": map[string]any{"language": "go", "flavours": []any{"app"}, "ci": map[string]any{"chartName": "example-service"}}}
+	entry := map[string]any{kName: "example-service", "componentType": "service", "gen": map[string]any{"language": "go", "flavours": []any{"app"}, "ci": map[string]any{"chartName": "example-service"}}}
 
 	text, isErr := call(t, c, tools.ToolCreateRepository, map[string]any{tools.ArgMode: "apply", argTeam: team, argEntry: entry})
 	if !isErr || text != tools.ApplyRefusal {

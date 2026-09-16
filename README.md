@@ -20,7 +20,9 @@ exposes it, with the repository lifecycle, as MCP tools with the prefix `giantsw
 |---|---|---|
 | `get_info` | the identity chain of the call: caller, GitHub grant (proven with a read), App identity, inventory store, engine, write modes | shipped |
 | `create_repository` | a declaration added to the team file; the dry run is the engine's validation (rendered entry, implied template, name check) | dry run shipped, `commit` next |
-| `list_repositories`, `get_repository`, `validate_repository` | the inventory by scope, one record, the dry run of a declaration | next slices |
+| `list_repositories`, `get_repository` | the inventory: one row per repository (team, orphan score with reasons, finding kinds, set-up state, record age) with the last sweep's summary; the full record of one repository — declaration, GitHub reality, CircleCI, Renovate, catalog, mapping, the engine's read-mode checks and the last reconciler run, findings, decision. Both rescore for another `stalePeriodDays`. Shape in [`docs/inventory-record.md`](docs/inventory-record.md) | shipped |
+| `refresh_repository`, `decide_repository` | rebuild one record now; leave a decision note (`keep`, with text) as the caller — annotations of the cache, nothing on GitHub | shipped |
+| `validate_repository` | the dry run of a declaration | next slices |
 | `update_repository`, `transfer_repository`, `set_lifecycle`, `approve_change`, `reconcile_repository` | the rest of the lifecycle | next slices |
 
 ## The pattern
@@ -53,12 +55,23 @@ write tool takes `dryRun` and `mode`.
 | Identity | Used for | Configured by |
 |---|---|---|
 | **The person** (muster's GitHub grant, released by the broker) | every write: team-file pull requests, and the read that proves the grant in `get_info` | `muster.url`, `broker.clientID`, `broker.existingSecret` (`client-secret`), `broker.audience` |
-| **The giantswarm-align-files App installation** | unattended, read-only inventory reads and the engine's name checks — its own rate budget | `githubApp.appID`, `githubApp.installationID`, `githubApp.existingSecret` (`private-key`) |
+| **The giantswarm-align-files App installation** | unattended, read-only inventory reads (GraphQL sweeps, the engine's checks in read mode) and the engine's name checks — its own rate budget; `GITHUB_TOKEN` stands in for it in development only | `githubApp.appID`, `githubApp.installationID`, `githubApp.existingSecret` (`private-key`) |
 | **The caller towards this server** (Dex `id_token` forwarded by muster) | who is calling; the subject token of the broker exchange | `oauth.*` (or the platform's `global.identity.*`), `muster.mcpServer.auth.requiredAudiences` |
-| **`CIRCLECI_API_TOKEN`** (architectbot's token, read scope) | follow/setup-workflow checks of the reconciler — not used before that slice; `get_info` reports whether it is set | `circleci.existingSecret` (`token`) |
+| **`CIRCLECI_API_TOKEN`** (architectbot's token, read scope) | the inventory's CircleCI state (followed, setup workflows, last pipeline) and the engine's circleci/release checks; `get_info` reports whether it is set | `circleci.existingSecret` (`token`) |
 
 Effective rights of a write are the intersection of the Dex GitHub App's permissions and the person's.
 No personal token beyond the two org secrets that already exist, no new GitHub App, no new OAuth client.
+
+## The inventory
+
+One Valkey record per repository of the org, filled by a full sweep on a schedule (`inventory.sweep.interval`,
+default daily), one repository after each reconciler run (`POST /internal/refresh` with the run, authenticated by the
+token of `inventory.internal.existingSecret`) and on demand (`refresh_repository`). GitHub is read as the App through
+GraphQL — repository metadata 20 a page (halved when GitHub cannot answer a page), default-branch history in aliased batches of 20 — and the engine's checks run
+in read mode per accepted declaration (`inventory.sweep.engineChecks`). `--sweep-once` runs one sweep and prints the
+summary (calls, GraphQL points, REST calls, duration); `inventory.sweep.graphqlBudgetFloor` stops a sweep cleanly when
+the budget runs low. The record, its findings and the orphan score are described in
+[`docs/inventory-record.md`](docs/inventory-record.md).
 
 ## What the tests prove
 
@@ -67,6 +80,11 @@ No personal token beyond the two org secrets that already exist, no new GitHub A
   identity chain against fakes: a forwarded `id_token` from a fake Dex is validated, exchanged at a fake
   muster broker as this client for the person's grant, the grant reads a fake GitHub as the person, the
   App answers `GET /app`, a seeded Valkey is reported (a real one through `VALKEY_ADDR`, else in-process).
+- **The inventory** (`internal/e2e/inventory_test.go`, a fake org behind the App's GraphQL): the full sweep leaves one
+  record per repository — declared and present, declared but gone, a refused declaration, undeclared, archived — with
+  the findings, the engine's read-mode result, CircleCI, Renovate and the orphan scores; the tools list, filter, rescore,
+  refresh and decide; the reconciler's trigger stores its run and survives the next refresh; a sweep stops cleanly at the
+  GraphQL budget floor.
 - `make scenario-test` — muster's own scenario harness (`tests/scenarios`) with a mocked GitHub: muster
   forwards the Dex token to a backend registered the way this chart registers the server, and the broker
   releases the person's grant to the `giantswarm-repo-manager` client (no grant, wrong secret, foreign

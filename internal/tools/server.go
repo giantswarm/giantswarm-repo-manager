@@ -15,6 +15,7 @@ import (
 	mcpserver "github.com/mark3labs/mcp-go/server"
 
 	"github.com/giantswarm/giantswarm-repo-manager/internal/broker"
+	"github.com/giantswarm/giantswarm-repo-manager/internal/collect"
 	"github.com/giantswarm/giantswarm-repo-manager/internal/gh"
 	"github.com/giantswarm/giantswarm-repo-manager/internal/identity"
 	"github.com/giantswarm/giantswarm-repo-manager/internal/inventory"
@@ -46,6 +47,9 @@ type Deps struct {
 	Broker       *broker.Client
 	App          *gh.App
 	Inventory    *inventory.Store
+	// Collector fills the inventory; nil when the store or a GitHub read
+	// identity is missing (refresh_repository then says so).
+	Collector *collect.Collector
 	// CircleCIConfigured says whether CIRCLECI_API_TOKEN is set; the token is
 	// not used before the reconciler slice.
 	CircleCIConfigured bool
@@ -59,7 +63,7 @@ func NewMCPServer(d Deps) *mcpserver.MCPServer {
 	}
 	s := mcpserver.NewMCPServer(ToolPrefix, d.Version,
 		mcpserver.WithToolCapabilities(false),
-		mcpserver.WithInstructions("Giant Swarm's repository set-up service. The team files in giantswarm/github (repositories/team-*.yaml) are the desired state of every repository; GitHub is the reality. Call get_info first: it reports who you are to this server, whether your GitHub grant could be obtained through muster (connect GitHub in muster if not), the App identity used for unattended reads and the inventory store. Every write tool takes dryRun and mode; the only write mode is commit — a team-file pull request opened as you — and apply is refused."),
+		mcpserver.WithInstructions("Giant Swarm's repository set-up service. The team files in giantswarm/github (repositories/team-*.yaml) are the desired state of every repository; GitHub is the reality. Call get_info first: it reports who you are to this server, whether your GitHub grant could be obtained through muster (connect GitHub in muster if not), the App identity used for unattended reads and the inventory store. The inventory (list_repositories, get_repository) is one record per repository of the org — declaration, GitHub reality, set-up state, orphan score with reasons, findings — refreshed by a scheduled sweep, after every reconciler run and on refresh_repository; every record carries its age. Every write tool takes dryRun and mode; the only write mode is commit — a team-file pull request opened as you — and apply is refused."),
 	)
 	t := &tools{d: d}
 	s.AddTool(mcp.NewTool(ToolGetInfo,
@@ -67,6 +71,7 @@ func NewMCPServer(d Deps) *mcpserver.MCPServer {
 		mcp.WithReadOnlyHintAnnotation(true),
 	), t.getInfo)
 	registerWrite(s, t.createRepository())
+	t.registerInventory(s)
 	return s
 }
 

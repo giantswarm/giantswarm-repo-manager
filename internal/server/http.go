@@ -23,7 +23,13 @@ type Config struct {
 	// OAuth, when set, makes the MCP endpoint require a bearer token the
 	// platform IdP issued (forwarded by muster) or this server's own.
 	OAuth *OAuthConfig
+	// Internal, when set, serves /internal/ — the reconciler's refresh trigger
+	// and the sweep control, authenticated by their own static token.
+	Internal http.Handler
 }
+
+// InternalPrefix is where Internal is mounted.
+const InternalPrefix = "/internal/"
 
 // Server is the assembled HTTP server.
 type Server struct {
@@ -57,6 +63,9 @@ func New(cfg Config, mcpSrv *mcpserver.MCPServer, log *slog.Logger) (*Server, er
 		s.oauth = o
 	}
 	mux.Handle(cfg.MCPPath, s.guard(mcpserver.NewStreamableHTTPServer(mcpSrv, mcpserver.WithEndpointPath(cfg.MCPPath))))
+	if cfg.Internal != nil {
+		mux.Handle(InternalPrefix, cfg.Internal)
+	}
 
 	s.http = &http.Server{
 		Addr:              cfg.Addr,

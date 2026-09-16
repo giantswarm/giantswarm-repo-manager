@@ -2,3 +2,5 @@ replace-chart-version-with-git: true
 generate-metadata: true
 chart-dir: ./helm/giantswarm-repo-manager
 destination: ./build
+# CI overwrites this, check .circleci/workflows.yml
+catalog-base-url: https://giantswarm.github.io/giantswarm-catalog/

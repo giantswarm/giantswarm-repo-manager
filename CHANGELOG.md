@@ -18,6 +18,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- devctl v8.64.8 (from v8.64.3): a declaration the engine refuses is the engine's `Refused` result — the `entry` step reported, one finding per problem (`entry-refused`, `gen-circleci-refused`) naming the field to fix — in place of the inventory's own `declaration-refused` finding and a `checkError`. `list_repositories` shows it as `setup.refused`, `get_repository` carries the result, `validate_repository` adds the same findings for its refused entries, and `reconcile_repository` names a known refusal before a dispatch that could only report it. The engine's read-mode checks gain the catalog mapping by the Component's `giantswarm.io/helmcharts` annotation (a chartless component is in the catalog with no chart to map) and the reported checks of a fresh repository whose every commit is tagged.
 - Existing declarations are validated against the repositories schema alone; the creation rules (mandatory `gen.flavours`/`gen.language`, `gen.ci.generate`) apply to an added entry in `validate_repository`'s dry run only. The `declaration-refused` finding and the withheld engine checks no longer hit the 222 declared repositories the creation rules refused.
 - The chart's Valkey subchart carries the restricted Pod Security Standard's security contexts (pod, container, metrics exporter) by default, so an installation enforcing PSS restricted admits it without overlay values.
 

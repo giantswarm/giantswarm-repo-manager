@@ -188,7 +188,9 @@ type Mapping struct {
 // reconciler run.
 type Setup struct {
 	// Checks is the engine's read-mode result (mode check); nil when the
-	// repository is unassigned, gone, or the checks did not run.
+	// repository is unassigned, gone, or the checks did not run. An entry the
+	// engine refuses carries its Refused result: the entry step reported with
+	// one finding per problem, no step run.
 	Checks    *reconcile.Result `json:"checks,omitempty"`
 	CheckedAt *time.Time        `json:"checkedAt,omitempty"`
 	// CheckError says why Checks is missing.
@@ -227,7 +229,6 @@ type Finding struct {
 const (
 	FindingDeclaredButGone    = "declared-but-gone"
 	FindingUndeclaredOnGitHub = "undeclared-on-github"
-	FindingDeclarationRefused = "declaration-refused"
 	FindingSourceInventory    = "inventory"
 	FindingSourceEngine       = "engine"
 )
@@ -293,11 +294,6 @@ func (r *Record) findings() []Finding {
 		out = append(out, Finding{Kind: FindingUndeclaredOnGitHub, Source: FindingSourceInventory,
 			Message: fmt.Sprintf("%s exists on GitHub and no team file declares it", r.Repository),
 			Fix:     "declare it in the owning team's repositories/<team>.yaml, or archive it"})
-	}
-	if r.Declaration != nil && !r.Declaration.Accepted && len(r.Declaration.Problems) > 0 {
-		out = append(out, Finding{Kind: FindingDeclarationRefused, Source: FindingSourceInventory,
-			Message: fmt.Sprintf("the engine refuses the declaration: %v", r.Declaration.Problems),
-			Fix:     "fix the entry in the team file; the set-up checks run once the engine accepts it"})
 	}
 	if r.Setup.Checks != nil {
 		for _, f := range r.Setup.Checks.Findings() {

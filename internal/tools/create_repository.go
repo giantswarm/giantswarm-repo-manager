@@ -5,7 +5,10 @@ import (
 	"fmt"
 	"strings"
 
+	"time"
+
 	"github.com/giantswarm/devctl/v8/pkg/reposetup"
+	"github.com/giantswarm/devctl/v8/pkg/reposetup/reconcile"
 	"github.com/google/go-github/v92/github"
 	"github.com/mark3labs/mcp-go/mcp"
 	mcpserver "github.com/mark3labs/mcp-go/server"
@@ -35,6 +38,10 @@ type Validation struct {
 	// MachineApproved says whether the creation-only pull request would be
 	// approved by the machine (no notice, every entry accepted).
 	MachineApproved bool `json:"machineApproved"`
+	// Findings are the engine's findings for the refused entries — the
+	// entry-refused and gen-circleci-refused kinds the inventory and the
+	// reconciler report, one per problem naming the field to fix.
+	Findings []reconcile.Finding `json:"findings,omitempty"`
 }
 
 func (t *tools) registerValidate(s *mcpserver.MCPServer) {
@@ -42,7 +49,7 @@ func (t *tools) registerValidate(s *mcpserver.MCPServer) {
 		mcp.WithDescription("Read-only. The dry run of declaring one or more new repositories for a team, exactly what create_repository would put in "+
 			"the pull request: each entry rendered with the schema's defaults, the implied template (giantswarm/template for Go, template-app for a chart, "+
 			"the minimal scaffold otherwise) and its options, whether the name is free on GitHub, and the refusals of the creation rules as data "+
-			"(entries[].problems). Plus the guard notices a person sees before any pull request exists: team-review when the author is outside the "+
+			"(entries[].problems, and as the engine's findings entry-refused / gen-circleci-refused). Plus the guard notices a person sees before any pull request exists: team-review when the author is outside the "+
 			"owning team and team-planeteers, batch-review above three entries, names-unchecked without the App. Writes nothing. "+
 			"Use it before create_repository; for an existing repository's state use get_repository."),
 		mcp.WithReadOnlyHintAnnotation(true),
@@ -131,6 +138,12 @@ func (t *tools) validate(ctx context.Context, args map[string]any) (*Validation,
 	}
 	v.Result = res
 	v.MachineApproved = res.Accepted && len(res.Notices) == 0
+	now := time.Now()
+	for _, e := range res.Entries {
+		if !e.Accepted {
+			v.Findings = append(v.Findings, reconcile.Refused(reconcile.Request{Owner: t.org(), Team: team, Entry: e, Added: true, Mode: reconcile.ModeCheck}, now).Findings()...)
+		}
+	}
 	return &v, nil
 }
 

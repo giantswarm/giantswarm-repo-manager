@@ -375,12 +375,20 @@ func (c *Collector) runChecks(ctx context.Context, records []*inventory.Record, 
 	c.parallel(records, func(r *inventory.Record) {
 		d := src.declarations[r.Name]
 		switch {
-		case r.Declaration == nil || r.Reality == nil:
+		case r.Declaration == nil || d == nil:
 			r.Setup.Checks, r.Setup.CheckedAt, r.Setup.CheckError = nil, nil, ""
 			return
-		case d == nil || !d.entry.Accepted:
-			r.Setup.Checks, r.Setup.CheckedAt = nil, nil
-			r.Setup.CheckError = "the engine's creation rules refuse the declaration; the set-up checks need an accepted entry"
+		case !d.entry.Accepted:
+			// A refused entry is the engine's result without a run — the entry
+			// step reported, one finding per problem, what `devctl repo
+			// reconcile` prints for it. Read from the declaration alone, so a
+			// gone repository keeps the refusal beside declared-but-gone.
+			at := c.now()
+			r.Setup.Checks = reconcile.Refused(reconcile.Request{Owner: c.opts.Org, Team: d.Team, Entry: d.entry, Mode: reconcile.ModeCheck}, at)
+			r.Setup.CheckedAt, r.Setup.CheckError = &at, ""
+			return
+		case r.Reality == nil:
+			r.Setup.Checks, r.Setup.CheckedAt, r.Setup.CheckError = nil, nil, ""
 			return
 		}
 		res, err := c.checker.Check(ctx, d.Team, d.entry)

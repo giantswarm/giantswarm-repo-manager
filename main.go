@@ -250,9 +250,13 @@ func envOr(key, def string) string {
 }
 
 // envSecret reads a secret from the environment with surrounding whitespace
-// trimmed: a Secret created from a file carries the file's trailing newline,
-// which muster's broker answers with invalid_client.
-func envSecret(key string) string { return strings.TrimSpace(os.Getenv(key)) }
+// and quotes trimmed: a Secret created from a file carries the file's
+// trailing newline, which muster's broker answers with invalid_client, and a
+// token copied from a YAML file may carry its quotes, which CircleCI answers
+// with 401.
+func envSecret(key string) string {
+	return strings.Trim(strings.TrimSpace(os.Getenv(key)), `"'`)
+}
 
 func envBool(key string) bool {
 	b, err := strconv.ParseBool(os.Getenv(key))

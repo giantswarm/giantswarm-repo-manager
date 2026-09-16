@@ -11,7 +11,7 @@ COPY --from=certs /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/
 
 ARG TARGETOS
 ARG TARGETARCH
-COPY giantswarm-repo-manager-- /giantswarm-repo-manager
+COPY giantswarm-repo-manager-${TARGETOS}-${TARGETARCH} /giantswarm-repo-manager
 USER giantswarm
 
 ENTRYPOINT ["/giantswarm-repo-manager"]

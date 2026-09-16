@@ -1,5 +1,3 @@
-# CI overwrites this, check .circleci/workflows.yml
-catalog-base-url: https://giantswarm.github.io/giantswarm-catalog/
 # app-test-suite (ATS >= 1.0) config, consumed by the generated
 # `run-tests-with-ats` CircleCI job (execute-chart-tests). The job creates a
 # kind cluster; ATS applies the CRDs listed below, installs the packaged chart

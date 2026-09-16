@@ -22,7 +22,7 @@ import (
 
 var newEntry = map[string]any{
 	kName: "shiny-service", kComponentType: kService,
-	"gen": map[string]any{"language": "go", kFlavours: []any{kApp}, "ci": map[string]any{kChartName: "shiny-service"}},
+	kGen: map[string]any{"language": "go", kFlavours: []any{kApp}, "ci": map[string]any{kChartName: "shiny-service"}},
 }
 
 // TestValidateRepositoryRendersAndRefuses: the dry run renders an accepted
@@ -38,7 +38,7 @@ func TestValidateRepositoryRendersAndRefuses(t *testing.T) {
 		t.Errorf("member's valid entry: %+v notices=%v teams=%v/%s", v.Result, v.Notices, v.AuthorTeams, v.TeamsSource)
 	}
 
-	bad := map[string]any{kName: "shiny-app", kComponentType: kService, "gen": map[string]any{"language": "go", kFlavours: []any{kApp}}}
+	bad := map[string]any{kName: "shiny-app", kComponentType: kService, kGen: map[string]any{"language": "go", kFlavours: []any{kApp}}}
 	st.callJSON(t, asAlice, tools.ToolValidateRepository, map[string]any{argTeam: team, argEntry: bad}, &v)
 	if v.Accepted || len(v.Entries) != 1 || len(v.Entries[0].Problems) == 0 {
 		t.Errorf("refusal should be data: %+v", v.Result)
@@ -52,7 +52,7 @@ func TestValidateRepositoryRendersAndRefuses(t *testing.T) {
 
 	four := []any{}
 	for _, n := range []string{"a-one", "a-two", "a-three", "a-four"} {
-		e := map[string]any{kName: n, kComponentType: kService, "gen": map[string]any{"language": "go", kFlavours: []any{"generic"}}}
+		e := map[string]any{kName: n, kComponentType: kService, kGen: map[string]any{"language": "go", kFlavours: []any{"generic"}}}
 		four = append(four, e)
 	}
 	st.callJSON(t, asAlice, tools.ToolValidateRepository, map[string]any{argTeam: team, "entries": four}, &v)
@@ -176,7 +176,7 @@ func TestUpdateRepositoryReplacesOneEntry(t *testing.T) {
 	st := newStack(t)
 	c := st.as(t, st.idp.mint(t, alice, aliceEmail))
 	entry := map[string]any{"name": repoPresent, kComponentType: kService, "description": "now described",
-		"gen": map[string]any{"language": "go", kFlavours: []any{kApp}, "ci": map[string]any{kChartName: repoPresent}}}
+		kGen: map[string]any{"language": "go", kFlavours: []any{kApp}, "ci": map[string]any{kChartName: repoPresent}}}
 	var plan tools.Plan
 	st.callJSON(t, c, tools.ToolUpdateRepository, map[string]any{argDryRun: true, kRepository: repoPresent, argEntry: entry}, &plan)
 	if !plan.Accepted || !strings.Contains(plan.Entry, "now described") || strings.Contains(plan.Before, "described") || plan.Team != team {

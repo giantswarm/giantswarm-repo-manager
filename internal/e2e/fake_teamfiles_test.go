@@ -44,6 +44,7 @@ const (
 	argToTeam      = "toTeam"
 	kFlavours      = "flavours"
 	kService       = "service"
+	kGen           = "gen"
 )
 
 const planeteersFile = `# Planeteers' repositories.

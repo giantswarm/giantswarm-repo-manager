@@ -426,6 +426,25 @@
                 }
             }
         },
+        "reviews": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+                "audience": {
+                    "type": "string",
+                    "description": "The audience of the projected token — the gateway's `reviews.audience`; this ServiceAccount must be in its `reviews.allowedCallers`."
+                },
+                "channels": {
+                    "type": "object",
+                    "description": "Slack channel IDs by the channel name a team's policy file carries (`slackChannel`): the gateway takes IDs. A policy file that carries the ID itself needs no entry.",
+                    "additionalProperties": true
+                },
+                "gatewayURL": {
+                    "type": "string",
+                    "description": "klaus-gateway's base URL as reached from the pod (for example `http://klaus-gateway.agent-platform.svc:8080`): lifecycle and transfer asks go to `POST /reviews`, notices and completion messages to `POST /notices`, authenticated with this pod's projected ServiceAccount token for `audience`. Empty leaves the asks undelivered; the tools say so and approving on GitHub stays equivalent."
+                }
+            }
+        },
         "securityContext": {
             "type": "object",
             "description": "Container security context.",
@@ -504,6 +523,20 @@
         },
         "subscriptionID": {
             "type": "string"
+        },
+        "teamFiles": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+                "ref": {
+                    "type": "string",
+                    "description": "The branch the files are read from and pull requests target."
+                },
+                "repository": {
+                    "type": "string",
+                    "description": "The repository that holds the team files (`repositories/<team>.yaml`, the desired state) and the policy files (`repository-setup/<team>.yaml`); every write is a pull request against it, opened as the caller."
+                }
+            }
         },
         "tolerations": {
             "type": "array",

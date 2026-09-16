@@ -140,7 +140,11 @@ func (c *Collector) parseSources(ctx context.Context, data *sourcesData, src *so
 			src.problems = append(src.problems, fmt.Sprintf("%s: %v", file, err))
 			continue
 		}
-		res, err := validator.Validate(ctx, reposetup.Request{TeamFile: tf})
+		// Every declared entry stands for a repository that exists (or is the
+		// reconciler's finding when gone): the engine validates it in
+		// ModeExisting — the schema, not the creation rules, which apply to an
+		// added entry in validate_repository's dry run alone (PRD D1).
+		res, err := validator.Validate(ctx, reposetup.Request{TeamFile: tf, Mode: reposetup.ModeExisting})
 		if err != nil {
 			src.problems = append(src.problems, fmt.Sprintf("%s: validate: %v", file, err))
 			continue

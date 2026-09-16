@@ -47,6 +47,40 @@ valkey:  # @schema skipProperties: true; additionalProperties: true
     deploymentStrategy: Recreate
     podAnnotations:
       karpenter.sh/do-not-disrupt: "true"
+    # The restricted Pod Security Standard: the valkey chart's init container
+    # and metrics exporter carry no security context of their own, so an
+    # installation enforcing PSS restricted (Kyverno: disallow-privilege-
+    # escalation, restrict-seccomp-strict) denies the Deployment without
+    # these. muster-valkey's values, so every installation passes without
+    # overlay values.
+    podSecurityContext:
+      fsGroup: 1000
+      runAsGroup: 1000
+      runAsUser: 1000
+      seccompProfile:
+        type: RuntimeDefault
+    securityContext:
+      allowPrivilegeEscalation: false
+      capabilities:
+        drop:
+          - ALL
+      readOnlyRootFilesystem: true
+      runAsNonRoot: true
+      runAsUser: 1000
+      seccompProfile:
+        type: RuntimeDefault
+    metrics:
+      exporter:
+        securityContext:
+          allowPrivilegeEscalation: false
+          capabilities:
+            drop:
+              - ALL
+          readOnlyRootFilesystem: true
+          runAsNonRoot: true
+          runAsUser: 1000
+          seccompProfile:
+            type: RuntimeDefault
 
 inventory:
   # -- Address (`host:port`) of the Valkey the inventory lives in, passed to
@@ -86,6 +120,30 @@ inventory:
     # after a run, with the run as `lastRun`) and `/internal/sweep`. Empty
     # disables them (404).
     existingSecret: ""
+
+teamFiles:
+  # -- The repository that holds the team files (`repositories/<team>.yaml`,
+  # the desired state) and the policy files (`repository-setup/<team>.yaml`);
+  # every write is a pull request against it, opened as the caller.
+  repository: giantswarm/github
+  # -- The branch the files are read from and pull requests target.
+  ref: main
+
+reviews:
+  # -- klaus-gateway's base URL as reached from the pod (for example
+  # `http://klaus-gateway.agent-platform.svc:8080`): lifecycle and transfer
+  # asks go to `POST /reviews`, notices and completion messages to
+  # `POST /notices`, authenticated with this pod's projected ServiceAccount
+  # token for `audience`. Empty leaves the asks undelivered; the tools say so
+  # and approving on GitHub stays equivalent.
+  gatewayURL: ""
+  # -- The audience of the projected token — the gateway's `reviews.audience`;
+  # this ServiceAccount must be in its `reviews.allowedCallers`.
+  audience: klaus-gateway
+  # -- Slack channel IDs by the channel name a team's policy file carries
+  # (`slackChannel`): the gateway takes IDs. A policy file that carries the
+  # ID itself needs no entry.
+  channels: {}  # @schema additionalProperties: true
 
 mcp:
   # -- MCP streamable-HTTP endpoint path.

@@ -107,9 +107,9 @@ func (o *fakeOrg) handle(w http.ResponseWriter, r *http.Request) {
 	var errs []map[string]any
 	switch {
 	case contains(req.Query, "teamFiles:"):
-		data["organization"] = map[string]any{"teams": map[string]any{"pageInfo": map[string]any{"hasNextPage": false}, kNodes: []map[string]any{{kSlug: team}, {kSlug: "team-planeteers"}}}}
-		data["github"] = map[string]any{
-			"teamFiles": map[string]any{"entries": []map[string]any{{kName: "team-bumblebee.yaml", "type": "blob", "object": map[string]any{kText: teamFile}}}},
+		data["organization"] = map[string]any{"teams": map[string]any{"pageInfo": map[string]any{"hasNextPage": false}, kNodes: []map[string]any{{kSlug: team}, {kSlug: teamPlaneteers}}}}
+		data[kGitHub] = map[string]any{
+			"teamFiles": map[string]any{"entries": []map[string]any{{kName: "team-bumblebee.yaml", kType: "blob", "object": map[string]any{kText: teamFile}}}},
 			"catalog":   map[string]any{kText: catalogFile},
 		}
 		data["mcb"] = map[string]any{"mapping": map[string]any{kText: mappingFile}}
@@ -125,7 +125,7 @@ func (o *fakeOrg) handle(w http.ResponseWriter, r *http.Request) {
 			data["repository"] = n
 		} else {
 			data["repository"] = nil
-			errs = append(errs, map[string]any{"message": fmt.Sprintf("Could not resolve to a Repository with the name '%s/%s'.", org, name), "type": "NOT_FOUND", "path": []string{"repository"}})
+			errs = append(errs, map[string]any{"message": fmt.Sprintf("Could not resolve to a Repository with the name '%s/%s'.", org, name), kType: "NOT_FOUND", kPath: []string{kRepository}})
 		}
 	default:
 		for _, m := range historyAlias.FindAllStringSubmatch(req.Query, -1) {

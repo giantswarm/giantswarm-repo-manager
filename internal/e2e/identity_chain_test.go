@@ -12,6 +12,7 @@ import (
 	"log/slog"
 	"net/http/httptest"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -25,6 +26,7 @@ import (
 	"github.com/giantswarm/giantswarm-repo-manager/internal/collect"
 	"github.com/giantswarm/giantswarm-repo-manager/internal/gh"
 	"github.com/giantswarm/giantswarm-repo-manager/internal/inventory"
+	"github.com/giantswarm/giantswarm-repo-manager/internal/review"
 	"github.com/giantswarm/giantswarm-repo-manager/internal/server"
 	"github.com/giantswarm/giantswarm-repo-manager/internal/tools"
 )
@@ -38,7 +40,10 @@ const (
 	argEntry     = "entry"
 	alice        = "alice"
 	aliceEmail   = "alice@example.com"
-	testVersion  = "test"
+	// carol has a grant but is in no team of the fixture's files: the
+	// outsider of the guard notices and approve_change.
+	carol       = "carol"
+	testVersion = "test"
 	// internalToken authenticates the reconciler's trigger.
 	internalToken = "internal-secret" // #nosec G101 -- test fixture
 )
@@ -47,6 +52,7 @@ type stack struct {
 	idp     *fakeIdP
 	brk     *fakeBroker
 	ghs     *fakeGitHub
+	gw      *fakeGateway
 	srv     *httptest.Server
 	app     *gh.App
 	store   *inventory.Store
@@ -66,9 +72,18 @@ func newStack(t *testing.T) *stack {
 	t.Helper()
 	log := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError}))
 	idp := newFakeIdP(t, dexClient)
-	brk := newFakeBroker(t, brokerClient, brokerSecret, map[string]string{alice: "alice-token"})
-	ghs := newFakeGitHub(t, map[string]string{"alice-token": alice})
+	brk := newFakeBroker(t, brokerClient, brokerSecret, map[string]string{alice: "alice-token", carol: "carol-token"})
+	ghs := newFakeGitHub(t, map[string]string{"alice-token": alice, "carol-token": carol})
+	ghs.teams[alice] = []string{team}
+	ghs.teams[carol] = []string{teamOther}
 	apiURL := ghs.URL + "/api/v3"
+	gw := &fakeGateway{token: "sa-token"}
+	gws := httptest.NewServer(gw.handler())
+	t.Cleanup(gws.Close)
+	tokenFile := filepath.Join(t.TempDir(), "token")
+	if err := os.WriteFile(tokenFile, []byte(gw.token+"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
 
 	addr := os.Getenv("VALKEY_ADDR")
 	if addr == "" {
@@ -98,9 +113,13 @@ func newStack(t *testing.T) *stack {
 	if err != nil {
 		t.Fatal(err)
 	}
-	st := &stack{idp: idp, brk: brk, ghs: ghs, app: app, store: store, checker: &fakeChecker{}, circle: &fakeCircleCI{}, log: log}
+	st := &stack{idp: idp, brk: brk, ghs: ghs, gw: gw, app: app, store: store, checker: &fakeChecker{}, circle: &fakeCircleCI{}, log: log}
 	st.col = st.newCollector(0)
-	mcpSrv := tools.NewMCPServer(tools.Deps{Version: testVersion, GitHubAPIURL: apiURL, Broker: bc, App: app, Inventory: store, Collector: st.col, CircleCIConfigured: true, Log: log})
+	ts := tools.New(tools.Deps{Version: testVersion, GitHubAPIURL: apiURL, Broker: bc, App: app, Inventory: store, Collector: st.col, CircleCIConfigured: true, Log: log,
+		TeamFilesRepository: org + "/github", TeamFilesRef: mainBranch,
+		Review: review.New(review.Config{BaseURL: gws.URL, TokenFile: tokenFile, Channels: map[string]string{teamPlaneteers: planeteersChannel}})})
+	st.col.OnReconciled(ts.Reconciled)
+	mcpSrv := ts.MCPServer()
 
 	// The OAuth base URL is this server's own; the listener is httptest's,
 	// so the metadata issuer is loopback http.
@@ -173,7 +192,7 @@ func TestIdentityChain(t *testing.T) {
 	if info.Caller == nil || info.Caller.Subject != alice || info.Caller.Email != aliceEmail || info.Caller.Source != "sso" {
 		t.Errorf("caller: %+v", info.Caller)
 	}
-	if g := info.GitHub.Grant; !g.Obtained || g.Login != alice || g.Audience != "github" || g.ExpiresIn == "" {
+	if g := info.GitHub.Grant; !g.Obtained || g.Login != alice || g.Audience != kGitHub || g.ExpiresIn == "" {
 		t.Errorf("grant: %+v", g)
 	}
 	if a := info.GitHub.App; a == nil || a.Slug != "giantswarm-align-files" || a.ID != 17164699 || a.InstallationID != 7 || info.GitHub.AppError != "" {
@@ -196,7 +215,7 @@ func TestIdentityChain(t *testing.T) {
 // connected GitHub — no grant, a pointer to muster, nothing else fails.
 func TestPersonWithoutGrantIsToldToConnect(t *testing.T) {
 	st := newStack(t)
-	info := getInfo(t, st.as(t, st.idp.mint(t, "bob", "bob@example.com")))
+	info := getInfo(t, st.as(t, st.idp.mint(t, bob, "bob@example.com")))
 	if info.Caller == nil || info.Caller.Subject != "bob" {
 		t.Errorf("caller: %+v", info.Caller)
 	}
@@ -234,7 +253,7 @@ func TestUnauthenticatedCallIsRefused(t *testing.T) {
 func TestWritesAsThePerson(t *testing.T) {
 	st := newStack(t)
 	c := st.as(t, st.idp.mint(t, alice, aliceEmail))
-	entry := map[string]any{kName: "example-service", "componentType": "service", "gen": map[string]any{"language": "go", "flavours": []any{"app"}, "ci": map[string]any{"chartName": "example-service"}}}
+	entry := map[string]any{kName: "example-service", "componentType": kService, kGen: map[string]any{kLanguage: kGo, kFlavours: []any{kApp}, kCI: map[string]any{kChartName: "example-service"}}}
 
 	text, isErr := call(t, c, tools.ToolCreateRepository, map[string]any{tools.ArgMode: "apply", argTeam: team, argEntry: entry})
 	if !isErr || text != tools.ApplyRefusal {

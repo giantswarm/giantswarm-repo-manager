@@ -19,6 +19,7 @@ import (
 	"github.com/giantswarm/giantswarm-repo-manager/internal/gh"
 	"github.com/giantswarm/giantswarm-repo-manager/internal/identity"
 	"github.com/giantswarm/giantswarm-repo-manager/internal/inventory"
+	"github.com/giantswarm/giantswarm-repo-manager/internal/review"
 )
 
 // ToolPrefix is the MCPServer name muster registers this server under.
@@ -31,7 +32,9 @@ const (
 )
 
 // WriteToolNames lists every tool registered through the write framework.
-func WriteToolNames() []string { return []string{ToolCreateRepository} }
+func WriteToolNames() []string {
+	return []string{ToolCreateRepository, ToolUpdateRepository, ToolTransferRepository, ToolSetLifecycle, ToolApproveChange, ToolReconcileRepository}
+}
 
 // engineModule is the devctl module the engine package comes from; its version
 // is read from the build info.
@@ -46,32 +49,56 @@ type Deps struct {
 	GitHubAPIURL string
 	Broker       *broker.Client
 	App          *gh.App
-	Inventory    *inventory.Store
+	// Reader is the unattended read identity when it is not the App (the
+	// development token); nil when App is set or nothing reads.
+	Reader    *gh.Reader
+	Inventory *inventory.Store
 	// Collector fills the inventory; nil when the store or a GitHub read
 	// identity is missing (refresh_repository then says so).
 	Collector *collect.Collector
 	// CircleCIConfigured says whether CIRCLECI_API_TOKEN is set; the token is
 	// not used before the reconciler slice.
 	CircleCIConfigured bool
-	Log                *slog.Logger
+	// TeamFilesRepository and TeamFilesRef are where the team files live
+	// (giantswarm/github at main; a fixture in tests).
+	TeamFilesRepository, TeamFilesRef string
+	// Review is klaus-gateway's team-review endpoint; nil leaves the asks
+	// undelivered and reported as such.
+	Review *review.Client
+	Log    *slog.Logger
 }
 
 // NewMCPServer builds the MCP server with every tool registered.
-func NewMCPServer(d Deps) *mcpserver.MCPServer {
+func NewMCPServer(d Deps) *mcpserver.MCPServer { return New(d).MCPServer() }
+
+// Tools is the tool set: the MCP server and the hooks other components call
+// (the completion message after a reconciler run).
+type Tools struct{ t *tools }
+
+// New builds the tool set.
+func New(d Deps) *Tools {
 	if d.Log == nil {
 		d.Log = slog.Default()
 	}
+	return &Tools{t: &tools{d: d}}
+}
+
+// MCPServer registers every tool on a new MCP server.
+func (ts *Tools) MCPServer() *mcpserver.MCPServer {
+	d, t := ts.t.d, ts.t
 	s := mcpserver.NewMCPServer(ToolPrefix, d.Version,
 		mcpserver.WithToolCapabilities(false),
 		mcpserver.WithInstructions("Giant Swarm's repository set-up service. The team files in giantswarm/github (repositories/team-*.yaml) are the desired state of every repository; GitHub is the reality. Call get_info first: it reports who you are to this server, whether your GitHub grant could be obtained through muster (connect GitHub in muster if not), the App identity used for unattended reads and the inventory store. The inventory (list_repositories, get_repository) is one record per repository of the org — declaration, GitHub reality, set-up state, orphan score with reasons, findings — refreshed by a scheduled sweep, after every reconciler run and on refresh_repository; every record carries its age. Every write tool takes dryRun and mode; the only write mode is commit — a team-file pull request opened as you — and apply is refused."),
 	)
-	t := &tools{d: d}
 	s.AddTool(mcp.NewTool(ToolGetInfo,
 		mcp.WithDescription("Read-only. Report the service version and the identity chain of this call: the caller muster forwarded (subject, email, groups), whether the caller's GitHub grant was obtained from muster's token broker and the GitHub login it belongs to (proven with a read call), the App identity used for unattended inventory reads, the inventory store, the engine (devctl reposetup package) and the write modes. Call first."),
 		mcp.WithReadOnlyHintAnnotation(true),
 	), t.getInfo)
-	registerWrite(s, t.createRepository())
 	t.registerInventory(s)
+	t.registerValidate(s)
+	for _, wt := range []WriteTool{t.createRepository(), t.updateRepository(), t.transferRepository(), t.setLifecycle(), t.approveChange(), t.reconcileRepository()} {
+		registerWrite(s, wt)
+	}
 	return s
 }
 

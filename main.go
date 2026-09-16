@@ -30,7 +30,9 @@ import (
 	"github.com/giantswarm/giantswarm-repo-manager/internal/collect"
 	"github.com/giantswarm/giantswarm-repo-manager/internal/gh"
 	"github.com/giantswarm/giantswarm-repo-manager/internal/inventory"
+	"github.com/giantswarm/giantswarm-repo-manager/internal/review"
 	"github.com/giantswarm/giantswarm-repo-manager/internal/server"
+	"github.com/giantswarm/giantswarm-repo-manager/internal/teamfiles"
 	"github.com/giantswarm/giantswarm-repo-manager/internal/tools"
 )
 
@@ -49,6 +51,9 @@ type options struct {
 	githubAppID, githubAppInstallationID               int64
 
 	circleciToken string
+
+	teamFilesRepository, teamFilesRef             string
+	reviewsURL, reviewsTokenFile, reviewsChannels string
 
 	oauthEnabled, oauthAllowPrivateURLs, ssoAllowPrivateIPs, allowPublicClientRegistration     bool
 	oauthBaseURL, dexIssuerURL, dexClientID, dexClientSecret, dexCAFile, oauthTrustedAudiences string
@@ -79,6 +84,11 @@ func parseFlags(args []string) (*options, error) {
 	f.StringVar(&o.githubAppPrivateKeyFile, "github-app-private-key-file", envOr("GITHUB_APP_PRIVATE_KEY_FILE", ""), "PEM private key of the App (GITHUB_APP_PRIVATE_KEY_FILE)")
 	f.StringVar(&o.githubToken, "github-token", envSecret("GITHUB_TOKEN"), "Development only: a personal token for the unattended reads when no App is configured; draws from that person's budget (GITHUB_TOKEN)")
 	f.StringVar(&o.circleciToken, "circleci-api-token", envSecret("CIRCLECI_API_TOKEN"), "CircleCI API token, read scope; prefer the environment (CIRCLECI_API_TOKEN)")
+	f.StringVar(&o.teamFilesRepository, "team-files-repository", envOr("TEAM_FILES_REPOSITORY", teamfiles.DefaultRepository), "owner/name of the repository that holds the team files and policy files (TEAM_FILES_REPOSITORY)")
+	f.StringVar(&o.teamFilesRef, "team-files-ref", envOr("TEAM_FILES_REF", teamfiles.DefaultRef), "Branch the team files are read from and pull requests target (TEAM_FILES_REF)")
+	f.StringVar(&o.reviewsURL, "reviews-url", envOr("REVIEWS_URL", ""), "klaus-gateway's base URL for the team-review endpoint (POST /reviews, /notices); empty leaves the asks undelivered (REVIEWS_URL)")
+	f.StringVar(&o.reviewsTokenFile, "reviews-token-file", envOr("REVIEWS_TOKEN_FILE", "/var/run/secrets/klaus-gateway/token"), "Projected ServiceAccount token (audience klaus-gateway) sent to the team-review endpoint (REVIEWS_TOKEN_FILE)")
+	f.StringVar(&o.reviewsChannels, "reviews-channels", envOr("REVIEWS_CHANNELS", ""), "Comma-separated name=ID pairs mapping a policy file's slackChannel to its Slack channel ID (REVIEWS_CHANNELS)")
 	f.BoolVar(&o.oauthEnabled, "enable-oauth", envBool("OAUTH_ENABLED"), "Require a bearer token on the MCP endpoint, validated against Dex; the caller's identity and id_token travel with every request (OAUTH_ENABLED)")
 	f.StringVar(&o.oauthBaseURL, "oauth-base-url", envOr("OAUTH_BASE_URL", ""), "Public base URL of this server, the issuer of its OAuth metadata (OAUTH_BASE_URL)")
 	f.StringVar(&o.dexIssuerURL, "dex-issuer-url", envOr("DEX_ISSUER_URL", ""), "Dex issuer URL (DEX_ISSUER_URL)")
@@ -110,7 +120,9 @@ func main() {
 
 // run wires the components and serves until ctx is done.
 func run(ctx context.Context, o *options, log *slog.Logger) error {
-	deps := tools.Deps{Version: version(), GitHubAPIURL: o.githubAPIURL, CircleCIConfigured: o.circleciToken != "", Log: log}
+	deps := tools.Deps{Version: version(), GitHubAPIURL: o.githubAPIURL, CircleCIConfigured: o.circleciToken != "", Log: log,
+		TeamFilesRepository: o.teamFilesRepository, TeamFilesRef: o.teamFilesRef,
+		Review: review.New(review.Config{BaseURL: o.reviewsURL, TokenFile: o.reviewsTokenFile, Channels: channelMap(o.reviewsChannels)})}
 
 	if o.musterURL != "" || o.brokerClientID != "" || o.brokerClientSecret != "" {
 		b, err := broker.New(broker.Config{MusterURL: o.musterURL, ClientID: o.brokerClientID, ClientSecret: o.brokerClientSecret, Audience: o.brokerAudience})
@@ -138,6 +150,7 @@ func run(ctx context.Context, o *options, log *slog.Logger) error {
 			return err
 		}
 		reader = r
+		deps.Reader = r
 		log.Warn("reading GitHub with a personal token (GITHUB_TOKEN): development only, it draws from that person's budget")
 	}
 	var store *inventory.Store
@@ -188,10 +201,12 @@ func run(ctx context.Context, o *options, log *slog.Logger) error {
 			SSOAllowPrivateIPs: o.ssoAllowPrivateIPs, AllowPublicClientRegistration: o.allowPublicClientRegistration,
 		}
 	}
+	ts := tools.New(deps)
 	if deps.Collector != nil {
 		cfg.Internal = deps.Collector.InternalHandler(o.internalToken)
+		deps.Collector.OnReconciled(ts.Reconciled)
 	}
-	srv, err := server.New(cfg, tools.NewMCPServer(deps), log)
+	srv, err := server.New(cfg, ts.MCPServer(), log)
 	if err != nil {
 		return err
 	}
@@ -219,7 +234,8 @@ func run(ctx context.Context, o *options, log *slog.Logger) error {
 	log.Info("giantswarm-repo-manager starting", "version", deps.Version, "engine", tools.EngineVersion(), "listen", o.listen, "mcp", o.mcpPath,
 		"oauth", o.oauthEnabled, "broker", deps.Broker != nil, "muster", o.musterURL, "githubApp", deps.App != nil, "reads", readsAs,
 		"inventory", o.valkeyAddr, "inventoryConnectTimeout", o.connectTimeout, "collector", deps.Collector != nil, "sweepInterval", o.sweepInterval,
-		"engineChecks", o.sweepEngineChecks, "internalEndpoints", deps.Collector != nil && o.internalToken != "")
+		"engineChecks", o.sweepEngineChecks, "internalEndpoints", deps.Collector != nil && o.internalToken != "",
+		"teamFiles", o.teamFilesRepository+"@"+o.teamFilesRef, "reviews", o.reviewsURL)
 	err = srv.Run(runCtx)
 	if cause := context.Cause(runCtx); cause != nil && !errors.Is(cause, context.Canceled) {
 		return cause
@@ -320,6 +336,17 @@ func envDuration(key string, def time.Duration) time.Duration {
 		return def
 	}
 	return d
+}
+
+// channelMap parses "name=ID,name=ID".
+func channelMap(s string) map[string]string {
+	out := map[string]string{}
+	for _, p := range splitList(s) {
+		if name, id, ok := strings.Cut(p, "="); ok {
+			out[strings.TrimPrefix(strings.TrimSpace(name), "#")] = strings.TrimSpace(id)
+		}
+	}
+	return out
 }
 
 func splitList(s string) []string {

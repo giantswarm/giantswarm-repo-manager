@@ -90,15 +90,16 @@ var ErrSweepRunning = errors.New("a sweep is already running")
 
 // Collector fills the store.
 type Collector struct {
-	opts    Options
-	reader  *gh.Reader
-	gql     *graphQL
-	store   *inventory.Store
-	checker Checker
-	circle  CircleCI
-	log     *slog.Logger
-	now     func() time.Time
-	running atomic.Bool
+	reconciled func(context.Context, *inventory.Record)
+	opts       Options
+	reader     *gh.Reader
+	gql        *graphQL
+	store      *inventory.Store
+	checker    Checker
+	circle     CircleCI
+	log        *slog.Logger
+	now        func() time.Time
+	running    atomic.Bool
 
 	srcMu    sync.Mutex
 	srcCache *sources
@@ -277,6 +278,10 @@ func (c *Collector) existing(ctx context.Context) (map[string]*inventory.Record,
 // Refresh rebuilds one record: after a reconciler run (run set, source
 // reconciler) or on demand. A repository neither declared nor on GitHub loses
 // its record and is reported as inventory.ErrNotFound.
+// OnReconciled registers the hook a refresh with a reconciler run calls after
+// the record is stored: the completion message to the team's channel.
+func (c *Collector) OnReconciled(fn func(context.Context, *inventory.Record)) { c.reconciled = fn }
+
 func (c *Collector) Refresh(ctx context.Context, repository string, run *inventory.LastRun, source string) (*inventory.Record, error) {
 	name := strings.TrimPrefix(repository, c.opts.Org+"/")
 	if name == "" || strings.Contains(name, "/") {
@@ -311,6 +316,9 @@ func (c *Collector) Refresh(ctx context.Context, repository string, run *invento
 	rec.RefreshedAt, rec.Source = c.now(), source
 	if err := c.store.Put(ctx, rec); err != nil {
 		return nil, err
+	}
+	if run != nil && c.reconciled != nil {
+		c.reconciled(ctx, rec)
 	}
 	return rec, nil
 }

@@ -156,7 +156,12 @@ func TestIdentityChain(t *testing.T) {
 	if inv := info.Inventory; !inv.Connected || inv.Records != 1 || inv.Error != "" {
 		t.Errorf("inventory: %+v", inv)
 	}
-	if !info.GitHub.CircleCIConfigured || !info.Capabilities.ApplyRefused || info.Engine.Version == "unknown" {
+	// The engine's version comes from the binary's build info; whether a
+	// *test* binary lists module deps depends on the toolchain (Go 1.27 does,
+	// 1.26 does not), so only the module and package are asserted here — the
+	// built binary is checked with `go version -m`.
+	if !info.GitHub.CircleCIConfigured || !info.Capabilities.ApplyRefused || info.Engine.Version == "" ||
+		info.Engine.Module != "github.com/giantswarm/devctl/v8" || !strings.HasSuffix(info.Engine.Package, "/pkg/reposetup") {
 		t.Errorf("info: circleci=%v caps=%+v engine=%+v", info.GitHub.CircleCIConfigured, info.Capabilities, info.Engine)
 	}
 }

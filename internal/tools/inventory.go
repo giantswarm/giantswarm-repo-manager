@@ -4,10 +4,11 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"github.com/giantswarm/devctl/v8/pkg/reposetup/reconcile"
 	"sort"
 	"strings"
 	"time"
+
+	"github.com/giantswarm/devctl/v8/pkg/reposetup/reconcile"
 
 	"github.com/mark3labs/mcp-go/mcp"
 	mcpserver "github.com/mark3labs/mcp-go/server"

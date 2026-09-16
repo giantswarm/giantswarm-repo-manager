@@ -1,11 +1,12 @@
 package inventory
 
 import (
-	"github.com/giantswarm/devctl/v8/pkg/reposetup"
-	"github.com/giantswarm/devctl/v8/pkg/reposetup/reconcile"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/giantswarm/devctl/v8/pkg/reposetup"
+	"github.com/giantswarm/devctl/v8/pkg/reposetup/reconcile"
 )
 
 func TestScoreHonoursTheStalePeriodAndListsReasons(t *testing.T) {

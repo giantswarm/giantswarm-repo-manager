@@ -1,0 +1,222 @@
+name: "giantswarm-repo-manager-broker-grant"
+category: "behavioral"
+concept: "mcpserver"
+description: |
+  The muster half of giantswarm-repo-manager's identity chain, in muster's own
+  harness with a mocked GitHub (github-idp / github-style):
+
+    - muster forwards the person's Dex id_token byte-identical to a backend
+      registered with auth.forwardToken (the shape the chart's MCPServer CR
+      renders for giantswarm-repo-manager);
+    - giantswarm-repo-manager, a confidential broker client
+      (tokenExchangeBroker.brokerClients), exchanges that id_token (RFC 8693,
+      audience github) and receives the person's own GitHub access token — the
+      grant filed when the person connected the GitHub server — with its
+      remaining lifetime, never the refresh token;
+    - a person without a grant is answered invalid_target (the server tells
+      them to connect GitHub in muster), a wrong client secret invalid_client,
+      an audience outside the client's allowlist invalid_target.
+
+  The server half — validating the forwarded token, running the exchange as
+  this client, reading GitHub as the person, refusing mode apply — runs
+  against fakes in internal/e2e (go test), in the same CI job with a seeded
+  Valkey.
+tags: ["oauth", "token-exchange", "broker", "subject-grant", "github", "giantswarm-repo-manager"]
+timeout: "3m"
+
+instance_logs:
+  contains:
+    - "subject_grant_released"
+    - "subject_grant_release_refused"
+
+pre_configuration:
+  mock_oauth_servers:
+    # The platform Dex: muster's IdP and the issuer of the tokens muster
+    # forwards and the broker validates as a trusted issuer.
+    - name: "dex"
+      scopes: ["openid", "profile", "email", "groups"]
+      auto_approve: true
+      pkce_required: false
+      token_lifetime: "1h"
+      client_id: "dex-k8s-authenticator"
+      client_secret: "dex-secret"
+      use_as_muster_oauth_server: true
+
+    # GitHub's OAuth stand-in: the grant issuer.
+    - name: "github-idp"
+      scopes: ["repo"]
+      auto_approve: true
+      pkce_required: false
+      token_lifetime: "1h"
+      client_id: "github-client"
+      use_tls: true
+
+  muster_broker:
+    trusted_issuers:
+      - oauth_server_ref: "dex"
+        accepted_typ_headers: [""]
+    clients:
+      - client_id: "giantswarm-repo-manager"
+        client_secret: "repo-manager-secret"
+        audiences: ["github"]
+    grant_targets:
+      github:
+        oauth_server_ref: "github-idp"
+
+  mcp_servers:
+    # The GitHub MCP server the person connects once; the grant is filed
+    # under their subject.
+    - name: "github-style"
+      config:
+        type: "streamable-http"
+        oauth:
+          required: true
+          mock_oauth_server_ref: "github-idp"
+          scope: "repo"
+          grant_scope: "subject"
+        tools:
+          - name: "get_me"
+            description: "The authenticated GitHub user"
+            responses:
+              - response:
+                  login: "alice"
+
+    # A backend registered the way the chart registers giantswarm-repo-manager:
+    # muster forwards the session's Dex id_token; the backend validates it
+    # against Dex and echoes the claims it received.
+    - name: "repo-manager-shape"
+      config:
+        type: "streamable-http"
+        oauth:
+          required: true
+          mock_oauth_server_ref: "dex"
+          trust_issuer_ref: "dex"
+          forward_token: true
+        tools:
+          - name: "get_info"
+            description: "Echoes the forwarded token's claims"
+            echo_token: true
+            responses:
+              - response:
+                  status: "ok"
+
+steps:
+  - id: login-alice
+    description: "alice signs in to muster through Dex"
+    tool: "test_muster_auth_login"
+    args:
+      subject: "alice"
+    expected:
+      success: true
+  - id: create-alice
+    tool: "test_create_user"
+    args:
+      name: "alice"
+    expected:
+      success: true
+
+  - id: mint-alice-id-token
+    description: "The id_token muster forwards for alice, as the broker's subject token"
+    tool: "test_mint_token"
+    args:
+      server: "dex"
+      name: "alice-id-token"
+      sub: "alice"
+      email: "alice@example.com"
+      email_verified: true
+    expected:
+      success: true
+  - id: mint-bob-id-token
+    tool: "test_mint_token"
+    args:
+      server: "dex"
+      name: "bob-id-token"
+      sub: "bob"
+    expected:
+      success: true
+
+  - id: forwarded-token-reaches-the-backend
+    as_user: "alice"
+    description: "muster forwards alice's Dex id_token to the forwardToken backend"
+    tool: "x_repo-manager-shape_get_info"
+    args: {}
+    expected:
+      success: true
+      contains:
+        - "alice"
+
+  - id: exchange-before-any-grant
+    description: "Before alice connects GitHub the exchange answers invalid_target"
+    tool: "test_broker_token_exchange"
+    args:
+      subject_token_ref: "alice-id-token"
+      audience: "github"
+      client_id: "giantswarm-repo-manager"
+      client_secret: "repo-manager-secret"
+    expected:
+      success: false
+      contains:
+        - "invalid_target"
+
+  - id: alice-connects-github
+    as_user: "alice"
+    description: "alice connects the GitHub server once; the grant is filed under her subject"
+    tool: "test_simulate_oauth_callback"
+    args:
+      server: "github-style"
+    expected:
+      success: true
+      contains:
+        - "success"
+
+  - id: exchange-releases-alice-grant
+    description: "giantswarm-repo-manager exchanges alice's id_token for her GitHub grant"
+    tool: "test_broker_token_exchange"
+    args:
+      subject_token_ref: "alice-id-token"
+      audience: "github"
+      client_id: "giantswarm-repo-manager"
+      client_secret: "repo-manager-secret"
+    expected:
+      success: true
+      contains:
+        - "urn:ietf:params:oauth:token-type:access_token"
+      json_path:
+        has_refresh_token: false
+
+  - id: exchange-with-wrong-secret
+    tool: "test_broker_token_exchange"
+    args:
+      subject_token_ref: "alice-id-token"
+      audience: "github"
+      client_id: "giantswarm-repo-manager"
+      client_secret: "not-the-secret"
+    expected:
+      success: false
+      contains:
+        - "invalid_client"
+
+  - id: exchange-for-unlisted-audience
+    tool: "test_broker_token_exchange"
+    args:
+      subject_token_ref: "alice-id-token"
+      audience: "elsewhere"
+      client_id: "giantswarm-repo-manager"
+      client_secret: "repo-manager-secret"
+    expected:
+      success: false
+      contains:
+        - "invalid_target"
+
+  - id: exchange-for-bob-without-grant
+    description: "bob never connected GitHub: invalid_target"
+    tool: "test_broker_token_exchange"
+    args:
+      subject_token_ref: "bob-id-token"
+      audience: "github"
+      client_id: "giantswarm-repo-manager"
+      client_secret: "repo-manager-secret"
+    expected:
+      success: false
+      contains:
+        - "invalid_target"

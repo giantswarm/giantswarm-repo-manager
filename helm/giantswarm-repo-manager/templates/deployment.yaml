@@ -43,6 +43,70 @@ spec:
           env:
             - name: VALKEY_ADDR
               value: {{ include "giantswarm-repo-manager.valkeyAddress" . | quote }}
+            - name: MCP_PATH
+              value: {{ .Values.mcp.path | quote }}
+            {{- if .Values.oauth.enabled }}
+            - name: OAUTH_ENABLED
+              value: "true"
+            - name: OAUTH_BASE_URL
+              value: {{ include "giantswarm-repo-manager.oauthBaseURL" . | quote }}
+            - name: DEX_ISSUER_URL
+              value: {{ include "giantswarm-repo-manager.dexIssuerURL" . | quote }}
+            - name: DEX_CLIENT_ID
+              value: {{ include "giantswarm-repo-manager.dexClientID" . | quote }}
+            - name: DEX_CLIENT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "giantswarm-repo-manager.oauthSecretName" . }}
+                  key: dex-client-secret
+            {{- if include "giantswarm-repo-manager.dexCASecretName" . }}
+            - name: DEX_CA_FILE
+              value: /etc/giantswarm-repo-manager/dex-ca/{{ include "giantswarm-repo-manager.dexCASecretKey" . }}
+            {{- end }}
+            - name: OAUTH_ALLOW_PRIVATE_URLS
+              value: {{ .Values.oauth.dex.allowPrivateURLs | quote }}
+            - name: OAUTH_TRUSTED_AUDIENCES
+              value: {{ include "giantswarm-repo-manager.trustedAudiences" . | quote }}
+            - name: SSO_ALLOW_PRIVATE_IPS
+              value: {{ .Values.oauth.sso.allowPrivateIPs | quote }}
+            - name: OAUTH_ALLOW_PUBLIC_REGISTRATION
+              value: {{ .Values.oauth.allowPublicClientRegistration | quote }}
+            {{- end }}
+            {{- if .Values.muster.url }}
+            - name: MUSTER_URL
+              value: {{ .Values.muster.url | quote }}
+            {{- end }}
+            {{- if .Values.broker.existingSecret }}
+            - name: BROKER_CLIENT_ID
+              value: {{ .Values.broker.clientID | quote }}
+            - name: BROKER_CLIENT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.broker.existingSecret }}
+                  key: client-secret
+            - name: BROKER_AUDIENCE
+              value: {{ .Values.broker.audience | quote }}
+            {{- end }}
+            {{- if .Values.githubApp.existingSecret }}
+            {{- /* int64: Helm reads a large number as a float and would render 1.7e+07 */}}
+            - name: GITHUB_APP_ID
+              value: {{ .Values.githubApp.appID | int64 | quote }}
+            - name: GITHUB_APP_INSTALLATION_ID
+              value: {{ .Values.githubApp.installationID | int64 | quote }}
+            - name: GITHUB_APP_PRIVATE_KEY_FILE
+              value: /etc/giantswarm-repo-manager/github-app/private-key
+            {{- end }}
+            {{- with .Values.githubApp.apiURL }}
+            - name: GITHUB_API_URL
+              value: {{ . | quote }}
+            {{- end }}
+            {{- with .Values.circleci.existingSecret }}
+            - name: CIRCLECI_API_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: {{ . }}
+                  key: token
+            {{- end }}
             {{- with .Values.extraEnv }}
             {{- toYaml . | nindent 12 }}
             {{- end }}
@@ -71,9 +135,32 @@ spec:
           volumeMounts:
             - name: tmp
               mountPath: /tmp
+            {{- if and .Values.oauth.enabled (include "giantswarm-repo-manager.dexCASecretName" .) }}
+            - name: dex-ca
+              mountPath: /etc/giantswarm-repo-manager/dex-ca
+              readOnly: true
+            {{- end }}
+            {{- if .Values.githubApp.existingSecret }}
+            - name: github-app
+              mountPath: /etc/giantswarm-repo-manager/github-app
+              readOnly: true
+            {{- end }}
       volumes:
         - name: tmp
           emptyDir: {}
+        {{- if and .Values.oauth.enabled (include "giantswarm-repo-manager.dexCASecretName" .) }}
+        - name: dex-ca
+          secret:
+            secretName: {{ include "giantswarm-repo-manager.dexCASecretName" . }}
+        {{- end }}
+        {{- if .Values.githubApp.existingSecret }}
+        - name: github-app
+          secret:
+            secretName: {{ .Values.githubApp.existingSecret }}
+            items:
+              - key: private-key
+                path: private-key
+        {{- end }}
       {{- with .Values.nodeSelector }}
       nodeSelector:
         {{- toYaml . | nindent 8 }}

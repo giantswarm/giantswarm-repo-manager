@@ -1,0 +1,114 @@
+// Package server assembles the single HTTP listener: the health endpoints the
+// chart probes and the MCP streamable-HTTP endpoint behind the OAuth guard.
+// Without OAuth there is no authentication and no caller: only a server
+// nothing but a trusted proxy can reach runs that way, and every tool then
+// reports an anonymous caller without a GitHub grant.
+package server
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"log/slog"
+	"net/http"
+	"time"
+
+	mcpserver "github.com/mark3labs/mcp-go/server"
+)
+
+// Config configures the listener.
+type Config struct {
+	Addr    string
+	MCPPath string
+	// OAuth, when set, makes the MCP endpoint require a bearer token the
+	// platform IdP issued (forwarded by muster) or this server's own.
+	OAuth *OAuthConfig
+}
+
+// Server is the assembled HTTP server.
+type Server struct {
+	http  *http.Server
+	oauth *oauthRuntime
+	log   *slog.Logger
+}
+
+// New builds the server around the MCP server.
+func New(cfg Config, mcpSrv *mcpserver.MCPServer, log *slog.Logger) (*Server, error) {
+	if log == nil {
+		log = slog.Default()
+	}
+	if cfg.MCPPath == "" {
+		cfg.MCPPath = "/mcp"
+	}
+	mux := http.NewServeMux()
+	mux.HandleFunc("GET /healthz", ok)
+	// Readiness does not track Valkey, GitHub or muster: the endpoint stays
+	// reachable so clients read a failure from get_info instead of an unready
+	// Service.
+	mux.HandleFunc("GET /readyz", ok)
+
+	s := &Server{log: log}
+	if cfg.OAuth != nil {
+		o, err := newOAuth(*cfg.OAuth, cfg.MCPPath, log)
+		if err != nil {
+			return nil, err
+		}
+		o.register(mux)
+		s.oauth = o
+	}
+	mux.Handle(cfg.MCPPath, s.guard(mcpserver.NewStreamableHTTPServer(mcpSrv, mcpserver.WithEndpointPath(cfg.MCPPath))))
+
+	s.http = &http.Server{
+		Addr:              cfg.Addr,
+		Handler:           mux,
+		ReadHeaderTimeout: 10 * time.Second,
+		// No WriteTimeout: MCP streams outlive any fixed value.
+		IdleTimeout: 120 * time.Second,
+	}
+	return s, nil
+}
+
+func ok(w http.ResponseWriter, _ *http.Request) {
+	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+	w.WriteHeader(http.StatusOK)
+	_, _ = w.Write([]byte("ok\n"))
+}
+
+// guard requires an authenticated caller when OAuth is on.
+func (s *Server) guard(next http.Handler) http.Handler {
+	if s.oauth == nil {
+		return next
+	}
+	return s.oauth.protect(next)
+}
+
+// Handler exposes the mux (tests).
+func (s *Server) Handler() http.Handler { return s.http.Handler }
+
+// Run serves until ctx is done, then shuts down gracefully. It returns early
+// when the listener cannot serve.
+func (s *Server) Run(ctx context.Context) error {
+	errCh := make(chan error, 1)
+	go func() {
+		defer close(errCh)
+		s.log.Info("listening", "addr", s.http.Addr)
+		if err := s.http.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
+			errCh <- fmt.Errorf("serve on %s: %w", s.http.Addr, err)
+		}
+	}()
+	select {
+	case err := <-errCh:
+		return err
+	case <-ctx.Done():
+	}
+	shutdownCtx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+	if s.oauth != nil {
+		s.oauth.shutdown(shutdownCtx)
+	}
+	if err := s.http.Shutdown(shutdownCtx); err != nil {
+		return fmt.Errorf("shutdown: %w", err)
+	}
+	s.log.Info("stopped")
+	return nil
+}

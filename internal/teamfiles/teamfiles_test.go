@@ -14,8 +14,8 @@ func TestParsePolicy(t *testing.T) {
 		want       Policy
 		wantErr    string
 	}{
-		{name: "both channels", yaml: "repairOptIn: true\nslackChannel: team-a\nstandupChannel: standup-a\n",
-			want: Policy{Team: team, SlackChannel: team, StandupChannel: "standup-a", RepairOptIn: true}},
+		{name: "both channels", yaml: "alignOptIn: true\nslackChannel: team-a\nstandupChannel: standup-a\n",
+			want: Policy{Team: team, SlackChannel: team, StandupChannel: "standup-a", AlignOptIn: true}},
 		{name: "channel IDs as written", yaml: "slackChannel: C0TEAM\nstandupChannel: C0STANDUP\n",
 			want: Policy{Team: team, SlackChannel: "C0TEAM", StandupChannel: "C0STANDUP"}},
 		{name: "no standupChannel", yaml: "slackChannel: team-a\n", wantErr: path + ": standupChannel is empty"},

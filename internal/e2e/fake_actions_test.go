@@ -121,7 +121,7 @@ func (r artifactReport) zip(t *testing.T, run *fakeRun) []byte {
 	}
 	// The id and the attempt are strings, as the workflow writes them from
 	// GITHUB_RUN_ID and GITHUB_RUN_ATTEMPT.
-	body["workflowRun"] = map[string]any{kID: strconv.FormatInt(run.ID, 10), "url": runURL(run.ID), "attempt": strconv.Itoa(run.Attempt), "event": run.Event, "trigger": "reconcile_repository", "devctl": "v8.65.0"}
+	body["workflowRun"] = map[string]any{kID: strconv.FormatInt(run.ID, 10), "url": runURL(run.ID), "attempt": strconv.Itoa(run.Attempt), "event": run.Event, "trigger": "align_repository", "devctl": "v8.65.0"}
 	body["finishedAt"] = r.finishedAt.UTC().Format(time.RFC3339)
 	if r.change != nil {
 		body["change"] = r.change

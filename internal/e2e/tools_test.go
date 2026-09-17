@@ -424,11 +424,23 @@ func TestReconcileDispatchesAsThePersonAndTheCompletionMessageFollows(t *testing
 	st := newStack(t)
 	c := st.as(t, aliceToken)
 	var d tools.Dispatch
-	st.callJSON(t, c, tools.ToolReconcileRepository, map[string]any{argDryRun: true, kRepository: repoPresent}, &d)
+	st.callJSON(t, c, tools.ToolAlignRepository, map[string]any{argDryRun: true, kRepository: repoPresent}, &d)
 	if d.Dispatched || d.As != alice || d.Workflow != reconcilerWorkflow || len(st.ghs.files.dispatches) != 0 {
 		t.Fatalf("dry run: %+v dispatches=%v", d, st.ghs.files.dispatches)
 	}
-	st.callJSON(t, c, tools.ToolReconcileRepository, map[string]any{argMode: modeCommit, kRepository: repoPresent, argTeam: team}, &d)
+	// The answer says what the run does: the declaring team has opted in, so
+	// the run aligns, and the warning names what an alignment changes.
+	if d.Team != team || !d.OptedIn || d.Mode != tools.DispatchModeAlign || !strings.Contains(d.Warning, "has opted in") ||
+		!strings.Contains(d.Warning, "enforce_admins") {
+		t.Errorf("dry run answer for an opted-in team: team=%q optedIn=%v mode=%q warning=%q", d.Team, d.OptedIn, d.Mode, d.Warning)
+	}
+	// A team without the opt-in: the run is a check, and the warning says nothing changes.
+	var check tools.Dispatch
+	st.callJSON(t, c, tools.ToolAlignRepository, map[string]any{argDryRun: true, kRepository: repoPresent, argTeam: teamPlaneteers}, &check)
+	if check.Team != teamPlaneteers || check.OptedIn || check.Mode != tools.DispatchModeCheck || !strings.Contains(check.Warning, "has not opted in") {
+		t.Errorf("dry run answer for a team without opt-in: team=%q optedIn=%v mode=%q warning=%q", check.Team, check.OptedIn, check.Mode, check.Warning)
+	}
+	st.callJSON(t, c, tools.ToolAlignRepository, map[string]any{argMode: modeCommit, kRepository: repoPresent, argTeam: team}, &d)
 	ds := st.ghs.files.dispatches
 	if !d.Dispatched || len(ds) != 1 || ds[0]["workflow"] != reconcilerWorkflow || ds[0]["as"] != alice || ds[0]["ref"] != mainBranch ||
 		ds[0]["inputs"].(map[string]any)["repository"] != repoPresent || ds[0]["inputs"].(map[string]any)["team"] != team {
@@ -437,7 +449,7 @@ func TestReconcileDispatchesAsThePersonAndTheCompletionMessageFollows(t *testing
 
 	// The dispatched run completes and uploads its artifact; the poller
 	// reads it: the record carries the run and its change block, and the
-	// team hears nothing — a Reconcile now with nothing to fix is not news.
+	// team hears nothing — an Align now with nothing to fix is not news.
 	finished := time.Now().UTC()
 	converged := reconcile.Result{Converged: true, Steps: []reconcile.StepResult{{Step: "release", Verdict: "ok", Summary: "v0.1.0 built"}}}
 	run := st.ghs.actions.addRun(t, runStatusCompleted, finished, artifactReport{name: repoPresent, finishedAt: finished, result: converged,
@@ -451,7 +463,7 @@ func TestReconcileDispatchesAsThePersonAndTheCompletionMessageFollows(t *testing
 		t.Fatalf("record after the run: %+v change=%+v", rec.Setup, rec.Setup.LastRun.Change)
 	}
 	if _, notices := st.gw.posted(); len(notices) != 0 {
-		t.Errorf("a converged Reconcile now should post nothing: %v", notices)
+		t.Errorf("a converged Align now should post nothing: %v", notices)
 	}
 
 	// The run that followed alice's merged pull request creating the

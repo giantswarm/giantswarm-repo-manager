@@ -34,7 +34,7 @@ const (
 
 // WriteToolNames lists every tool registered through the write framework.
 func WriteToolNames() []string {
-	return []string{ToolCreateRepository, ToolUpdateRepository, ToolTransferRepository, ToolSetLifecycle, ToolApproveChange, ToolReconcileRepository}
+	return []string{ToolCreateRepository, ToolUpdateRepository, ToolTransferRepository, ToolSetLifecycle, ToolApproveChange, ToolAlignRepository}
 }
 
 // engineModule is the devctl module the engine package comes from; its version
@@ -72,7 +72,7 @@ type Deps struct {
 	// (giantswarm/github at main; a fixture in tests).
 	TeamFilesRepository, TeamFilesRef string
 	// ReconcilerWorkflow is the reconciler's workflow file in that
-	// repository, the one reconcile_repository dispatches and the inventory
+	// repository, the one align_repository dispatches and the inventory
 	// reads the runs of; empty is teamfiles.ReconcilerWorkflow.
 	ReconcilerWorkflow string
 	// Review is klaus-gateway's team-review endpoint; nil leaves the asks
@@ -114,7 +114,7 @@ func (ts *Tools) MCPServer() *mcpserver.MCPServer {
 	), t.getInfo)
 	t.registerInventory(s)
 	t.registerValidate(s)
-	for _, wt := range []WriteTool{t.createRepository(), t.updateRepository(), t.transferRepository(), t.setLifecycle(), t.approveChange(), t.reconcileRepository()} {
+	for _, wt := range []WriteTool{t.createRepository(), t.updateRepository(), t.transferRepository(), t.setLifecycle(), t.approveChange(), t.alignRepository()} {
 		registerWrite(s, wt)
 	}
 	return s

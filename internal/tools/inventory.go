@@ -136,7 +136,7 @@ type RowSetup struct {
 	Refused   bool   `json:"refused,omitempty"`
 	CheckedAt string `json:"checkedAt,omitempty"`
 	LastRun   string `json:"lastRun,omitempty"`
-	// PendingRun is a Reconcile now waiting for its run's artifact.
+	// PendingRun is an Align now waiting for its run's artifact.
 	PendingRun *inventory.PendingRun `json:"pendingRun,omitempty"`
 	Error      string                `json:"error,omitempty"`
 }

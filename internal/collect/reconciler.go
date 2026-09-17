@@ -34,7 +34,7 @@ type ReconcilerOptions struct {
 	// PollInterval is how often completed runs are read; 0 turns the poller
 	// off.
 	PollInterval time.Duration
-	// PendingInterval is the poll interval while a Reconcile now is pending.
+	// PendingInterval is the poll interval while an Align now is pending.
 	PendingInterval time.Duration
 	// PendingWindow is how long a dispatched run may take to report before it
 	// is given up as missing.
@@ -98,7 +98,7 @@ type ReconcilerPoll struct {
 	// Runs is the completed runs consumed, Artifacts the artifacts stored as
 	// a repository's setup.lastRun, Skipped the ones a record already named.
 	Runs, Artifacts, Skipped int
-	// Pending is the Reconcile nows still waiting for their run, Missing the
+	// Pending is the Align nows still waiting for their run, Missing the
 	// ones given up this time.
 	Pending, Missing int
 	// Watermark is where the cursor stands after the poll.
@@ -113,7 +113,7 @@ var (
 )
 
 // RunReconcilerPoll polls until ctx is done: at start, then every
-// PollInterval, and every PendingInterval while a Reconcile now is pending. A
+// PollInterval, and every PendingInterval while an Align now is pending. A
 // failed poll is logged and retried at the next interval.
 func (c *Collector) RunReconcilerPoll(ctx context.Context) {
 	o := c.opts.Reconciler
@@ -143,7 +143,7 @@ func (c *Collector) RunReconcilerPoll(ctx context.Context) {
 // PollReconciler reads the reconciler's runs since the cursor once: every
 // completed run's reconcile-<name> artifacts become the repositories'
 // setup.lastRun, the cursor moves past the runs that are consumed, and the
-// pending Reconcile nows older than the window are given up. It returns what
+// pending Align nows older than the window are given up. It returns what
 // it did; a cursor or listing that could not be read is the error.
 func (c *Collector) PollReconciler(ctx context.Context) (*ReconcilerPoll, error) {
 	now := c.now()
@@ -457,7 +457,7 @@ func decodeArtifact(zipped []byte, max int64) (*artifactReport, error) {
 	return nil, fmt.Errorf("%w: no JSON file in the zip", errArtifactMalformed)
 }
 
-// expirePending gives up the Reconcile nows older than the pending window
+// expirePending gives up the Align nows older than the pending window
 // with the finding reconcile-run-missing and counts the ones still waiting.
 func (c *Collector) expirePending(ctx context.Context, now time.Time, poll *ReconcilerPoll) {
 	recs, err := c.store.List(ctx)

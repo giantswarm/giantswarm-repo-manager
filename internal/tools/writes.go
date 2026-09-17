@@ -170,26 +170,42 @@ func (pl *Plan) finish(repo teamfiles.Repo, as, branch, title, body string) {
 	pl.Accepted = len(pl.Problems) == 0
 }
 
-// message plans an ask or notice to a team's channel from its policy file.
-func (t *tools) message(ctx context.Context, repo teamfiles.Repo, team, text string) *PlannedMessage {
+// message plans an ask or a notice to a team from its policy file: an ask
+// (an Approve button) goes to the team's slackChannel, a notice to its
+// standupChannel.
+func (t *tools) message(ctx context.Context, repo teamfiles.Repo, team, text string, ask bool) *PlannedMessage {
 	m := &PlannedMessage{Team: team, Text: text}
 	if t.d.Review == nil {
 		m.Reason = review.ErrNotConfigured.Error()
 		return m
 	}
+	channel, err := t.policyChannel(ctx, repo, team, ask)
+	m.Channel = channel
+	if err != nil {
+		m.Reason = err.Error()
+		return m
+	}
+	m.Deliverable = true
+	return m
+}
+
+// policyChannel reads a team's policy file and resolves the channel an ask
+// (slackChannel) or a notice (standupChannel) goes to, as the ID the
+// gateway takes. A name the map does not resolve comes back with the error.
+func (t *tools) policyChannel(ctx context.Context, repo teamfiles.Repo, team string, ask bool) (string, error) {
 	pol, err := repo.Policy(ctx, team)
 	if err != nil {
-		m.Reason = err.Error()
-		return m
+		return "", err
 	}
-	id, err := t.d.Review.ChannelID(pol.SlackChannel)
+	name := pol.StandupChannel
+	if ask {
+		name = pol.SlackChannel
+	}
+	id, err := t.d.Review.ChannelID(name)
 	if err != nil {
-		m.Channel = pol.SlackChannel
-		m.Reason = err.Error()
-		return m
+		return name, err
 	}
-	m.Channel, m.Deliverable = id, true
-	return m
+	return id, nil
 }
 
 // commit opens the plan's pull request as the person and posts its messages.
@@ -357,7 +373,7 @@ func (t *tools) transferRepository() WriteTool {
 		Name: ToolTransferRepository,
 		Description: "Move a declared repository to another team: its entry leaves the giving team's file and enters the receiving team's " +
 			"file in one pull request that names both teams. The ask goes to the receiving team's channel (its member approves), the giving team " +
-			"gets a notice. The reconciler then re-applies permissions, CODEOWNERS and the catalog mapping for the new owner.",
+			"gets a notice in its standup channel. The reconciler then re-applies permissions, CODEOWNERS and the catalog mapping for the new owner.",
 		Options: []mcp.ToolOption{
 			mcp.WithString(argRepository, mcp.Required(), mcp.Description("Repository name, with or without the org.")),
 			mcp.WithString(argToTeam, mcp.Required(), mcp.Description("The receiving team's slug (team-planeteers, …).")),
@@ -428,8 +444,8 @@ func (t *tools) planTransfer(ctx context.Context, repo teamfiles.Repo, as string
 		fmt.Sprintf("## Problem\n\n`%s/%s` changes owner.\n\n## Solution\n\nThe entry moves from `%s` (giving team: **%s**) to `%s` (receiving team: **%s**), unchanged. "+
 			"The reconciler re-applies team permissions, CODEOWNERS and the catalog mapping for %s after this merges.\n\n%s\n\nOpened by giantswarm-repo-manager (`%s`) as the caller.",
 			t.org(), name, from.Path, from.Team, dst.Path, to, to, reasonLine(reason), ToolTransferRepository))
-	pl.Ask = t.message(ctx, repo, to, fmt.Sprintf("*Transfer* `%s/%s` from %s to %s: your team receives it.%s", t.org(), name, from.Team, to, reasonSuffix(reason)))
-	pl.Notice = t.message(ctx, repo, from.Team, fmt.Sprintf("*Transfer* `%s/%s` from %s to %s: your team gives it; %s decides.%s", t.org(), name, from.Team, to, to, reasonSuffix(reason)))
+	pl.Ask = t.message(ctx, repo, to, fmt.Sprintf("%s asks to transfer `%s/%s` from %s to %s: your team receives it.%s", as, t.org(), name, from.Team, to, reasonSuffix(reason)), true)
+	pl.Notice = t.message(ctx, repo, from.Team, fmt.Sprintf("%s asks to transfer `%s/%s` from %s to %s: your team gives it; %s decides.%s", as, t.org(), name, from.Team, to, to, reasonSuffix(reason)), false)
 	return pl, nil
 }
 
@@ -506,7 +522,7 @@ func (t *tools) planLifecycle(ctx context.Context, repo teamfiles.Repo, as strin
 	pl.finish(repo, as, "reposetup/"+lc+"-"+name, fmt.Sprintf("chore(repositories): %s %s (%s)", verb(lc), name, tf.Team),
 		fmt.Sprintf("## Problem\n\n`%s/%s` is to be %s.\n\n## Solution\n\n`lifecycle: %s` in `%s` — %s.\n\n%s\n\nOpened by giantswarm-repo-manager (`%s`) as the caller.",
 			t.org(), name, lc, lc, tf.Path, effect, reasonLine(reason), ToolSetLifecycle))
-	pl.Ask = t.message(ctx, repo, tf.Team, fmt.Sprintf("*%s* `%s/%s` (owned by %s).%s", strings.ToUpper(verb(lc)[:1])+verb(lc)[1:], t.org(), name, tf.Team, reasonSuffix(reason)))
+	pl.Ask = t.message(ctx, repo, tf.Team, fmt.Sprintf("%s asks to %s `%s/%s` (owned by %s).%s", as, verb(lc), t.org(), name, tf.Team, reasonSuffix(reason)), true)
 	return pl, nil
 }
 
@@ -633,7 +649,9 @@ func (t *tools) reconcileRepository() WriteTool {
 		Description: "Run the reconciler for one repository now (Reconcile now): dispatches the reconcile-repositories workflow in giantswarm/github " +
 			"as you, which runs the engine's set-up steps for that repository — settings, permissions, protection, CircleCI, Renovate check, CODEOWNERS, " +
 			"metadata, lifecycle, catalog, release. The record shows setup.pendingRun until the inventory has read the run's artifact (within " +
-			"seconds of the run completing) as setup.lastRun; the completion message follows in the team's channel; a run that does not report " +
+			"seconds of the run completing) as setup.lastRun, with the run's change block (kind, by, pullRequest). The team's standup channel " +
+			"gets one sentence per failed step or finding with the fix; a run with nothing to fix posts nothing (the sentence about who created, " +
+			"added, transferred, archived or deprecated a repository follows the merged pull request, not a dispatch). A run that does not report " +
 			"within 15 minutes leaves the finding reconcile-run-missing. Nothing is written to the team files. Here mode commit means: dispatch.",
 		Options: []mcp.ToolOption{
 			mcp.WithString(argRepository, mcp.Required(), mcp.Description("Repository name, with or without the org.")),
@@ -659,7 +677,7 @@ func (t *tools) dispatch(ctx context.Context, args map[string]any, run bool) (*D
 	}
 	workflow := t.d.reconcilerWorkflow()
 	d := &Dispatch{Workflow: workflow, Inputs: inputs,
-		Then: "the inventory reads the run's reconcile-" + name + " artifact from GitHub within seconds of the run completing: get_repository shows setup.pendingRun until then, setup.lastRun after, and the team's channel gets the completion message"}
+		Then: "the inventory reads the run's reconcile-" + name + " artifact from GitHub within seconds of the run completing: get_repository shows setup.pendingRun until then, setup.lastRun after; the team's standup channel gets one sentence per failed step or finding, nothing when there is nothing to fix"}
 	var rec *inventory.Record
 	if t.d.Inventory != nil {
 		key, _ := t.repositoryKey(args)

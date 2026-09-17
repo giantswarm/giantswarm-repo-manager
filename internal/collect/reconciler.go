@@ -317,7 +317,8 @@ func (c *Collector) consumeArtifact(ctx context.Context, run *github.WorkflowRun
 	}
 	lr := &inventory.LastRun{Result: report.Result, RunID: run.GetID(), Attempt: run.GetRunAttempt(),
 		RunURL:    firstNonEmpty(report.WorkflowRun.URL, run.GetHTMLURL()),
-		Timestamp: firstTime(report.FinishedAt, report.Result.FinishedAt, run.GetUpdatedAt().Time)}
+		Timestamp: firstTime(report.FinishedAt, report.Result.FinishedAt, run.GetUpdatedAt().Time),
+		Change:    report.Change}
 	if stored != nil && stored.Timestamp.After(lr.Timestamp) {
 		return errArtifactSkipped
 	}
@@ -326,12 +327,14 @@ func (c *Collector) consumeArtifact(ctx context.Context, run *github.WorkflowRun
 }
 
 // artifactReport is the JSON in a reconcile-<name> artifact: the engine's
-// result as devctl repo reconcile prints it, with the run that produced it
-// and when it finished.
+// result as devctl repo reconcile prints it, with the run that produced it,
+// when it finished, and the change block — the team-file change the run
+// followed (kind, who, the pull request), kept on the record as it is.
 type artifactReport struct {
-	Result      reconcile.Result `json:"-"`
-	WorkflowRun artifactRun      `json:"workflowRun"`
-	FinishedAt  time.Time        `json:"finishedAt"`
+	Result      reconcile.Result  `json:"-"`
+	WorkflowRun artifactRun       `json:"workflowRun"`
+	FinishedAt  time.Time         `json:"finishedAt"`
+	Change      *inventory.Change `json:"change"`
 }
 
 // artifactRun is the run in an artifact. Its id and attempt are a JSON

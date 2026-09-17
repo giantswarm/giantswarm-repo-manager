@@ -32,8 +32,9 @@ type Config struct {
 	BaseURL string
 	// TokenFile is the projected ServiceAccount token, read per request.
 	TokenFile string
-	// Channels maps a policy file's channel name to its Slack ID — the
-	// gateway refuses names, and the policy files carry names today.
+	// Channels maps a policy file's channel names — slackChannel for asks,
+	// standupChannel for notices — to their Slack IDs: the gateway refuses
+	// names, and the policy files carry names today.
 	Channels map[string]string
 	// HTTPClient defaults to a 15 s client.
 	HTTPClient *http.Client
@@ -87,8 +88,9 @@ type Posted struct {
 	TS      string `json:"ts"`
 }
 
-// ChannelID resolves a policy file's slackChannel to the ID the gateway
-// accepts: an ID as written, else through Config.Channels.
+// ChannelID resolves a policy file's channel (slackChannel or
+// standupChannel) to the ID the gateway accepts: an ID as written, else
+// through Config.Channels.
 func (c *Client) ChannelID(name string) (string, error) {
 	name = strings.TrimPrefix(strings.TrimSpace(name), "#")
 	if channelID.MatchString(name) {

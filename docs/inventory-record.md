@@ -47,8 +47,13 @@ the row) carry the state the Repositories page shows.
 **Artifact contract for 6031a:** `reconcile-<name>.json` is `reconcile.Result` as `devctl repo reconcile` prints it
 (`pkg/reposetup/reconcile`, JSON tags on every field: `repository`, `declared`, `team`, `mode`, `added`, `startedAt`,
 `finishedAt`, `steps[]{step, verdict, summary, changes[], findings[]{kind, message, fix}}`, `converged`) plus
-`workflowRun {id, url, attempt, event, trigger, devctl}` and `finishedAt`. The poller stores the result unchanged as
-`lastRun.result`, with `workflowRun.url` and `finishedAt`.
+`workflowRun {id, url, attempt, event, trigger, devctl}`, `finishedAt` and `change {kind, by, pullRequest {number, url},
+fromTeam}` — the reconciler's classification of the team-file change the run followed: `kind` is `created` (the
+repository is younger than its pull request), `added` (an existing repository declared), `transferred` (`fromTeam` names
+the giving team), `archived`, `deprecated`, `changed` (any other edit), `dispatched` (a Reconcile now) or `nightly`; `by` is
+the pull request's author or the dispatching person (absent for the schedule). The poller stores the result unchanged as
+`lastRun.result`, with `workflowRun.url`, `finishedAt` and the change block as `lastRun.change`. The change block is what
+the message to the team's standup channel is rendered from (README, "Asks and messages go through Swarmgeist").
 
 ## Shape
 
@@ -105,7 +110,8 @@ the row) carry the state the Repositories page shows.
     "checks": { "…": "reconcile.Result in mode check — what devctl repo status prints" },
     "checkedAt": "…",
     "checkError": "",                   // why checks is missing (no read identity, …); a refused entry has checks = the engine's Refused result
-    "lastRun": {"result": {"…": "reconcile.Result"}, "runUrl": "…", "timestamp": "…", "runId": 1, "attempt": 1},
+    "lastRun": {"result": {"…": "reconcile.Result"}, "runUrl": "…", "timestamp": "…", "runId": 1, "attempt": 1,
+                "change": {"kind": "created", "by": "alice", "pullRequest": {"number": 4711, "url": "…"}}},  // kind: created | added | transferred (+fromTeam) | archived | deprecated | changed | dispatched | nightly
     "pendingRun": {"dispatchedAt": "…", "by": "alice"},     // a Reconcile now waiting for its run's artifact
     "missingRun": {"dispatchedAt": "…", "by": "alice", "noticedAt": "…", "runsUrl": "…"}   // one that did not report in 15 min
   },

@@ -141,7 +141,7 @@
                     "properties": {
                         "pollInterval": {
                             "type": "string",
-                            "description": "Read the reconciler workflow's completed runs from GitHub as the inventory App every interval (a Go duration) and store each run's `reconcile-<repository>` artifact as the repository's `setup.lastRun`; every 30 s while a Align now (`align_repository`) is pending. `\"0\"` turns the poller off. Nothing reaches the server from the workflow: the App needs Actions read on `teamFiles.repository`."
+                            "description": "Read the reconciler workflow's completed runs from GitHub as the inventory App every interval (a Go duration) and store each run's `reconcile-<repository>` artifact as the repository's `setup.lastRun`; every 30 s while an Align now (`align_repository`) is pending. `\"0\"` turns the poller off. Nothing reaches the server from the workflow: the App needs Actions read on `teamFiles.repository`."
                         },
                         "workflow": {
                             "type": "string",

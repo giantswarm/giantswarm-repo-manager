@@ -56,7 +56,8 @@ func registerWrite(s *mcpserver.MCPServer, wt WriteTool) {
 	opts := []mcp.ToolOption{
 		mcp.WithDescription("WRITES (as you, with your own GitHub token through the App giantswarm-repo-manager). " + wt.Description +
 			" Every write takes dryRun and mode: dryRun: true returns the rendered change and writes nothing; " +
-			`mode: "commit" opens the team-file pull request as you. mode: "apply" is refused for every write tool ` +
+			`mode: "commit" opens the team-file pull request as you and may take up to a minute (its writes run on GitHub within the call) — wait for the one answer. ` +
+			`mode: "apply" is refused for every write tool ` +
 			"(a repository without its declaration is drift), and mode is required unless dryRun is true."),
 		mcp.WithBoolean(ArgDryRun, mcp.Description("Render the change and write nothing (default false).")),
 		mcp.WithString(ArgMode, mcp.Description(`How the change lands: "commit" (a team-file pull request as you). "apply" is refused.`), mcp.Enum(string(ModeCommit))),

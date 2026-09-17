@@ -181,6 +181,13 @@ muster:
     name: giantswarm-repo-manager
     # -- Start the server connection when muster initializes.
     autoStart: true
+    # -- Seconds muster waits for one call before it cancels it (the CR's
+    # `spec.timeout`; muster's own default is 30, the CRD allows 1–300). 180
+    # because `create_repository` in `mode: commit` does its writes in one
+    # call — create the repository, fetch and render the template, push the
+    # scaffold, open the pull request — and `reconcile_repository` and
+    # `set_lifecycle` with the ask come close to muster's default as well.
+    timeout: 180  # @schema minimum: 1; maximum: 300
     # -- Human-readable description shown by muster.
     description: Giant Swarm's repository set-up service — the giantswarm org's repositories, every write as the person
     # -- Extra labels on the MCPServer CR.

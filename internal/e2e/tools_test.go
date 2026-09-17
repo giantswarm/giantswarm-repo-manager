@@ -284,7 +284,7 @@ func TestTransferNamesBothTeams(t *testing.T) {
 	var plan tools.Plan
 	st.callJSON(t, c, tools.ToolTransferRepository, map[string]any{argDryRun: true, kRepository: repoPresent, argToTeam: teamPlaneteers}, &plan)
 	if plan.Team != teamPlaneteers || plan.FromTeam != team || len(plan.PullRequest.Files) != 2 || plan.Ask == nil || !plan.Ask.Deliverable || plan.Ask.Channel != planeteersChannel ||
-		plan.Notice == nil || plan.Notice.Channel != bumblebeeChannel || plan.PullRequest.As != alice {
+		plan.Notice == nil || plan.Notice.Channel != bumblebeeStandup || plan.PullRequest.As != alice || !strings.HasPrefix(plan.Ask.Text, alice+" asks to transfer") {
 		t.Fatalf("plan: %+v ask=%+v notice=%+v", plan, plan.Ask, plan.Notice)
 	}
 	var out tools.Committed
@@ -296,7 +296,7 @@ func TestTransferNamesBothTeams(t *testing.T) {
 		t.Errorf("transfer pull request %q\n%s\n--- from ---\n%s\n--- to ---\n%s", pr.Title, pr.Body, from, to)
 	}
 	asks, notices := st.gw.posted()
-	if len(asks) != 1 || asks[0][kChannel] != planeteersChannel || asks[0]["team"] != teamPlaneteers || len(notices) != 1 || notices[0][kChannel] != bumblebeeChannel ||
+	if len(asks) != 1 || asks[0][kChannel] != planeteersChannel || asks[0]["team"] != teamPlaneteers || len(notices) != 1 || notices[0][kChannel] != bumblebeeStandup ||
 		out.Ask == nil || !out.Ask.Delivered || out.Notice == nil || !out.Notice.Delivered {
 		t.Errorf("asks=%v notices=%v out=%+v", asks, notices, out)
 	}
@@ -315,7 +315,7 @@ func TestSetLifecycleArchivedAndApproveChange(t *testing.T) {
 		t.Errorf("archive pull request %q\n%s", pr.Title, file)
 	}
 	asks, _ := st.gw.posted()
-	if len(asks) != 1 || asks[0][kChannel] != bumblebeeChannel || !strings.Contains(asks[0]["text"].(string), "Archive") || !strings.Contains(asks[0]["text"].(string), "superseded") {
+	if len(asks) != 1 || asks[0][kChannel] != bumblebeeChannel || !strings.Contains(asks[0]["text"].(string), alice+" asks to archive") || !strings.Contains(asks[0]["text"].(string), "superseded") {
 		t.Fatalf("ask: %v", asks)
 	}
 	approve := asks[0]["approve"].(map[string]any)
@@ -435,21 +435,43 @@ func TestReconcileDispatchesAsThePersonAndTheCompletionMessageFollows(t *testing
 		t.Errorf("dispatch: %+v %v", d, ds)
 	}
 
-	// The run completes and uploads its artifact; the poller reads it: the
-	// record carries the run, the team's channel gets the completion message.
+	// The dispatched run completes and uploads its artifact; the poller
+	// reads it: the record carries the run and its change block, and the
+	// team hears nothing — a Reconcile now with nothing to fix is not news.
 	finished := time.Now().UTC()
-	run := st.ghs.actions.addRun(t, runStatusCompleted, finished, artifactReport{name: repoPresent, finishedAt: finished,
-		result: reconcile.Result{Converged: true, Steps: []reconcile.StepResult{{Step: "release", Verdict: "ok", Summary: "v0.1.0 built"}}}})
+	converged := reconcile.Result{Converged: true, Steps: []reconcile.StepResult{{Step: "release", Verdict: "ok", Summary: "v0.1.0 built"}}}
+	run := st.ghs.actions.addRun(t, runStatusCompleted, finished, artifactReport{name: repoPresent, finishedAt: finished, result: converged,
+		change: &inventory.Change{Kind: inventory.ChangeDispatched, By: alice}})
 	if p := st.poll(t); p.Artifacts != 1 {
 		t.Fatalf("poll: %+v", p)
 	}
-	if rec := st.record(t, repoPresent); rec.Setup.LastRun == nil || rec.Setup.LastRun.RunURL != runURL(run.ID) || rec.Setup.PendingRun != nil {
-		t.Fatalf("record after the run: %+v", rec.Setup)
+	rec := st.record(t, repoPresent)
+	if rec.Setup.LastRun == nil || rec.Setup.LastRun.RunURL != runURL(run.ID) || rec.Setup.PendingRun != nil ||
+		rec.Setup.LastRun.Change == nil || rec.Setup.LastRun.Change.Kind != inventory.ChangeDispatched || rec.Setup.LastRun.Change.By != alice {
+		t.Fatalf("record after the run: %+v change=%+v", rec.Setup, rec.Setup.LastRun.Change)
+	}
+	if _, notices := st.gw.posted(); len(notices) != 0 {
+		t.Errorf("a converged Reconcile now should post nothing: %v", notices)
+	}
+
+	// The run that followed alice's merged pull request creating the
+	// repository: one sentence about it in the team's standup channel,
+	// linking the pull request — and a finding as a second sentence linking
+	// the run.
+	prURL := "https://github.com/" + org + "/github/pull/4711"
+	created := reconcile.Result{Converged: true, Steps: []reconcile.StepResult{{Step: "release", Verdict: "ok", Summary: "v0.1.0 built"},
+		{Step: "metadata", Verdict: "reported", Findings: []reconcile.Finding{{Kind: "default-icon", Message: "the repository has the default icon", Fix: "upload one under Settings"}}}}}
+	later := finished.Add(time.Minute)
+	pushed := st.ghs.actions.addRun(t, runStatusCompleted, later, artifactReport{name: repoPresent, finishedAt: later, result: created,
+		change: &inventory.Change{Kind: inventory.ChangeCreated, By: alice, PullRequest: &inventory.ChangePullRequest{Number: 4711, URL: prURL}}})
+	if p := st.poll(t); p.Artifacts != 1 {
+		t.Fatalf("second poll: %+v", p)
 	}
 	_, notices := st.gw.posted()
-	if len(notices) != 1 || notices[0][kChannel] != bumblebeeChannel || !strings.Contains(notices[0]["text"].(string), "*Reconciled* `"+org+"/"+repoPresent+"`") ||
-		!strings.Contains(notices[0]["text"].(string), "catalog entity: present") || notices[0]["link"] != runURL(run.ID) {
-		t.Errorf("completion message: %v", notices)
+	if len(notices) != 2 || notices[0][kChannel] != bumblebeeStandup || notices[0]["team"] != team ||
+		notices[0]["text"] != alice+" created a new repo: "+repoPresent+" (app, go)" || notices[0]["link"] != prURL ||
+		notices[1][kChannel] != bumblebeeStandup || notices[1]["text"] != repoPresent+": the repository has the default icon — upload one under Settings" || notices[1]["link"] != runURL(pushed.ID) {
+		t.Errorf("messages after the creating run: %v", notices)
 	}
 }
 

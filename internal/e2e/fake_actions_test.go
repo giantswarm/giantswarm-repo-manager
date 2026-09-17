@@ -16,6 +16,7 @@ import (
 	"github.com/giantswarm/devctl/v8/pkg/reposetup/reconcile"
 
 	"github.com/giantswarm/giantswarm-repo-manager/internal/collect"
+	"github.com/giantswarm/giantswarm-repo-manager/internal/inventory"
 )
 
 // fakeActions is the Actions API of the fake team-files repository, as the
@@ -99,11 +100,13 @@ func (a *fakeActions) rerun(t *testing.T, run *fakeRun, reports ...artifactRepor
 }
 
 // artifactReport is what the reconciler uploads for one repository: the
-// engine's result with the run and the finish time.
+// engine's result with the run, the finish time and the change block (the
+// team-file change the run followed; nil leaves it out).
 type artifactReport struct {
 	name       string
 	result     reconcile.Result
 	finishedAt time.Time
+	change     *inventory.Change
 }
 
 func (r artifactReport) zip(t *testing.T, run *fakeRun) []byte {
@@ -120,6 +123,9 @@ func (r artifactReport) zip(t *testing.T, run *fakeRun) []byte {
 	// GITHUB_RUN_ID and GITHUB_RUN_ATTEMPT.
 	body["workflowRun"] = map[string]any{kID: strconv.FormatInt(run.ID, 10), "url": runURL(run.ID), "attempt": strconv.Itoa(run.Attempt), "event": run.Event, "trigger": "reconcile_repository", "devctl": "v8.65.0"}
 	body["finishedAt"] = r.finishedAt.UTC().Format(time.RFC3339)
+	if r.change != nil {
+		body["change"] = r.change
+	}
 	b, err = json.Marshal(body)
 	if err != nil {
 		t.Fatal(err)

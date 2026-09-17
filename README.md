@@ -27,7 +27,7 @@ exposes it, with the repository lifecycle, as MCP tools with the prefix `giantsw
 | `transfer_repository` | the entry moved between two team files in one pull request naming the giving and the receiving team; the ask to the receiving team's channel, a notice to the giving team's |
 | `set_lifecycle` | `deprecated` or `archived` set on the entry; the ask to the owning team's channel |
 | `approve_change` | the caller's GitHub team membership checked (the team named in the pull request), then the approving review submitted as the caller — what the Slack ask's Approve button calls as the clicking member |
-| `reconcile_repository` | the reconciler workflow (`reconcile-repositories.yaml` in giantswarm/github) dispatched for one repository as the caller; the record shows `setup.pendingRun` until the inventory has read the run's artifact, and the completion message ("repository · catalog entity · first release") reaches the team's channel |
+| `reconcile_repository` | the reconciler workflow (`reconcile-repositories.yaml` in giantswarm/github) dispatched for one repository as the caller; the record shows `setup.pendingRun` until the inventory has read the run's artifact as `setup.lastRun` (with the run's `change` block); the team's standup channel gets one sentence per failed step or finding with the fix, and nothing when there is nothing to fix |
 
 Every tool's description and input schema, as muster exposes them: [`docs/tools.md`](docs/tools.md).
 
@@ -44,12 +44,20 @@ order stay; only the one entry changes.
 inventory validates the entry against the schema alone (the engine's checks then run for it), and the
 creation rules appear only in `validate_repository`'s dry run for an added entry.
 
-**Asks and messages go through Swarmgeist.** Lifecycle and transfer asks are posted to klaus-gateway's
-team-review endpoint (`POST /reviews`, an Approve button calling `approve_change` as the clicking member),
-notices and completion messages to `POST /notices`; the channel comes from the team's policy file
-(`repository-setup/<team>.yaml`, `slackChannel`), mapped to its Slack ID through `reviews.channels` when
-the file carries a name. Authentication is this pod's projected ServiceAccount token (audience
-`klaus-gateway`). An undelivered ask is reported in the result; approving on GitHub is equivalent.
+**Asks and messages go through Swarmgeist.** Lifecycle and transfer asks — naming the asking person — are
+posted to klaus-gateway's team-review endpoint (`POST /reviews`, an Approve button calling `approve_change`
+as the clicking member) into the team's `slackChannel`. Notices go to `POST /notices` into the team's
+`standupChannel`: the giving team's transfer notice, and after a reconciler run one sentence about the
+change for the team, rendered from the artifact's `change` block and the declaration — `alice created a
+new repo: bumblebee-repo (app, go)`, `alice added the existing repo … to team-bumblebee`, `alice
+transferred the repo … (app, go) from team-planeteers to team-bumblebee`, `alice archived the repo …`,
+`alice deprecated the repo …` — linking the pull request, plus one sentence per failed step or finding
+with what to do, linking the run. A run that converged without a change a person made and without
+findings (an edit the reconciler applied, a Reconcile now, the schedule) posts nothing: the reconciler
+doing its job is not news. Both channels come from the team's policy file (`repository-setup/<team>.yaml`);
+a file without either is refused, nothing stands in. A channel name is mapped to its Slack ID through
+`reviews.channels` (the gateway takes IDs). Authentication is this pod's projected ServiceAccount token
+(audience `klaus-gateway`). An undelivered ask is reported in the result; approving on GitHub is equivalent.
 
 ## The pattern
 
@@ -121,8 +129,10 @@ the budget runs low. The record and its findings are described in
   team's; `set_lifecycle: archived` opens the pull request and posts the ask whose Approve calls
   `approve_change`; `approve_change` refuses the outsider and lands the member's review; `update_repository` rewrites
   one entry and leaves the rest of the file byte-identical; `list_repositories` scopes per caller (their GitHub
-  teams, read as them) and applies the page's filters; `reconcile_repository` dispatches the workflow as the person and the
-  reconciler's report back posts the completion message.
+  teams, read as them) and applies the page's filters; `reconcile_repository` dispatches the workflow as the person, the
+  run's artifact lands as `setup.lastRun` with its `change` block and a converged Reconcile now posts nothing, while the
+  run of a merged pull request that created the repository posts the one sentence about it to the team's standup
+  channel, linking the pull request, and its finding as a second sentence linking the run.
 - `go test ./...` — the write framework refuses `mode: apply` for every registered write tool and
   advertises `commit` alone; the dry run is the engine's result; and, in `internal/e2e`, the whole
   identity chain against a fake GitHub: the person's user token as the bearer is verified with `GET /user`

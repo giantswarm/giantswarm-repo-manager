@@ -239,7 +239,8 @@ type Setup struct {
 	MissingRun *MissingRun `json:"missingRun,omitempty"`
 }
 
-// LastRun is one reconciler run: the engine's result, the run and when.
+// LastRun is one reconciler run: the engine's result, the run, when, and
+// the team-file change the run followed.
 type LastRun struct {
 	Result    reconcile.Result `json:"result"`
 	RunURL    string           `json:"runUrl"`
@@ -248,12 +249,54 @@ type LastRun struct {
 	// came from: the poller reads no artifact twice.
 	RunID   int64 `json:"runId,omitempty"`
 	Attempt int   `json:"attempt,omitempty"`
+	// Change is the artifact's change block: what the run was about for the
+	// team — the kind of team-file change, who made it and its pull request.
+	// nil for an artifact without one.
+	Change *Change `json:"change,omitempty"`
 }
 
 // Names says whether the run is the Actions run id at attempt.
 func (r *LastRun) Names(id int64, attempt int) bool {
 	return r != nil && r.RunID == id && r.Attempt == attempt
 }
+
+// Change is the team-file change a reconciler run followed, as the
+// reconciler classifies it in the artifact's change block.
+type Change struct {
+	// Kind is one of the Change… kinds.
+	Kind string `json:"kind"`
+	// By is the login of the pull request's author (a push) or of the person
+	// who dispatched the run; empty for the schedule.
+	By string `json:"by,omitempty"`
+	// PullRequest is the merged pull request that made the change.
+	PullRequest *ChangePullRequest `json:"pullRequest,omitempty"`
+	// FromTeam is the giving team of a transfer.
+	FromTeam string `json:"fromTeam,omitempty"`
+}
+
+// ChangePullRequest names the pull request of a change.
+type ChangePullRequest struct {
+	Number int    `json:"number"`
+	URL    string `json:"url"`
+}
+
+// The kinds of change a run follows.
+const (
+	// ChangeCreated: the repository is younger than its pull request.
+	ChangeCreated = "created"
+	// ChangeAdded: an existing repository was declared.
+	ChangeAdded = "added"
+	// ChangeTransferred: the entry moved from another team's file (FromTeam).
+	ChangeTransferred = "transferred"
+	ChangeArchived    = "archived"
+	ChangeDeprecated  = "deprecated"
+	// ChangeChanged: any other edit of the entry.
+	ChangeChanged = "changed"
+	// ChangeDispatched: a Reconcile now.
+	ChangeDispatched = "dispatched"
+	// ChangeNightly: the schedule.
+	ChangeNightly = "nightly"
+)
 
 // PendingRun is a dispatched reconciler run that has not reported yet.
 type PendingRun struct {

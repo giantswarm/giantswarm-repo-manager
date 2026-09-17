@@ -20,10 +20,13 @@ import (
 const (
 	teamPlaneteers = "team-planeteers"
 	teamOther      = "team-other"
-	// Channel IDs: bumblebee's policy carries the ID, planeteers' a name the
-	// server maps (reviews.channels).
+	// Channel IDs: bumblebee's policy carries the IDs, planeteers' names the
+	// server maps (reviews.channels). The team channel takes the asks, the
+	// standup channel the notices.
 	bumblebeeChannel  = "C0BUMBLEBEE"
+	bumblebeeStandup  = "C0STANDUPBEE"
 	planeteersChannel = "C0PLANETEERS"
+	planeteersStandup = "C0STANDUPPLA"
 
 	// Tool arguments and values the scenarios repeat.
 	argDryRun      = "dryRun"
@@ -97,8 +100,8 @@ func newFakeTeamFiles() *fakeTeamFiles {
 		files: map[string][]byte{
 			"repositories/" + team + ".yaml":               []byte(teamFile),
 			"repositories/" + teamPlaneteers + ".yaml":     []byte(planeteersFile),
-			"repository-setup/" + team + ".yaml":           []byte("repairOptIn: true\nslackChannel: " + bumblebeeChannel + "\n"),
-			"repository-setup/" + teamPlaneteers + ".yaml": []byte("repairOptIn: false\nslackChannel: " + teamPlaneteers + "\n"),
+			"repository-setup/" + team + ".yaml":           []byte("repairOptIn: true\nslackChannel: " + bumblebeeChannel + "\nstandupChannel: " + bumblebeeStandup + "\n"),
+			"repository-setup/" + teamPlaneteers + ".yaml": []byte("repairOptIn: false\nslackChannel: " + teamPlaneteers + "\nstandupChannel: standup-planeteers\n"),
 		},
 		refs: map[string]string{"heads/" + mainBranch: "base000"}, trees: map[string]map[string][]byte{}, commits: map[string]string{}, pulls: map[int]*fakePullRequest{}, next: 4711,
 	}

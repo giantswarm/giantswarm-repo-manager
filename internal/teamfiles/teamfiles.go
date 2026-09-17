@@ -1,6 +1,6 @@
 // Package teamfiles is giantswarm/github as the writes see it: the team
 // files (repositories/<team>.yaml, the desired state), the per-team policy
-// files (repository-setup/<team>.yaml: Slack channel, repair opt-in), and the
+// files (repository-setup/<team>.yaml: Slack channels, repair opt-in), and the
 // one way a change lands — a branch and a pull request, opened with the
 // GitHub client the caller passes in (the person's token for every write, the
 // App for unattended reads). Nothing here decides who the client is.
@@ -209,11 +209,17 @@ func (r Repo) FindEntry(ctx context.Context, name, hint string) (*TeamFile, erro
 	return nil, fmt.Errorf("%w: %s (looked in %s)", ErrEntryNotFound, name, strings.Join(teams, ", "))
 }
 
-// Policy is a team's repository-setup policy file.
+// Policy is a team's repository-setup policy file: the two channels every
+// message of the set-up automation goes to — asks with an Approve button
+// (archive, deprecate, an incoming transfer, a repair review) to
+// SlackChannel, notices (what someone did, a failed step, a finding) to
+// StandupChannel — and the repair opt-in. Both channels are required; a file
+// without one is refused, nothing stands in for it.
 type Policy struct {
-	Team         string `json:"team" yaml:"-"`
-	SlackChannel string `json:"slackChannel" yaml:"slackChannel"`
-	RepairOptIn  bool   `json:"repairOptIn" yaml:"repairOptIn"`
+	Team           string `json:"team" yaml:"-"`
+	SlackChannel   string `json:"slackChannel" yaml:"slackChannel"`
+	StandupChannel string `json:"standupChannel" yaml:"standupChannel"`
+	RepairOptIn    bool   `json:"repairOptIn" yaml:"repairOptIn"`
 }
 
 // Policy reads repository-setup/<team>.yaml.
@@ -222,12 +228,20 @@ func (r Repo) Policy(ctx context.Context, team string) (*Policy, error) {
 	if err != nil {
 		return nil, err
 	}
+	return ParsePolicy(team, f.Path, f.Content)
+}
+
+// ParsePolicy parses a team's policy file; path names it in errors.
+func ParsePolicy(team, path string, content []byte) (*Policy, error) {
 	p := Policy{Team: team}
-	if err := yaml.Unmarshal(f.Content, &p); err != nil {
-		return nil, fmt.Errorf("%s: %w", f.Path, err)
+	if err := yaml.Unmarshal(content, &p); err != nil {
+		return nil, fmt.Errorf("%s: %w", path, err)
 	}
 	if p.SlackChannel == "" {
-		return nil, fmt.Errorf("%s: slackChannel is empty", f.Path)
+		return nil, fmt.Errorf("%s: slackChannel is empty", path)
+	}
+	if p.StandupChannel == "" {
+		return nil, fmt.Errorf("%s: standupChannel is empty", path)
 	}
 	return &p, nil
 }

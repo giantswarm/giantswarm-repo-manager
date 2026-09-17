@@ -141,7 +141,7 @@ func newStack(t *testing.T) *stack {
 	st.col = st.newCollector(0)
 	ts := tools.New(tools.Deps{Version: testVersion, GitHubAPIURL: apiURL, AuthorizationServer: server.DefaultAuthorizationServer, App: app, Inventory: store, Collector: st.col, Log: log,
 		TeamFilesRepository: org + "/github", TeamFilesRef: mainBranch, SweepTeams: []string{team, teamPlaneteers},
-		Review:   review.New(review.Config{BaseURL: gws.URL, TokenFile: tokenFile, Channels: map[string]string{teamPlaneteers: planeteersChannel}}),
+		Review:   review.New(review.Config{BaseURL: gws.URL, TokenFile: tokenFile, Channels: map[string]string{teamPlaneteers: planeteersChannel, "standup-planeteers": planeteersStandup}}),
 		Scaffold: fakeScaffold{}})
 	st.col.OnReconciled(ts.Reconciled)
 	mcpSrv := ts.MCPServer()

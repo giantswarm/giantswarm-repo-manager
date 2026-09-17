@@ -75,3 +75,29 @@ func zipOf(t *testing.T, name string, content []byte) []byte {
 	}
 	return buf.Bytes()
 }
+
+// TestDecodeArtifactChange: the artifact's change block — the team-file
+// change the run followed — is kept as it is; an artifact without one leaves
+// the record's change nil.
+func TestDecodeArtifactChange(t *testing.T) {
+	const run = `"workflowRun": {"id": "123", "url": "https://github.com/giantswarm/github/actions/runs/123", "attempt": "1", "event": "push"}`
+	body := `{"repository": "giantswarm/x", "finishedAt": "2026-09-17T17:00:00Z", ` + run + `, ` +
+		`"change": {"kind": "transferred", "by": "alice", "fromTeam": "team-planeteers", "pullRequest": {"number": 4711, "url": "https://github.com/giantswarm/github/pull/4711"}}}`
+	r, err := decodeArtifact(zipOf(t, ArtifactPrefix+"x.json", []byte(body)), 1<<20)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ch := r.Change
+	if ch == nil || ch.Kind != "transferred" || ch.By != "alice" || ch.FromTeam != "team-planeteers" ||
+		ch.PullRequest == nil || ch.PullRequest.Number != 4711 || ch.PullRequest.URL != "https://github.com/giantswarm/github/pull/4711" {
+		t.Errorf("change block: %+v", ch)
+	}
+
+	r, err = decodeArtifact(zipOf(t, ArtifactPrefix+"x.json", []byte(`{"repository": "giantswarm/x", `+run+`}`)), 1<<20)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if r.Change != nil {
+		t.Errorf("an artifact without a change block: %+v", r.Change)
+	}
+}

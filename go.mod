@@ -7,7 +7,7 @@ require (
 	github.com/bradleyfalzon/ghinstallation/v2 v2.19.0
 	github.com/giantswarm/devctl/v8 v8.65.0
 	github.com/google/go-github/v92 v92.0.0
-	github.com/mark3labs/mcp-go v1.0.0
+	github.com/mark3labs/mcp-go v1.1.0
 	github.com/sirupsen/logrus v1.10.2
 	github.com/valkey-io/valkey-go v1.0.78
 	gopkg.in/yaml.v3 v3.0.1

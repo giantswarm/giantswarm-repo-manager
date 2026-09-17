@@ -13,8 +13,6 @@ import (
 
 	"github.com/giantswarm/devctl/v8/pkg/reposetup"
 	"github.com/giantswarm/devctl/v8/pkg/reposetup/reconcile"
-
-	"github.com/giantswarm/giantswarm-repo-manager/internal/inventory"
 )
 
 // The fake org: one declared repository that exists, one declared but gone,
@@ -39,7 +37,15 @@ const (
 	kMessageHeadline = "messageHeadline"
 	mainBranch       = "main"
 	kUser            = "user"
-	renovateLogin    = "renovate"
+	kState           = "state"
+	kContext         = "context"
+	kTarget          = "target"
+	kHasNextPage     = "hasNextPage"
+	kPageInfo        = "pageInfo"
+	kPrivate         = "private"
+	// lifecycleArchived is set_lifecycle's archived value.
+	lifecycleArchived = "archived"
+	renovateLogin     = "renovate"
 )
 
 const (
@@ -52,6 +58,8 @@ const (
 	dissolvedTeam   = "team-dissolved"
 	fakeRunURL      = "https://github.com/giantswarm/github/actions/runs/1"
 	fakeGraphQLCost = 7
+	circleBuild     = "ci/circleci: go-build"
+	circlePush      = "ci/circleci: push-to-registries"
 )
 
 var teamFile = `# yaml-language-server: $schema=../repositories.schema.json
@@ -107,7 +115,7 @@ func (o *fakeOrg) handle(w http.ResponseWriter, r *http.Request) {
 	var errs []map[string]any
 	switch {
 	case contains(req.Query, "teamFiles:"):
-		data["organization"] = map[string]any{"teams": map[string]any{"pageInfo": map[string]any{"hasNextPage": false}, kNodes: []map[string]any{{kSlug: team}, {kSlug: teamPlaneteers}}}}
+		data["organization"] = map[string]any{"teams": map[string]any{kPageInfo: map[string]any{kHasNextPage: false}, kNodes: []map[string]any{{kSlug: team}, {kSlug: teamPlaneteers}}}}
 		data[kGitHub] = map[string]any{
 			"teamFiles": map[string]any{"entries": []map[string]any{{kName: "team-bumblebee.yaml", kType: "blob", "object": map[string]any{kText: teamFile}}}},
 			"catalog":   map[string]any{kText: catalogFile},
@@ -115,13 +123,20 @@ func (o *fakeOrg) handle(w http.ResponseWriter, r *http.Request) {
 		data["mcb"] = map[string]any{"mapping": map[string]any{kText: mappingFile}}
 	case contains(req.Query, "repositories(first:"):
 		data["organization"] = map[string]any{"repositories": map[string]any{
-			kTotalCount: 4, "pageInfo": map[string]any{"hasNextPage": false},
+			kTotalCount: 4, kPageInfo: map[string]any{kHasNextPage: false},
 			kNodes: []map[string]any{o.node(repoPresent), o.node(repoLegacy), o.node(repoStray), o.node(repoArchived)},
 		}}
 	case contains(req.Query, "repository(owner: $org, name: $name)"):
 		name, _ := req.Variables["name"].(string)
 		if n := o.node(name); n != nil {
-			n["defaultBranchRef"] = map[string]any{kName: mainBranch, "target": map[string]any{"history": o.history(name)}}
+			// The history joins the head's status rollup the node carries.
+			target := map[string]any{"history": o.history(name)}
+			if ref, ok := n["defaultBranchRef"].(map[string]any); ok {
+				if t, ok := ref[kTarget].(map[string]any); ok {
+					target["statusCheckRollup"] = t["statusCheckRollup"]
+				}
+			}
+			n["defaultBranchRef"] = map[string]any{kName: mainBranch, kTarget: target}
 			data["repository"] = n
 		} else {
 			data["repository"] = nil
@@ -130,7 +145,7 @@ func (o *fakeOrg) handle(w http.ResponseWriter, r *http.Request) {
 	default:
 		for _, m := range historyAlias.FindAllStringSubmatch(req.Query, -1) {
 			if n := o.node(m[2]); n != nil {
-				data["r"+m[1]] = map[string]any{kName: m[2], "defaultBranchRef": map[string]any{"target": map[string]any{"history": o.history(m[2])}}}
+				data["r"+m[1]] = map[string]any{kName: m[2], "defaultBranchRef": map[string]any{kTarget: map[string]any{"history": o.history(m[2])}}}
 			} else {
 				data["r"+m[1]] = nil
 			}
@@ -172,6 +187,7 @@ func (o *fakeOrg) node(name string) map[string]any {
 		n["codeowners"] = map[string]any{kText: "* @giantswarm/" + team + "\n"}
 		n["renovate0"] = map[string]any{kText: "{\n  // generated\n  \"extends\": [\"github>giantswarm/renovate-presets:default.json5\"],\n  packageRules: [{ enabled: false, matchPackageNames: [\"x\"] },],\n}\n"}
 		n["circleci"] = map[string]any{"id": "2"}
+		n["defaultBranchRef"] = map[string]any{kName: mainBranch, kTarget: map[string]any{"statusCheckRollup": o.rollup()}}
 		n["dockerfile"] = map[string]any{"id": "3"}
 		n["helm"] = map[string]any{"id": "4"}
 		return n
@@ -189,6 +205,20 @@ func (o *fakeOrg) node(name string) map[string]any {
 		return base(true)
 	}
 	return nil
+}
+
+// rollup is the present repository's head status rollup: CircleCI's two job
+// statuses (one still pending) among a GitHub Actions check run and another
+// system's status.
+func (o *fakeOrg) rollup() map[string]any {
+	return map[string]any{kState: "PENDING", "contexts": map[string]any{
+		kPageInfo: map[string]any{kHasNextPage: false},
+		kNodes: []map[string]any{
+			{kName: "lint"}, // a CheckRun: no context
+			{kContext: circleBuild, kState: "SUCCESS", kCreatedAt: o.now.Add(-2 * time.Hour).Format(time.RFC3339)},
+			{kContext: circlePush, kState: "PENDING", kCreatedAt: o.now.Add(-time.Hour).Format(time.RFC3339)},
+			{kContext: "sonar", kState: "FAILURE", kCreatedAt: o.now.Format(time.RFC3339)},
+		}}}
 }
 
 // history is the default branch's recent commits: the stray repository saw
@@ -218,14 +248,3 @@ func (c *fakeChecker) Check(_ context.Context, teamSlug string, entry reposetup.
 			Findings: []reconcile.Finding{{Kind: reconcile.FindingDefaultIcon, Message: "the chart carries the template's icon", Fix: "replace helm/<chart>/icon.svg"}}}},
 	}, nil
 }
-
-// fakeCircleCI follows every repository.
-type fakeCircleCI struct{ calls atomic.Int32 }
-
-func (c *fakeCircleCI) Project(_ context.Context, _, _ string) *inventory.CircleCI {
-	c.calls.Add(1)
-	yes := true
-	return &inventory.CircleCI{Followed: true, SetupWorkflows: &yes, LastPipeline: &inventory.Pipeline{Number: 42, State: "created", CreatedAt: time.Now(), Ref: mainBranch}}
-}
-
-func (c *fakeCircleCI) Calls() int { return int(c.calls.Load()) }

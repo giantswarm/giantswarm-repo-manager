@@ -128,7 +128,7 @@ Leave a decision note on a repository's inventory record as you (verdict keep, w
 
 ## `get_info`
 
-Read-only. Report the service version and how this call is authenticated: the caller (the GitHub login and id GET /user answered for the bearer muster put on the call — the person's own user token through the App giantswarm-repo-manager) and the authorization server pinned for it, the App identity used for unattended inventory reads, the inventory store, the engine (devctl reposetup package) and the write modes. Call first.
+Read-only. Report the service version and how this call is authenticated: the caller (the GitHub login and id GET /user answered for the bearer muster put on the call — the person's own user token through the App giantswarm-repo-manager) and the authorization server pinned for it; whether your credential reaches the team files (teamFiles.readable); the identity of the unattended inventory reads (the read-only App giantswarm-repo-manager-inventory, or not configured) and the inventory store; where the inventory's CircleCI facts come from (commit statuses and the reconciler's run artifact — this server holds no CircleCI token); the engine (devctl reposetup package) and the write modes. Call first.
 
 ```json
 {

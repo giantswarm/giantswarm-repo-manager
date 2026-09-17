@@ -23,16 +23,6 @@
             "type": "object",
             "additionalProperties": true
         },
-        "circleci": {
-            "type": "object",
-            "additionalProperties": false,
-            "properties": {
-                "existingSecret": {
-                    "type": "string",
-                    "description": "Existing Secret with the CircleCI API token (read scope) under `token`, passed as `CIRCLECI_API_TOKEN`. Empty leaves it unset."
-                }
-            }
-        },
         "cluster": {
             "type": "object",
             "additionalProperties": true
@@ -90,14 +80,15 @@
                 },
                 "appID": {
                     "type": "integer",
-                    "description": "The App used for unattended, read-only inventory reads (the giantswarm-align-files App) and its installation on the org. 0 leaves the App identity off."
+                    "description": "Id of the read-only GitHub App `giantswarm-repo-manager-inventory`, the one identity of the unattended reads: the org sweep, the engine's checks in read mode and the name check of a dry run run as its installation, on its own rate budget. Its permissions, all read: Administration, Contents, Pull requests, Issues, Commit statuses (the `ci/circleci:` contexts on the default branch head), Metadata, Organization members. 0 leaves the unattended reads unconfigured — nothing stands in for the App; the tools that need it say so."
                 },
                 "existingSecret": {
                     "type": "string",
-                    "description": "Existing Secret with the App's PEM private key under `private-key`."
+                    "description": "Existing Secret with the inventory App's PEM private key under `private-key`."
                 },
                 "installationID": {
-                    "type": "integer"
+                    "type": "integer",
+                    "description": "The inventory App's installation id on the org."
                 }
             }
         },
@@ -170,7 +161,7 @@
                     "properties": {
                         "concurrency": {
                             "type": "integer",
-                            "description": "Parallel CircleCI and engine reads during a sweep."
+                            "description": "Parallel engine reads during a sweep."
                         },
                         "engineChecks": {
                             "type": "boolean",

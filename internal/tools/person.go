@@ -2,9 +2,12 @@ package tools
 
 import (
 	"context"
+	"crypto/sha256"
 	"errors"
 	"sort"
 	"strings"
+	"sync"
+	"time"
 
 	"github.com/giantswarm/devctl/v8/pkg/reposetup"
 	"github.com/google/go-github/v92/github"
@@ -34,6 +37,27 @@ var ErrNoToken = errors.New("no GitHub token on this request: the server acts as
 // person is the caller with the token of the request and their teams read as
 // themselves. Without a token it fails with a reason the caller can act on.
 func (t *tools) person(ctx context.Context) (*person, error) {
+	p, err := t.caller(ctx)
+	if err != nil {
+		return nil, err
+	}
+	who, err := reposetup.Remote{GitHub: p.gh, Owner: p.repo.Owner, Repo: p.repo.Name, Ref: p.repo.Ref}.Person(ctx, t.org())
+	if err != nil {
+		// The bearer was verified, so the person is known; the teams stay
+		// unknown (the App lacks Organization members: read, or the person is
+		// in no team) and the guard notices say so.
+		t.d.Log.Warn("caller's teams unreadable", "login", p.login, "error", err)
+		return p, nil
+	}
+	p.teams = who.Teams
+	sort.Strings(p.teams)
+	return p, nil
+}
+
+// caller is the person with the client on the request's token and the
+// team-files repository as them — no call to GitHub yet; person adds the
+// teams.
+func (t *tools) caller(ctx context.Context) (*person, error) {
 	id, ok := identity.FromContext(ctx)
 	tok, hasToken := identity.TokenFromContext(ctx)
 	if !ok || !hasToken {
@@ -47,18 +71,8 @@ func (t *tools) person(ctx context.Context) (*person, error) {
 	if err != nil {
 		return nil, err
 	}
-	p := &person{login: id.Login, repo: repo, gh: c}
-	who, err := reposetup.Remote{GitHub: c, Owner: repo.Owner, Repo: repo.Name, Ref: repo.Ref}.Person(ctx, t.org())
-	if err != nil {
-		// The bearer was verified, so the person is known; the teams stay
-		// unknown (the App lacks Organization members: read, or the person is
-		// in no team) and the guard notices say so.
-		t.d.Log.Warn("caller's teams unreadable", "login", p.login, "error", err)
-		return p, nil
-	}
-	p.teams = who.Teams
-	sort.Strings(p.teams)
-	return p, nil
+	repo.As = id.Login
+	return &person{login: id.Login, repo: repo, gh: c}, nil
 }
 
 // member says whether the person is in the team.
@@ -76,17 +90,63 @@ func (t *tools) teamFiles(c *github.Client) (teamfiles.Repo, error) {
 	return teamfiles.New(c, t.d.TeamFilesRepository, t.d.TeamFilesRef)
 }
 
-// unattended is the team-files repository as the App installation (or the
-// development token) — for reads that need no person: the policy file for a
+// ErrNoApp is a read that needs the inventory App while none is configured;
+// nothing stands in for it.
+var ErrNoApp = errors.New("the inventory App giantswarm-repo-manager-inventory is not configured (GITHUB_APP_ID, GITHUB_APP_INSTALLATION_ID, GITHUB_APP_PRIVATE_KEY_FILE): no identity for unattended reads")
+
+// unattended is the team-files repository as the inventory App's
+// installation — for reads that need no person: the policy file for a
 // completion message.
 func (t *tools) unattended() (teamfiles.Repo, error) {
-	if t.d.App != nil {
-		return t.teamFiles(t.d.App.Installation())
+	if t.d.App == nil {
+		return teamfiles.Repo{}, ErrNoApp
 	}
-	if t.d.Reader != nil {
-		return t.teamFiles(t.d.Reader.REST())
+	return t.teamFiles(t.d.App.Installation())
+}
+
+// probeTTL is how long a token's team-files probe holds.
+const probeTTL = 15 * time.Minute
+
+// probes remembers, per token, whether the person's credential reaches the
+// team-files repository: one GET /repos/{owner}/{name} per token per TTL,
+// so get_info stays cheap.
+type probes struct {
+	mu      sync.Mutex
+	entries map[[sha256.Size]byte]probe
+}
+
+type probe struct {
+	reachable bool
+	until     time.Time
+}
+
+// reachable probes as the person, from the cache while it holds.
+func (c *probes) reachable(ctx context.Context, p *person) (bool, error) {
+	tok, _ := identity.TokenFromContext(ctx)
+	key := sha256.Sum256([]byte(tok))
+	now := time.Now()
+	c.mu.Lock()
+	if e, ok := c.entries[key]; ok && now.Before(e.until) {
+		c.mu.Unlock()
+		return e.reachable, nil
 	}
-	return teamfiles.Repo{}, errors.New("no GitHub identity for unattended reads (the App, or GITHUB_TOKEN in development)")
+	c.mu.Unlock()
+	reachable, err := p.repo.Reachable(ctx)
+	if err != nil {
+		return false, err
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.entries == nil {
+		c.entries = map[[sha256.Size]byte]probe{}
+	}
+	for k, e := range c.entries {
+		if !now.Before(e.until) {
+			delete(c.entries, k)
+		}
+	}
+	c.entries[key] = probe{reachable: reachable, until: now.Add(probeTTL)}
+	return reachable, nil
 }
 
 // callerTeams are the team slugs the caller belongs to on GitHub, read as

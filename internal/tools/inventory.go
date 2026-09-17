@@ -280,7 +280,7 @@ func (t *tools) getRepository(ctx context.Context, req mcp.CallToolRequest) (*mc
 
 func (t *tools) refreshRepository(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 	if t.d.Collector == nil {
-		return result(nil, errors.New("inventory collector not configured: it needs the store (VALKEY_ADDR) and a GitHub read identity (the App, or GITHUB_TOKEN in development)"))
+		return result(nil, errors.New("inventory collector not configured: it needs the store (VALKEY_ADDR) and the inventory App giantswarm-repo-manager-inventory (GITHUB_APP_ID, GITHUB_APP_INSTALLATION_ID, GITHUB_APP_PRIVATE_KEY_FILE)"))
 	}
 	key, err := t.repositoryKey(req.GetArguments())
 	if err != nil {

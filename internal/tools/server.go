@@ -6,6 +6,7 @@ package tools
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"log/slog"
 	"runtime/debug"
 
@@ -17,6 +18,7 @@ import (
 	"github.com/giantswarm/giantswarm-repo-manager/internal/identity"
 	"github.com/giantswarm/giantswarm-repo-manager/internal/inventory"
 	"github.com/giantswarm/giantswarm-repo-manager/internal/review"
+	"github.com/giantswarm/giantswarm-repo-manager/internal/teamfiles"
 )
 
 // ToolPrefix is the MCPServer name muster registers this server under.
@@ -48,17 +50,14 @@ type Deps struct {
 	// (the App giantswarm-repo-manager's), reported by get_info; empty when
 	// the server runs without OAuth.
 	AuthorizationServer string
-	App                 *gh.App
-	// Reader is the unattended read identity when it is not the App (the
-	// development token); nil when App is set or nothing reads.
-	Reader    *gh.Reader
+	// App is the read-only App giantswarm-repo-manager-inventory, the one
+	// identity of the unattended reads; nil when it is not configured — the
+	// tools that need it say so, nothing stands in.
+	App       *gh.App
 	Inventory *inventory.Store
-	// Collector fills the inventory; nil when the store or a GitHub read
-	// identity is missing (refresh_repository then says so).
+	// Collector fills the inventory; nil when the store or the inventory App
+	// is missing (refresh_repository then says so).
 	Collector *collect.Collector
-	// CircleCIConfigured says whether CIRCLECI_API_TOKEN is set; the token is
-	// not used before the reconciler slice.
-	CircleCIConfigured bool
 	// TeamFilesRepository and TeamFilesRef are where the team files live
 	// (giantswarm/github at main; a fixture in tests).
 	TeamFilesRepository, TeamFilesRef string
@@ -88,10 +87,10 @@ func (ts *Tools) MCPServer() *mcpserver.MCPServer {
 	d, t := ts.t.d, ts.t
 	s := mcpserver.NewMCPServer(ToolPrefix, d.Version,
 		mcpserver.WithToolCapabilities(false),
-		mcpserver.WithInstructions("Giant Swarm's repository set-up service. The team files in giantswarm/github (repositories/team-*.yaml) are the desired state of every repository; GitHub is the reality. Call get_info first: it reports who you are to this server (the GitHub login of the token muster put on the call — your own authorization of the App giantswarm-repo-manager), the App identity used for unattended reads and the inventory store. The inventory (list_repositories, get_repository) is one record per repository of the org — declaration, GitHub reality, set-up state, orphan score with reasons, findings — refreshed by a scheduled sweep, after every reconciler run and on refresh_repository; every record carries its age. Every write tool takes dryRun and mode; the only write mode is commit — a team-file pull request opened as you — and apply is refused."),
+		mcpserver.WithInstructions("Giant Swarm's repository set-up service. The team files in giantswarm/github (repositories/team-*.yaml) are the desired state of every repository; GitHub is the reality. Call get_info first: it reports who you are to this server (the GitHub login of the token muster put on the call — your own authorization of the App giantswarm-repo-manager), the identity of the unattended reads — the read-only App giantswarm-repo-manager-inventory — and the inventory store. The inventory (list_repositories, get_repository) is one record per repository of the org — declaration, GitHub reality, set-up state, orphan score with reasons, findings — refreshed by a scheduled sweep, after every reconciler run and on refresh_repository; every record carries its age. Every write tool takes dryRun and mode; the only write mode is commit — a team-file pull request opened as you — and apply is refused."),
 	)
 	s.AddTool(mcp.NewTool(ToolGetInfo,
-		mcp.WithDescription("Read-only. Report the service version and how this call is authenticated: the caller (the GitHub login and id GET /user answered for the bearer muster put on the call — the person's own user token through the App giantswarm-repo-manager) and the authorization server pinned for it, the App identity used for unattended inventory reads, the inventory store, the engine (devctl reposetup package) and the write modes. Call first."),
+		mcp.WithDescription("Read-only. Report the service version and how this call is authenticated: the caller (the GitHub login and id GET /user answered for the bearer muster put on the call — the person's own user token through the App giantswarm-repo-manager) and the authorization server pinned for it; whether your credential reaches the team files (teamFiles.readable); the identity of the unattended inventory reads (the read-only App giantswarm-repo-manager-inventory, or not configured) and the inventory store; where the inventory's CircleCI facts come from (commit statuses and the reconciler's run artifact — this server holds no CircleCI token); the engine (devctl reposetup package) and the write modes. Call first."),
 		mcp.WithReadOnlyHintAnnotation(true),
 	), t.getInfo)
 	t.registerInventory(s)
@@ -102,7 +101,12 @@ func (ts *Tools) MCPServer() *mcpserver.MCPServer {
 	return s
 }
 
-type tools struct{ d Deps }
+// tools is the tool set's state: the dependencies and the per-token cache of
+// the team-files probe (get_info's teamFiles.readable).
+type tools struct {
+	d      Deps
+	probes probes
+}
 
 // Info is get_info's result.
 type Info struct {
@@ -112,7 +116,9 @@ type Info struct {
 	Caller       *identity.Identity `json:"caller"`
 	Auth         AuthInfo           `json:"auth"`
 	GitHub       GitHubInfo         `json:"github"`
+	TeamFiles    TeamFilesInfo      `json:"teamFiles"`
 	Inventory    InventoryInfo      `json:"inventory"`
+	CircleCI     CircleCIInfo       `json:"circleci"`
 	Engine       EngineInfo         `json:"engine"`
 	Capabilities Capabilities       `json:"capabilities"`
 }
@@ -136,23 +142,52 @@ type AuthInfo struct {
 	Reason string `json:"reason,omitempty"`
 }
 
-// GitHubInfo is the App identity and the API the calls go to.
+// GitHubInfo is the inventory App's identity and the API the calls go to.
 type GitHubInfo struct {
-	APIURL string       `json:"apiUrl"`
-	App    *gh.Identity `json:"app,omitempty"`
+	APIURL string `json:"apiUrl"`
+	// App is the read-only App of the unattended reads as GET /app names it.
+	App *gh.Identity `json:"app,omitempty"`
 	// AppError says why the App identity is missing.
 	AppError string `json:"appError,omitempty"`
-	// CircleCIConfigured says whether the CircleCI token is set.
-	CircleCIConfigured bool `json:"circleciConfigured"`
 }
 
-// InventoryInfo is the store's state.
+// Readability of the team files with the caller's credential.
+const (
+	ReadableTrue    = "true"
+	ReadableFalse   = "false"
+	ReadableUnknown = "unknown"
+)
+
+// TeamFilesInfo is the team-files repository and whether the caller's
+// credential reaches it (one probe of the repository, cached per token).
+type TeamFilesInfo struct {
+	Repository string `json:"repository"`
+	Ref        string `json:"ref"`
+	// Readable is true, false or unknown; false names the fix in Reason.
+	Readable string `json:"readable"`
+	Reason   string `json:"reason,omitempty"`
+}
+
+// InventoryInfo is the store's state and the identity of the unattended reads.
 type InventoryInfo struct {
+	// Identity is `app <slug> (installation <id>)` — the read-only App
+	// giantswarm-repo-manager-inventory — or `not configured`.
+	Identity  string `json:"identity"`
 	Address   string `json:"address,omitempty"`
 	Connected bool   `json:"connected"`
 	Records   int    `json:"records"`
 	Error     string `json:"error,omitempty"`
 }
+
+// CircleCIInfo says where the inventory's CircleCI facts come from.
+type CircleCIInfo struct {
+	// Source is statuses+artifact: the `ci/circleci:` commit statuses on the
+	// default branch head and the reconciler's run artifact; no token.
+	Source string `json:"source"`
+}
+
+// IdentityNotConfigured is the inventory identity without the App.
+const IdentityNotConfigured = "not configured"
 
 // EngineInfo names the engine package and its version.
 type EngineInfo struct {
@@ -172,7 +207,8 @@ func (t *tools) getInfo(ctx context.Context, _ mcp.CallToolRequest) (*mcp.CallTo
 	info := Info{
 		Version:    t.d.Version,
 		ToolPrefix: ToolPrefix,
-		GitHub:     GitHubInfo{APIURL: apiURL(t.d.GitHubAPIURL), CircleCIConfigured: t.d.CircleCIConfigured},
+		GitHub:     GitHubInfo{APIURL: apiURL(t.d.GitHubAPIURL)},
+		CircleCI:   CircleCIInfo{Source: inventory.CircleCISourceBoth},
 		Engine:     EngineInfo{Module: engineModule, Version: EngineVersion(), Package: engineModule + "/pkg/reposetup"},
 		Capabilities: Capabilities{
 			Modes:        []string{string(ModeCommit)},
@@ -186,17 +222,64 @@ func (t *tools) getInfo(ctx context.Context, _ mcp.CallToolRequest) (*mcp.CallTo
 	} else {
 		info.Auth = AuthInfo{Mode: AuthModeNone, Reason: "the request carried no verified bearer: the server runs without OAuth (oauth.enabled), nothing acts as a person"}
 	}
+	info.TeamFiles = t.teamFilesInfo(ctx)
+	info.Inventory = t.inventory(ctx)
 	if t.d.App != nil {
 		app, err := t.d.App.Identity(ctx)
 		if err != nil {
 			info.GitHub.AppError = err.Error()
 		}
 		info.GitHub.App = app
+		info.Inventory.Identity = appIdentity(app, err)
 	} else {
-		info.GitHub.AppError = "GitHub App not configured (GITHUB_APP_ID, GITHUB_APP_INSTALLATION_ID, GITHUB_APP_PRIVATE_KEY_FILE)"
+		info.GitHub.AppError = ErrNoApp.Error()
+		info.Inventory.Identity = IdentityNotConfigured
 	}
-	info.Inventory = t.inventory(ctx)
 	return result(info, nil)
+}
+
+// appIdentity renders the inventory identity: `app <slug> (installation
+// <id>)`; when GET /app failed, the installation alone with the reason.
+func appIdentity(app *gh.Identity, err error) string {
+	if err != nil || app == nil {
+		return fmt.Sprintf("app installation %d (GET /app failed: %v)", installationID(app), err)
+	}
+	return fmt.Sprintf("app %s (installation %d)", app.Slug, app.InstallationID)
+}
+
+func installationID(app *gh.Identity) int64 {
+	if app == nil {
+		return 0
+	}
+	return app.InstallationID
+}
+
+// teamFilesInfo probes whether the caller's credential reaches the team-files
+// repository; without a caller nothing can be probed.
+func (t *tools) teamFilesInfo(ctx context.Context) TeamFilesInfo {
+	info := TeamFilesInfo{Repository: t.d.TeamFilesRepository, Ref: t.d.TeamFilesRef, Readable: ReadableUnknown}
+	if info.Repository == "" {
+		info.Repository = teamfiles.DefaultRepository
+	}
+	if info.Ref == "" {
+		info.Ref = teamfiles.DefaultRef
+	}
+	p, err := t.caller(ctx)
+	if err != nil {
+		info.Reason = "no caller to probe as: " + err.Error()
+		return info
+	}
+	reachable, err := t.probes.reachable(ctx, p)
+	switch {
+	case err != nil:
+		info.Reason = err.Error()
+	case reachable:
+		info.Readable = ReadableTrue
+	default:
+		info.Readable = ReadableFalse
+		info.Reason = fmt.Sprintf("your authorization of the App %s does not reach %s: the App must be installed on all repositories (an org owner's setting), or your own access does not include it", teamfiles.WriteApp, info.Repository)
+	}
+	return info
 }
 
 func (t *tools) inventory(ctx context.Context) InventoryInfo {

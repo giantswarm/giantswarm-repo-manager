@@ -36,10 +36,11 @@ import (
 )
 
 const (
-	team     = "team-bumblebee"
-	argTeam  = "team"
-	argEntry = "entry"
-	alice    = "alice"
+	team      = "team-bumblebee"
+	argTeam   = "team"
+	argReason = "reason"
+	argEntry  = "entry"
+	alice     = "alice"
 	// The user tokens muster puts on the calls: alice's and carol's are
 	// GitHub's, bob's is one GitHub refuses (never authorized, or revoked).
 	aliceToken = "alice-token"

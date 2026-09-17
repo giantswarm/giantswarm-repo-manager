@@ -9,8 +9,11 @@ import (
 )
 
 const (
-	testRunURL = "https://github.com/giantswarm/github/actions/runs/123"
-	testPRURL  = "https://github.com/giantswarm/github/pull/4711"
+	testRunURL      = "https://github.com/giantswarm/github/actions/runs/123"
+	testPRURL       = "https://github.com/giantswarm/github/pull/4711"
+	testService     = "service"
+	testFlavourApp  = "app"
+	testDefaultIcon = "default-icon"
 )
 
 // record is a declared repository whose last run followed change with the
@@ -25,9 +28,9 @@ func record(change *inventory.Change, steps ...reconcile.StepResult) *inventory.
 	return &inventory.Record{
 		Repository:  "giantswarm/bumblebee-repo",
 		Name:        "bumblebee-repo",
-		Declaration: &inventory.Declaration{Team: "team-bumblebee", ComponentType: "service", Language: "go", Flavours: []string{"app"}},
+		Declaration: &inventory.Declaration{Team: testTeam, ComponentType: testService, Language: "go", Flavours: []string{testFlavourApp}},
 		Setup: inventory.Setup{LastRun: &inventory.LastRun{
-			Result: reconcile.Result{Repository: "giantswarm/bumblebee-repo", Team: "team-bumblebee", Converged: converged, Steps: steps},
+			Result: reconcile.Result{Repository: "giantswarm/bumblebee-repo", Team: testTeam, Converged: converged, Steps: steps},
 			RunURL: testRunURL, RunID: 123, Attempt: 1, Change: change}},
 	}
 }
@@ -40,7 +43,7 @@ var (
 	okStep      = reconcile.StepResult{Step: reconcile.StepRelease, Verdict: reconcile.VerdictOK, Summary: "v0.1.0 built"}
 	failedStep  = reconcile.StepResult{Step: reconcile.StepCircleCI, Verdict: reconcile.VerdictFailed, Summary: "CircleCI answered 502"}
 	findingStep = reconcile.StepResult{Step: reconcile.StepMetadata, Verdict: reconcile.VerdictReported,
-		Findings: []reconcile.Finding{{Kind: "default-icon", Message: "the repository has the default icon", Fix: "upload one under Settings"}}}
+		Findings: []reconcile.Finding{{Kind: testDefaultIcon, Message: "the repository has the default icon", Fix: "upload one under Settings"}}}
 )
 
 // TestCompletionText: one sentence about the change for the kinds a person
@@ -100,7 +103,7 @@ func TestCompletionSentenceWithoutFlavourLanguageOrPerson(t *testing.T) {
 	if got, want := CompletionText(rec), "alice created a new repo: bumblebee-repo"; got != want {
 		t.Errorf("neither: got %q, want %q", got, want)
 	}
-	rec.Declaration.Flavours = []string{"app", "cli"}
+	rec.Declaration.Flavours = []string{testFlavourApp, "cli"}
 	rec.Setup.LastRun.Change.By = ""
 	if got, want := CompletionText(rec), "someone created a new repo: bumblebee-repo (app/cli)"; got != want {
 		t.Errorf("two flavours, nobody: got %q, want %q", got, want)

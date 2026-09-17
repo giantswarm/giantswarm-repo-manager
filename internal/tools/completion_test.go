@@ -47,8 +47,9 @@ var (
 )
 
 // TestCompletionText: one sentence about the change for the kinds a person
-// made, nothing for the reconciler doing its job, one sentence each for a
-// failed step and a finding.
+// made, one each for a failed step and a finding of that person's run, and
+// nothing for the reconciler doing its job — a Reconcile now, the nightly, an
+// artifact without a change block — findings and failures included.
 func TestCompletionText(t *testing.T) {
 	transfer := change(inventory.ChangeTransferred)
 	transfer.FromTeam = "team-planeteers"
@@ -70,15 +71,16 @@ func TestCompletionText(t *testing.T) {
 		{name: "nightly converged: silent", rec: record(nightly, okStep)},
 		{name: "no change block, converged: silent", rec: record(nil, okStep)},
 		{name: "no steps at all: silent", rec: record(change(inventory.ChangeDispatched))},
-		{name: "dispatched with a failed step", rec: record(change(inventory.ChangeDispatched), okStep, failedStep),
+		{name: "dispatched with a failed step: silent", rec: record(change(inventory.ChangeDispatched), okStep, failedStep)},
+		{name: "nightly with a finding: silent", rec: record(nightly, findingStep)},
+		{name: "no change block with a failed step: silent", rec: record(nil, failedStep)},
+		{name: "changed with a failed step: the failure alone", rec: record(change(inventory.ChangeChanged), okStep, failedStep),
 			want: "bumblebee-repo: the circleci step failed (CircleCI answered 502) — look at the run, fix the cause and reconcile again"},
-		{name: "nightly with a finding", rec: record(nightly, findingStep),
-			want: "bumblebee-repo: the repository has the default icon — upload one under Settings"},
 		{name: "created with a finding: two sentences", rec: record(change(inventory.ChangeCreated), okStep, findingStep),
 			want: "alice created a new repo: bumblebee-repo (app, go)\nbumblebee-repo: the repository has the default icon — upload one under Settings"},
-		{name: "failed step without a summary", rec: record(nil, reconcile.StepResult{Step: reconcile.StepCatalog, Verdict: reconcile.VerdictFailed}),
+		{name: "failed step without a summary", rec: record(change(inventory.ChangeChanged), reconcile.StepResult{Step: reconcile.StepCatalog, Verdict: reconcile.VerdictFailed}),
 			want: "bumblebee-repo: the catalog step failed — look at the run, fix the cause and reconcile again"},
-		{name: "finding without a fix", rec: record(nil, reconcile.StepResult{Step: reconcile.StepEntry, Verdict: reconcile.VerdictReported,
+		{name: "finding without a fix", rec: record(change(inventory.ChangeChanged), reconcile.StepResult{Step: reconcile.StepEntry, Verdict: reconcile.VerdictReported,
 			Findings: []reconcile.Finding{{Kind: "entry-refused", Message: "gen.language is not a language"}}}),
 			want: "bumblebee-repo: gen.language is not a language"},
 	}

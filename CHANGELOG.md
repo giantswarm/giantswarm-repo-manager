@@ -56,6 +56,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- The reconciler artifact poller decodes `workflowRun.id` and `workflowRun.attempt` written as JSON strings — the reconciler workflow writes both from `GITHUB_RUN_ID` and `GITHUB_RUN_ATTEMPT`, which GitHub Actions hands to the step as strings — as well as numbers; before, every artifact was rejected with `cannot unmarshal string into Go struct field .workflowRun.id of type int64` and `setup.lastRun` stayed empty for every repository. A value that is neither is still refused, naming the field (giantswarm/giantswarm-repo-manager#33).
 - The server no longer exits when the inventory store is not reachable at start (it crash-looped for 20 minutes on its first production rollout while Valkey came up late): it serves at once and connects to Valkey in the background, retrying with backoff for `inventory.connectTimeout` (`INVENTORY_CONNECT_TIMEOUT`, 5m; `0` waits for ever). Until the store answers, readiness fails with the reason, the inventory tools and `/internal/*` answer `inventory unavailable` (503), and the identity tools work; the sweep schedule starts on the connected store. A Valkey lost at runtime reads the same way and is reconnected by the client (#6).
 
 

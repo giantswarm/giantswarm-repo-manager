@@ -227,9 +227,18 @@ type Setup struct {
 	CheckedAt *time.Time        `json:"checkedAt,omitempty"`
 	// CheckError says why Checks is missing.
 	CheckError string `json:"checkError,omitempty"`
-	// LastRun is the reconciler's last run over this repository — what the
-	// reconciler workflow uploads as reconcile-<name>.json.
+	// LastRun is the reconciler's last run over this repository — the
+	// reconcile-<name> artifact its workflow run uploaded, read by the poller.
 	LastRun *LastRun `json:"lastRun,omitempty"`
+	// PendingRun is a Reconcile now dispatched for this repository whose run
+	// has not reported yet (a workflow_dispatch returns no run id). The run's
+	// artifact clears it; so does the pending window running out, which
+	// leaves MissingRun.
+	PendingRun *PendingRun `json:"pendingRun,omitempty"`
+	// MissingRun is a Reconcile now whose run did not report within the
+	// pending window: the finding reconcile-run-missing, until the next
+	// artifact or dispatch.
+	MissingRun *MissingRun `json:"missingRun,omitempty"`
 }
 
 // LastRun is one reconciler run: the engine's result, the run and when.
@@ -237,6 +246,31 @@ type LastRun struct {
 	Result    reconcile.Result `json:"result"`
 	RunURL    string           `json:"runUrl"`
 	Timestamp time.Time        `json:"timestamp"`
+	// RunID and Attempt name the Actions run (and its attempt) the artifact
+	// came from: the poller reads no artifact twice.
+	RunID   int64 `json:"runId,omitempty"`
+	Attempt int   `json:"attempt,omitempty"`
+}
+
+// Names says whether the run is the Actions run id at attempt.
+func (r *LastRun) Names(id int64, attempt int) bool {
+	return r != nil && r.RunID == id && r.Attempt == attempt
+}
+
+// PendingRun is a dispatched reconciler run that has not reported yet.
+type PendingRun struct {
+	DispatchedAt time.Time `json:"dispatchedAt"`
+	// By is the login of the person who dispatched it.
+	By string `json:"by"`
+}
+
+// MissingRun is a dispatched reconciler run that never reported.
+type MissingRun struct {
+	PendingRun
+	// NoticedAt is when the pending window ran out.
+	NoticedAt time.Time `json:"noticedAt"`
+	// RunsURL is the workflow's Actions page: where the run is, if any.
+	RunsURL string `json:"runsUrl"`
 }
 
 // Orphan is the orphan score with its reasons.
@@ -259,10 +293,11 @@ type Finding struct {
 
 // The inventory's own finding kinds; the engine's kinds pass through.
 const (
-	FindingDeclaredButGone    = "declared-but-gone"
-	FindingUndeclaredOnGitHub = "undeclared-on-github"
-	FindingSourceInventory    = "inventory"
-	FindingSourceEngine       = "engine"
+	FindingDeclaredButGone     = "declared-but-gone"
+	FindingUndeclaredOnGitHub  = "undeclared-on-github"
+	FindingReconcileRunMissing = "reconcile-run-missing"
+	FindingSourceInventory     = "inventory"
+	FindingSourceEngine        = "engine"
 )
 
 // Decision is the note a person left on a repository.
@@ -326,12 +361,37 @@ func (r *Record) findings() []Finding {
 			Message: fmt.Sprintf("%s exists on GitHub and no team file declares it", r.Repository),
 			Fix:     "declare it in the owning team's repositories/<team>.yaml, or archive it"})
 	}
+	if m := r.Setup.MissingRun; m != nil {
+		out = append(out, Finding{Kind: FindingReconcileRunMissing, Source: FindingSourceInventory,
+			Message: fmt.Sprintf("the reconciler run %s dispatched at %s for %s had not reported by %s", m.By, m.DispatchedAt.Format(time.RFC3339), r.Repository, m.NoticedAt.Format(time.RFC3339)),
+			Fix:     fmt.Sprintf("look for the run on %s — it may have failed before its report step, or the dispatch started none; dispatch again with reconcile_repository", m.RunsURL)})
+	}
 	if r.Setup.Checks != nil {
 		for _, f := range r.Setup.Checks.Findings() {
 			out = append(out, Finding{Kind: string(f.Kind), Message: f.Message, Fix: f.Fix, Source: FindingSourceEngine})
 		}
 	}
 	return out
+}
+
+// Dispatched marks a Reconcile now by login at now: setup.pendingRun, until
+// the run's artifact or the pending window's end; an earlier missing run is
+// forgotten. The findings follow, the orphan score does not depend on it.
+func (r *Record) Dispatched(now time.Time, by string) {
+	r.Setup.PendingRun = &PendingRun{DispatchedAt: now, By: by}
+	r.Setup.MissingRun = nil
+	r.Findings = r.findings()
+}
+
+// RunMissing ends the pending run at now without an artifact: the finding
+// reconcile-run-missing names runsURL, the workflow's Actions page.
+func (r *Record) RunMissing(now time.Time, runsURL string) {
+	if r.Setup.PendingRun == nil {
+		return
+	}
+	r.Setup.MissingRun = &MissingRun{PendingRun: *r.Setup.PendingRun, NoticedAt: now, RunsURL: runsURL}
+	r.Setup.PendingRun = nil
+	r.Findings = r.findings()
 }
 
 // Weights of the orphan reasons.

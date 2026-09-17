@@ -137,7 +137,7 @@
                     "properties": {
                         "existingSecret": {
                             "type": "string",
-                            "description": "Existing Secret with the bearer token of the internal endpoints under `token`: `POST /internal/refresh` (the reconciler workflow's trigger after a run, with the run as `lastRun`) and `/internal/sweep`. Empty disables them (404)."
+                            "description": "Existing Secret with the bearer token of the internal endpoints under `token`: `GET|POST /internal/sweep`. Empty disables them (404)."
                         }
                     }
                 },
@@ -152,6 +152,20 @@
                         "staleDays": {
                             "type": "integer",
                             "description": "Stale period of the orphan score in days (no commit by a person, no Renovate activity within it)."
+                        }
+                    }
+                },
+                "reconciler": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "properties": {
+                        "pollInterval": {
+                            "type": "string",
+                            "description": "Read the reconciler workflow's completed runs from GitHub as the inventory App every interval (a Go duration) and store each run's `reconcile-<repository>` artifact as the repository's `setup.lastRun`; every 30 s while a Reconcile now (`reconcile_repository`) is pending. `\"0\"` turns the poller off. Nothing reaches the server from the workflow: the App needs Actions read on `teamFiles.repository`."
+                        },
+                        "workflow": {
+                            "type": "string",
+                            "description": "The reconciler's workflow file in `teamFiles.repository`: the one `reconcile_repository` dispatches and the poller reads the runs of."
                         }
                     }
                 },

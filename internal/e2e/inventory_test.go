@@ -162,40 +162,189 @@ func TestInventoryToolsAndReconcilerRefresh(t *testing.T) {
 		t.Errorf("decide drop: isError=%v %s", isErr, text)
 	}
 
-	// The reconciler's trigger: its run lands in setup.lastRun, the decision survives.
-	run := inventory.LastRun{RunURL: fakeRunURL, Timestamp: time.Now().UTC(), Result: reconcile.Result{Repository: org + "/" + repoPresent, Mode: reconcile.ModeRepair, Converged: true,
-		Steps: []reconcile.StepResult{{Step: reconcile.StepCircleCI, Verdict: reconcile.VerdictOK, Summary: "followed, setup workflows on, checkout key present"}}}}
-	status, body := st.internal(t, http.MethodPost, "/internal/refresh", internalToken, collect.RefreshRequest{Repository: org + "/" + repoPresent, LastRun: &run})
-	var rec inventory.Record
-	if err := json.Unmarshal(body, &rec); status != http.StatusOK || err != nil {
-		t.Fatalf("internal refresh: %d %s", status, body)
+	// The reconciler's run: the poller reads its reconcile-<name> artifact
+	// from GitHub as the inventory App, the run lands in setup.lastRun, the
+	// decision survives; the blob is fetched without the App's token.
+	finished := time.Now().UTC().Truncate(time.Second)
+	run := st.ghs.actions.addRun(t, runStatusCompleted, finished.Add(-time.Minute), artifactReport{name: repoPresent, finishedAt: finished,
+		result: reconcile.Result{Repository: org + "/" + repoPresent, Mode: reconcile.ModeRepair, Converged: true,
+			Steps: []reconcile.StepResult{{Step: reconcile.StepCircleCI, Verdict: reconcile.VerdictOK, Summary: "followed, setup workflows on, checkout key present"}}}})
+	if p := st.poll(t); p.Runs != 1 || p.Artifacts != 1 || p.Skipped != 0 || len(p.Errors) != 0 {
+		t.Fatalf("poll: %+v", p)
 	}
+	if n := st.ghs.actions.blobDownloads.Load(); n != 1 || st.ghs.actions.blobAuthorized.Load() {
+		t.Errorf("blob downloads %d, authorized %v", n, st.ghs.actions.blobAuthorized.Load())
+	}
+	rec := st.record(t, repoPresent)
 	// The run's circleci step is the second source of the CircleCI state:
 	// setup workflows are known now, nothing is left unknown.
 	if ci := rec.CircleCI; ci == nil || !ci.Followed || ci.Source != inventory.CircleCISourceBoth || ci.SetupWorkflows == nil || !*ci.SetupWorkflows || len(ci.Unknown) != 0 || ci.Head == nil {
 		t.Errorf("circleci after the reconciler's run: %+v", ci)
 	}
-	if rec.Setup.LastRun == nil || rec.Setup.LastRun.RunURL != fakeRunURL || rec.Setup.LastRun.Result.Mode != reconcile.ModeRepair || rec.Source != inventory.SourceReconciler || rec.Decision == nil || rec.Age == "" {
+	if lr := rec.Setup.LastRun; lr == nil || lr.RunURL != runURL(run.ID) || lr.RunID != run.ID || lr.Attempt != 1 || !lr.Timestamp.Equal(finished) || lr.Result.Mode != reconcile.ModeRepair ||
+		rec.Source != inventory.SourceReconciler || rec.Decision == nil {
 		t.Errorf("reconciler refresh: setup %+v source %q decision %+v", rec.Setup, rec.Source, rec.Decision)
 	}
 	var again inventory.Record
 	st.callJSON(t, c, tools.ToolRefreshRepository, map[string]any{kRepository: repoPresent}, &again)
-	if again.Setup.LastRun == nil || again.Setup.LastRun.RunURL != fakeRunURL || again.Decision == nil {
+	if again.Setup.LastRun == nil || again.Setup.LastRun.RunURL != runURL(run.ID) || again.Decision == nil {
 		t.Errorf("run and decision did not survive the next refresh: %+v %+v", again.Setup.LastRun, again.Decision)
 	}
-	if status, _ := st.internal(t, http.MethodPost, "/internal/refresh", "", collect.RefreshRequest{Repository: repoPresent}); status != http.StatusUnauthorized {
+	// A second poll, and a fresh collector over the same store (a restart),
+	// read no artifact again: the cursor names the run attempt.
+	if p := st.poll(t); p.Runs != 0 || p.Artifacts != 0 {
+		t.Errorf("second poll: %+v", p)
+	}
+	if p, err := st.newCollector(0).PollReconciler(ctx); err != nil || p.Runs != 0 || p.Artifacts != 0 {
+		t.Errorf("poll after a restart: %+v %v", p, err)
+	}
+	if n := st.ghs.actions.blobDownloads.Load(); n != 1 {
+		t.Errorf("blob downloads after re-polls: %d", n)
+	}
+	// A re-run of the run is a new attempt with a new artifact.
+	st.ghs.actions.rerun(t, run, artifactReport{name: repoPresent, finishedAt: finished.Add(time.Hour),
+		result: reconcile.Result{Repository: org + "/" + repoPresent, Mode: reconcile.ModeRepair, Converged: true}})
+	if p := st.poll(t); p.Runs != 1 || p.Artifacts != 1 {
+		t.Errorf("poll after the re-run: %+v", p)
+	}
+	if lr := st.record(t, repoPresent).Setup.LastRun; lr == nil || lr.RunID != run.ID || lr.Attempt != 2 || st.ghs.actions.blobDownloads.Load() != 2 {
+		t.Errorf("re-run not stored: %+v downloads %d", lr, st.ghs.actions.blobDownloads.Load())
+	}
+
+	if status, _ := st.internal(t, http.MethodGet, "/internal/sweep", "", nil); status != http.StatusUnauthorized {
 		t.Errorf("internal without a token: %d", status)
 	}
-	if status, _ := st.internal(t, http.MethodPost, "/internal/refresh", "wrong", collect.RefreshRequest{Repository: repoPresent}); status != http.StatusUnauthorized {
-		t.Errorf("internal with a wrong token: %d", status)
+	if status, _ := st.internal(t, http.MethodPost, "/internal/refresh", internalToken, map[string]any{kRepository: repoPresent}); status != http.StatusNotFound {
+		t.Errorf("the removed refresh endpoint answers %d, not 404", status)
 	}
-	if status, _ := st.internal(t, http.MethodPost, "/internal/refresh", internalToken, collect.RefreshRequest{Repository: "nobody-knows"}); status != http.StatusNotFound {
-		t.Errorf("internal refresh of an unknown repository: %d", status)
-	}
-	status, body = st.internal(t, http.MethodGet, "/internal/sweep", internalToken, nil)
+	status, body := st.internal(t, http.MethodGet, "/internal/sweep", internalToken, nil)
 	var sw collect.SweepStatus
 	if err := json.Unmarshal(body, &sw); status != http.StatusOK || err != nil || sw.Last == nil || sw.Last.Repositories != 5 || sw.Running {
 		t.Errorf("internal sweep status: %d %s", status, body)
+	}
+}
+
+// TestReconcileNowPendingUntilTheArtifactOrTheWindow: reconcile_repository
+// leaves setup.pendingRun on the record and the poller polls fast; the run's
+// artifact answers it; a run that does not report within the window is given
+// up with the finding reconcile-run-missing naming the workflow's Actions
+// page, which the next dispatch clears.
+func TestReconcileNowPendingUntilTheArtifactOrTheWindow(t *testing.T) {
+	st := newStack(t)
+	ctx := context.Background()
+	if _, err := st.col.Sweep(ctx); err != nil {
+		t.Fatal(err)
+	}
+	c := st.as(t, aliceToken)
+	var d tools.Dispatch
+	st.callJSON(t, c, tools.ToolReconcileRepository, map[string]any{argMode: modeCommit, kRepository: repoPresent}, &d)
+	if !d.Dispatched || d.PendingRun == nil || d.PendingRun.By != alice || !strings.Contains(d.Then, "pendingRun") {
+		t.Fatalf("dispatch: %+v", d)
+	}
+	if p := st.record(t, repoPresent).Setup.PendingRun; p == nil || p.By != alice {
+		t.Fatalf("pendingRun on the record: %+v", p)
+	}
+	var listing tools.Listing
+	st.callJSON(t, c, tools.ToolListRepositories, map[string]any{argTeam: team}, &listing)
+	var shown bool
+	for _, row := range listing.Repositories {
+		shown = shown || (row.Repository == org+"/"+repoPresent && row.Setup.PendingRun != nil && row.Setup.PendingRun.By == alice)
+	}
+	if !shown {
+		t.Errorf("list_repositories does not show the pending run: %+v", listing.Repositories)
+	}
+	// No run yet: the poll keeps it pending, and says so (the fast interval).
+	if p := st.poll(t); p.Pending != 1 || p.Missing != 0 {
+		t.Errorf("poll while pending: %+v", p)
+	}
+	// The run completes: its artifact answers the pending run.
+	finished := time.Now().UTC().Truncate(time.Second)
+	st.ghs.actions.addRun(t, runStatusCompleted, finished, artifactReport{name: repoPresent, finishedAt: finished, result: reconcile.Result{Converged: true}})
+	if p := st.poll(t); p.Pending != 0 || p.Artifacts != 1 {
+		t.Errorf("poll with the run: %+v", p)
+	}
+	if rec := st.record(t, repoPresent); rec.Setup.PendingRun != nil || rec.Setup.LastRun == nil || hasKind(rec, inventory.FindingReconcileRunMissing) {
+		t.Errorf("after the run: %+v findings %+v", rec.Setup, rec.Findings)
+	}
+	// Dispatched again and no run within the window: given up with the finding.
+	st.callJSON(t, c, tools.ToolReconcileRepository, map[string]any{argMode: modeCommit, kRepository: repoPresent}, &d)
+	st.advance(14 * time.Minute)
+	if p := st.poll(t); p.Pending != 1 || p.Missing != 0 {
+		t.Errorf("poll inside the window: %+v", p)
+	}
+	st.advance(2 * time.Minute)
+	if p := st.poll(t); p.Pending != 0 || p.Missing != 1 {
+		t.Errorf("poll past the window: %+v", p)
+	}
+	rec := st.record(t, repoPresent)
+	if rec.Setup.PendingRun != nil || rec.Setup.MissingRun == nil || rec.Setup.MissingRun.By != alice || !hasKind(rec, inventory.FindingReconcileRunMissing) {
+		t.Fatalf("missing run: %+v findings %+v", rec.Setup, rec.Findings)
+	}
+	for _, f := range rec.Findings {
+		if f.Kind == inventory.FindingReconcileRunMissing && (f.Source != inventory.FindingSourceInventory || !strings.Contains(f.Fix, "https://github.com/"+org+"/github/actions/workflows/"+reconcilerWorkflow)) {
+			t.Errorf("finding: %+v", f)
+		}
+	}
+	var got inventory.Record
+	st.callJSON(t, c, tools.ToolGetRepository, map[string]any{kRepository: repoPresent}, &got)
+	if !hasKind(&got, inventory.FindingReconcileRunMissing) {
+		t.Errorf("get_repository does not carry the finding: %+v", got.Findings)
+	}
+	// The next dispatch forgets the missing run.
+	st.callJSON(t, c, tools.ToolReconcileRepository, map[string]any{argMode: modeCommit, kRepository: repoPresent}, &d)
+	if rec := st.record(t, repoPresent); rec.Setup.PendingRun == nil || rec.Setup.MissingRun != nil || hasKind(rec, inventory.FindingReconcileRunMissing) {
+		t.Errorf("after the next dispatch: %+v findings %+v", rec.Setup, rec.Findings)
+	}
+}
+
+// TestReconcilerPollReadsTheLastSevenDaysAndWaitsForOpenRuns: a first poll
+// (no cursor) reads the runs of the last seven days only; a run still in
+// progress holds the cursor where it stands, so its artifact is read when it
+// completes even though newer runs completed before it.
+func TestReconcilerPollReadsTheLastSevenDaysAndWaitsForOpenRuns(t *testing.T) {
+	st := newStack(t)
+	ctx := context.Background()
+	if _, err := st.col.Sweep(ctx); err != nil {
+		t.Fatal(err)
+	}
+	now := time.Now().UTC().Truncate(time.Second)
+	report := func(finished time.Time) artifactReport {
+		return artifactReport{name: repoPresent, finishedAt: finished, result: reconcile.Result{Converged: true}}
+	}
+	st.ghs.actions.addRun(t, runStatusCompleted, now.Add(-8*24*time.Hour), report(now.Add(-8*24*time.Hour)))
+	recent := st.ghs.actions.addRun(t, runStatusCompleted, now.Add(-24*time.Hour), report(now.Add(-24*time.Hour)))
+	if p := st.poll(t); p.Runs != 1 || p.Artifacts != 1 || st.ghs.actions.blobDownloads.Load() != 1 {
+		t.Fatalf("first poll: %+v downloads %d", p, st.ghs.actions.blobDownloads.Load())
+	}
+	if lr := st.record(t, repoPresent).Setup.LastRun; lr == nil || lr.RunID != recent.ID {
+		t.Errorf("the recent run is not the stored one: %+v", lr)
+	}
+	// A run created before the recent one, still running: the cursor waits
+	// for it while newer runs come and go.
+	running := st.ghs.actions.addRun(t, runStatusInProgress, now.Add(-2*time.Hour), report(now.Add(-time.Hour)))
+	newer := st.ghs.actions.addRun(t, runStatusCompleted, now.Add(-time.Hour), report(now.Add(-30*time.Minute)))
+	if p := st.poll(t); p.Runs != 1 || !p.Watermark.Equal(running.CreatedAt) {
+		t.Errorf("poll with an open run: %+v (open run created %s)", p, running.CreatedAt)
+	}
+	cur, err := st.store.ReconcilerCursor(ctx)
+	if err != nil || cur == nil || !cur.Watermark.Equal(running.CreatedAt) || len(cur.Consumed) != 1 {
+		t.Errorf("cursor: %+v %v", cur, err)
+	}
+	if lr := st.record(t, repoPresent).Setup.LastRun; lr == nil || lr.RunID != newer.ID {
+		t.Errorf("the newer run is not the stored one: %+v", lr)
+	}
+	// It completes: read, but its older result does not replace the newer run.
+	st.ghs.actions.complete(running)
+	if p := st.poll(t); p.Runs != 1 || p.Skipped != 1 || p.Artifacts != 0 || !p.Watermark.Equal(newer.CreatedAt) {
+		t.Errorf("poll after the open run completed: %+v", p)
+	}
+	if lr := st.record(t, repoPresent).Setup.LastRun; lr == nil || lr.RunID != newer.ID {
+		t.Errorf("an older run replaced the newer one: %+v", lr)
+	}
+	// Its artifact was downloaded — the finish time is inside the zip — and
+	// then skipped.
+	if n := st.ghs.actions.blobDownloads.Load(); n != 3 {
+		t.Errorf("blob downloads: %d", n)
 	}
 }
 

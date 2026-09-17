@@ -20,10 +20,11 @@ import (
 )
 
 // Keys: repository records under KeyPrefix<owner>/<name>, the last sweep's
-// summary under SweepKey.
+// summary under SweepKey, the reconciler poller's cursor under ReconcilerKey.
 const (
-	KeyPrefix = "repo:"
-	SweepKey  = "inventory:sweep"
+	KeyPrefix     = "repo:"
+	SweepKey      = "inventory:sweep"
+	ReconcilerKey = "inventory:reconciler"
 )
 
 // Connection timing: one dial is bounded by dialTimeout, and WaitConnected
@@ -315,42 +316,82 @@ func (s *Store) Delete(ctx context.Context, repositories ...string) error {
 
 // PutSweep stores the last sweep's summary.
 func (s *Store) PutSweep(ctx context.Context, sum *SweepSummary) error {
-	c, err := s.conn()
-	if err != nil {
-		return err
-	}
-	b, err := json.Marshal(sum)
-	if err != nil {
-		return fmt.Errorf("inventory: encode sweep: %w", err)
-	}
-	if err := c.Do(ctx, c.B().Set().Key(SweepKey).Value(string(b)).Build()).Error(); err != nil {
-		return fail("put sweep", err)
-	}
-	return nil
+	return s.putJSON(ctx, SweepKey, "sweep", sum)
 }
 
 // Sweep reads the last sweep's summary; nil without one.
 func (s *Store) Sweep(ctx context.Context) (*SweepSummary, error) {
-	c, err := s.conn()
-	if err != nil {
-		return nil, err
-	}
-	b, err := c.Do(ctx, c.B().Get().Key(SweepKey).Build()).AsBytes()
-	if err != nil {
-		if valkey.IsValkeyNil(err) {
-			return nil, nil
-		}
-		return nil, fail("get sweep", err)
-	}
 	var sum SweepSummary
-	if err := json.Unmarshal(b, &sum); err != nil {
-		return nil, fmt.Errorf("inventory: decode sweep: %w", err)
+	ok, err := s.getJSON(ctx, SweepKey, "sweep", &sum)
+	if err != nil || !ok {
+		return nil, err
 	}
 	return &sum, nil
 }
 
-// Clear removes every record and the sweep summary — the store is a cache,
-// so a forced rebuild (and a test on a shared Valkey) starts from nothing.
+// ReconcilerCursor is where the reconciler poller stands: every run created
+// before Watermark is consumed or given up; Consumed names the run attempts
+// at or after it that are consumed already ("<run id>/<attempt>"), with their
+// run's creation time.
+type ReconcilerCursor struct {
+	Watermark time.Time            `json:"watermark"`
+	Consumed  map[string]time.Time `json:"consumed,omitempty"`
+	PolledAt  time.Time            `json:"polledAt"`
+}
+
+// PutReconcilerCursor stores the reconciler poller's cursor.
+func (s *Store) PutReconcilerCursor(ctx context.Context, cur *ReconcilerCursor) error {
+	return s.putJSON(ctx, ReconcilerKey, "reconciler cursor", cur)
+}
+
+// ReconcilerCursor reads the reconciler poller's cursor; nil without one.
+func (s *Store) ReconcilerCursor(ctx context.Context) (*ReconcilerCursor, error) {
+	var cur ReconcilerCursor
+	ok, err := s.getJSON(ctx, ReconcilerKey, "reconciler cursor", &cur)
+	if err != nil || !ok {
+		return nil, err
+	}
+	return &cur, nil
+}
+
+// putJSON stores v as JSON under key; what names the value in errors.
+func (s *Store) putJSON(ctx context.Context, key, what string, v any) error {
+	c, err := s.conn()
+	if err != nil {
+		return err
+	}
+	b, err := json.Marshal(v)
+	if err != nil {
+		return fmt.Errorf("inventory: encode %s: %w", what, err)
+	}
+	if err := c.Do(ctx, c.B().Set().Key(key).Value(string(b)).Build()).Error(); err != nil {
+		return fail("put "+what, err)
+	}
+	return nil
+}
+
+// getJSON decodes the JSON under key into out; false without a value.
+func (s *Store) getJSON(ctx context.Context, key, what string, out any) (bool, error) {
+	c, err := s.conn()
+	if err != nil {
+		return false, err
+	}
+	b, err := c.Do(ctx, c.B().Get().Key(key).Build()).AsBytes()
+	if err != nil {
+		if valkey.IsValkeyNil(err) {
+			return false, nil
+		}
+		return false, fail("get "+what, err)
+	}
+	if err := json.Unmarshal(b, out); err != nil {
+		return false, fmt.Errorf("inventory: decode %s: %w", what, err)
+	}
+	return true, nil
+}
+
+// Clear removes every record, the sweep summary and the reconciler cursor —
+// the store is a cache, so a forced rebuild (and a test on a shared Valkey)
+// starts from nothing.
 func (s *Store) Clear(ctx context.Context) error {
 	keys, err := s.Keys(ctx)
 	if err != nil {
@@ -363,8 +404,11 @@ func (s *Store) Clear(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	if err := c.Do(ctx, c.B().Del().Key(SweepKey).Build()).Error(); err != nil {
-		return fail("delete sweep", err)
+	// One DEL per key: a multi-key command needs one hash slot.
+	for _, key := range []string{SweepKey, ReconcilerKey} {
+		if err := c.Do(ctx, c.B().Del().Key(key).Build()).Error(); err != nil {
+			return fail("delete "+key, err)
+		}
 	}
 	return nil
 }

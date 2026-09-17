@@ -59,6 +59,10 @@ spec:
               value: {{ .Values.inventory.sweep.graphqlBudgetFloor | int64 | quote }}
             - name: ORPHAN_STALE_DAYS
               value: {{ .Values.inventory.orphan.staleDays | int64 | quote }}
+            - name: RECONCILER_POLL_INTERVAL
+              value: {{ .Values.inventory.reconciler.pollInterval | quote }}
+            - name: RECONCILER_WORKFLOW
+              value: {{ .Values.inventory.reconciler.workflow | quote }}
             {{- with .Values.inventory.internal.existingSecret }}
             - name: INTERNAL_TOKEN
               valueFrom:

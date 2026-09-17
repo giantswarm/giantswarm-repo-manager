@@ -10,7 +10,7 @@ import (
 )
 
 // Reconciled is the collector's hook after a reconciler run refreshed a
-// record (POST /internal/refresh with lastRun): the completion message —
+// record (the poller read the run's artifact as lastRun): the completion message —
 // repository · catalog entity · first release — to the owning team's channel,
 // read from its policy file as the unattended identity. Nothing to approve.
 func (ts *Tools) Reconciled(ctx context.Context, rec *inventory.Record) {

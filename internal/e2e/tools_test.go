@@ -2,8 +2,6 @@ package e2e
 
 import (
 	"context"
-	"encoding/json"
-	"net/http"
 	"strings"
 	"testing"
 	"time"
@@ -11,7 +9,6 @@ import (
 	"github.com/giantswarm/devctl/v8/pkg/reposetup"
 	"github.com/giantswarm/devctl/v8/pkg/reposetup/reconcile"
 
-	"github.com/giantswarm/giantswarm-repo-manager/internal/collect"
 	"github.com/giantswarm/giantswarm-repo-manager/internal/inventory"
 	"github.com/giantswarm/giantswarm-repo-manager/internal/tools"
 )
@@ -422,31 +419,30 @@ func TestReconcileDispatchesAsThePersonAndTheCompletionMessageFollows(t *testing
 	c := st.as(t, aliceToken)
 	var d tools.Dispatch
 	st.callJSON(t, c, tools.ToolReconcileRepository, map[string]any{argDryRun: true, kRepository: repoPresent}, &d)
-	if d.Dispatched || d.As != alice || d.Workflow != "reconcile-repositories.yaml" || len(st.ghs.files.dispatches) != 0 {
+	if d.Dispatched || d.As != alice || d.Workflow != reconcilerWorkflow || len(st.ghs.files.dispatches) != 0 {
 		t.Fatalf("dry run: %+v dispatches=%v", d, st.ghs.files.dispatches)
 	}
 	st.callJSON(t, c, tools.ToolReconcileRepository, map[string]any{argMode: modeCommit, kRepository: repoPresent, argTeam: team}, &d)
 	ds := st.ghs.files.dispatches
-	if !d.Dispatched || len(ds) != 1 || ds[0]["workflow"] != "reconcile-repositories.yaml" || ds[0]["as"] != alice || ds[0]["ref"] != mainBranch ||
+	if !d.Dispatched || len(ds) != 1 || ds[0]["workflow"] != reconcilerWorkflow || ds[0]["as"] != alice || ds[0]["ref"] != mainBranch ||
 		ds[0]["inputs"].(map[string]any)["repository"] != repoPresent || ds[0]["inputs"].(map[string]any)["team"] != team {
 		t.Errorf("dispatch: %+v %v", d, ds)
 	}
 
-	// The reconciler reports back: the record carries the run, the team's
-	// channel gets the completion message.
-	run := inventory.LastRun{RunURL: "https://github.com/giantswarm/github/actions/runs/1", Timestamp: time.Now().UTC(),
-		Result: reconcile.Result{Converged: true, Steps: []reconcile.StepResult{{Step: "release", Verdict: "ok", Summary: "v0.1.0 built"}}}}
-	status, body := st.internal(t, http.MethodPost, "/internal/refresh", internalToken, collect.RefreshRequest{Repository: org + "/" + repoPresent, LastRun: &run})
-	if status != http.StatusOK {
-		t.Fatalf("refresh: %d %s", status, body)
+	// The run completes and uploads its artifact; the poller reads it: the
+	// record carries the run, the team's channel gets the completion message.
+	finished := time.Now().UTC()
+	run := st.ghs.actions.addRun(t, runStatusCompleted, finished, artifactReport{name: repoPresent, finishedAt: finished,
+		result: reconcile.Result{Converged: true, Steps: []reconcile.StepResult{{Step: "release", Verdict: "ok", Summary: "v0.1.0 built"}}}})
+	if p := st.poll(t); p.Artifacts != 1 {
+		t.Fatalf("poll: %+v", p)
 	}
-	var rec inventory.Record
-	if err := json.Unmarshal(body, &rec); err != nil || rec.Setup.LastRun == nil || rec.Setup.LastRun.RunURL != run.RunURL {
-		t.Fatalf("record after the run: %v %s", err, body)
+	if rec := st.record(t, repoPresent); rec.Setup.LastRun == nil || rec.Setup.LastRun.RunURL != runURL(run.ID) || rec.Setup.PendingRun != nil {
+		t.Fatalf("record after the run: %+v", rec.Setup)
 	}
 	_, notices := st.gw.posted()
 	if len(notices) != 1 || notices[0][kChannel] != bumblebeeChannel || !strings.Contains(notices[0]["text"].(string), "*Reconciled* `"+org+"/"+repoPresent+"`") ||
-		!strings.Contains(notices[0]["text"].(string), "catalog entity: present") || notices[0]["link"] != run.RunURL {
+		!strings.Contains(notices[0]["text"].(string), "catalog entity: present") || notices[0]["link"] != runURL(run.ID) {
 		t.Errorf("completion message: %v", notices)
 	}
 }

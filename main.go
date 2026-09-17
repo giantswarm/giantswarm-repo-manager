@@ -49,6 +49,8 @@ type options struct {
 	githubAppID, githubAppInstallationID  int64
 
 	teamFilesRepository, teamFilesRef             string
+	reconcilerWorkflow                            string
+	reconcilerPollInterval                        time.Duration
 	reviewsURL, reviewsTokenFile, reviewsChannels string
 
 	oauthEnabled                           bool
@@ -69,7 +71,9 @@ func parseFlags(args []string) (*options, error) {
 	f.IntVar(&o.staleDays, "stale-days", int(envInt64Default("ORPHAN_STALE_DAYS", 180)), "Stale period of the orphan score in days (ORPHAN_STALE_DAYS)")
 	f.IntVar(&o.graphqlBudgetFloor, "graphql-budget-floor", int(envInt64Default("GRAPHQL_BUDGET_FLOOR", 0)), "Stop a sweep cleanly when the GraphQL budget's remaining points fall below this; 0 never stops (GRAPHQL_BUDGET_FLOOR)")
 	f.BoolVar(&o.sweepOnce, "sweep-once", envBool("SWEEP_ONCE"), "Run one full sweep, print its summary as JSON and exit (SWEEP_ONCE)")
-	f.StringVar(&o.internalToken, "internal-token", envSecret("INTERNAL_TOKEN"), "Bearer token of the internal endpoints (/internal/refresh for the reconciler, /internal/sweep); empty disables them (INTERNAL_TOKEN)")
+	f.DurationVar(&o.reconcilerPollInterval, "reconciler-poll-interval", envDuration("RECONCILER_POLL_INTERVAL", collect.DefaultReconcilerPoll), "Read the reconciler workflow's completed runs from GitHub every interval and store their reconcile-<repository> artifacts as the repositories' setup.lastRun; every 30 s while a Reconcile now is pending; 0 turns the poller off (RECONCILER_POLL_INTERVAL)")
+	f.StringVar(&o.reconcilerWorkflow, "reconciler-workflow", envOr("RECONCILER_WORKFLOW", teamfiles.ReconcilerWorkflow), "The reconciler's workflow file in the team files repository: the one reconcile_repository dispatches and the poller reads the runs of (RECONCILER_WORKFLOW)")
+	f.StringVar(&o.internalToken, "internal-token", envSecret("INTERNAL_TOKEN"), "Bearer token of the internal endpoints (/internal/sweep); empty disables them (INTERNAL_TOKEN)")
 	f.StringVar(&o.githubAPIURL, "github-api-url", envOr("GITHUB_API_URL", ""), "GitHub API base URL; empty is api.github.com (GITHUB_API_URL)")
 	f.Int64Var(&o.githubAppID, "github-app-id", envInt64("GITHUB_APP_ID"), "Id of the read-only GitHub App giantswarm-repo-manager-inventory, the identity of the unattended reads (GITHUB_APP_ID)")
 	f.Int64Var(&o.githubAppInstallationID, "github-app-installation-id", envInt64("GITHUB_APP_INSTALLATION_ID"), "The inventory App's installation id on the org (GITHUB_APP_INSTALLATION_ID)")
@@ -104,7 +108,7 @@ func main() {
 // run wires the components and serves until ctx is done.
 func run(ctx context.Context, o *options, log *slog.Logger) error {
 	deps := tools.Deps{Version: version(), GitHubAPIURL: o.githubAPIURL, Log: log,
-		TeamFilesRepository: o.teamFilesRepository, TeamFilesRef: o.teamFilesRef,
+		TeamFilesRepository: o.teamFilesRepository, TeamFilesRef: o.teamFilesRef, ReconcilerWorkflow: o.reconcilerWorkflow,
 		Review: review.New(review.Config{BaseURL: o.reviewsURL, TokenFile: o.reviewsTokenFile, Channels: channelMap(o.reviewsChannels)})}
 
 	var reader *gh.Reader
@@ -133,6 +137,7 @@ func run(ctx context.Context, o *options, log *slog.Logger) error {
 		deps.Collector = collect.New(collect.Options{
 			Org: o.org, Stale: time.Duration(o.staleDays) * 24 * time.Hour, EngineChecks: o.sweepEngineChecks,
 			Concurrency: o.sweepConcurrency, BudgetFloor: o.graphqlBudgetFloor,
+			Reconciler: collect.ReconcilerOptions{Repository: o.teamFilesRepository, Workflow: o.reconcilerWorkflow, PollInterval: o.reconcilerPollInterval},
 		}, reader, deps.Inventory, collect.NewEngine(o.org, reader), log)
 	}
 	if o.sweepOnce {
@@ -174,9 +179,13 @@ func run(ctx context.Context, o *options, log *slog.Logger) error {
 				return
 			}
 			if deps.Collector != nil {
+				go deps.Collector.RunReconcilerPoll(runCtx)
 				deps.Collector.RunSchedule(runCtx, o.sweepInterval)
 			}
 		}()
+	}
+	if deps.Collector == nil {
+		log.Info("reconciler poller off: the inventory store and the inventory App are what it reads with", "inventory", o.valkeyAddr != "", "githubApp", reader != nil)
 	}
 	readsAs := "none"
 	if reader != nil {
@@ -185,6 +194,7 @@ func run(ctx context.Context, o *options, log *slog.Logger) error {
 	log.Info("giantswarm-repo-manager starting", "version", deps.Version, "engine", tools.EngineVersion(), "listen", o.listen, "mcp", o.mcpPath,
 		"oauth", o.oauthEnabled, "authorizationServer", deps.AuthorizationServer, "githubApp", deps.App != nil, "reads", readsAs,
 		"inventory", o.valkeyAddr, "inventoryConnectTimeout", o.connectTimeout, "collector", deps.Collector != nil, "sweepInterval", o.sweepInterval,
+		"reconcilerPollInterval", o.reconcilerPollInterval, "reconcilerWorkflow", o.reconcilerWorkflow,
 		"engineChecks", o.sweepEngineChecks, "internalEndpoints", deps.Collector != nil && o.internalToken != "",
 		"teamFiles", o.teamFilesRepository+"@"+o.teamFilesRef, "reviews", o.reviewsURL)
 	err = srv.Run(runCtx)

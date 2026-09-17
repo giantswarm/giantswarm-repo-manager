@@ -21,8 +21,8 @@ var statusRank = map[string]int{"FAILURE": 0, "ERROR": 1, "PENDING": 2, "EXPECTE
 // circleCI derives the record's CircleCI state without a CircleCI token: the
 // `ci/circleci:` statuses on the default branch head (read with the
 // repository, no extra call) say whether CircleCI builds the repository; the
-// reconciler's last run — its circleci step, in the run artifact posted to
-// /internal/refresh — says whether the project is followed and setup
+// reconciler's last run — its circleci step, in the run artifact the poller
+// read — says whether the project is followed and setup
 // workflows are on. What neither yields is named in Unknown, never guessed.
 func circleCI(n *repoNode, run *inventory.LastRun) *inventory.CircleCI {
 	out := &inventory.CircleCI{Source: inventory.CircleCISourceStatuses}

@@ -34,8 +34,10 @@ type fakeGitHub struct {
 	// org answers GraphQL for the fake org (the inventory reads).
 	org *fakeOrg
 	// files is the fake giantswarm/github: team files, policy files, pull
-	// requests, reviews, dispatches.
-	files *fakeTeamFiles
+	// requests, reviews, dispatches; actions its reconciler workflow's runs
+	// and their artifacts.
+	files   *fakeTeamFiles
+	actions *fakeActions
 	// repos are the org's other repositories: the ones create_repository
 	// creates and scaffolds, and the name checks' answers.
 	repos *fakeRepos
@@ -50,10 +52,11 @@ type fakeGitHub struct {
 
 func newFakeGitHub(t *testing.T, logins map[string]string) *fakeGitHub {
 	t.Helper()
-	g := &fakeGitHub{logins: logins, teams: map[string][]string{}, org: &fakeOrg{remaining: 5000, now: time.Now()}, files: newFakeTeamFiles(), repos: newFakeRepos(), roles: map[string]string{}}
+	g := &fakeGitHub{logins: logins, teams: map[string][]string{}, org: &fakeOrg{remaining: 5000, now: time.Now()}, files: newFakeTeamFiles(), actions: &fakeActions{}, repos: newFakeRepos(), roles: map[string]string{}}
 	mux := http.NewServeMux()
 	mux.HandleFunc("POST /api/v3/graphql", g.org.handle)
 	g.files.register(mux, g)
+	g.actions.register(mux, g)
 	g.repos.register(mux, g)
 	mux.HandleFunc("GET /api/v3/user/teams", func(w http.ResponseWriter, r *http.Request) {
 		login, ok := g.logins[bearer(r)]

@@ -12,6 +12,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"net/http"
 	"sort"
 	"strings"
 	"sync"
@@ -42,6 +43,10 @@ type Options struct {
 	// BudgetFloor stops a sweep cleanly when the GraphQL budget's remaining
 	// points fall below it; 0 never stops.
 	BudgetFloor int
+	// Reconciler says where the reconciler's runs are read from.
+	Reconciler ReconcilerOptions
+	// Now is the clock; nil is time.Now.
+	Now func() time.Time
 }
 
 // DefaultStale is the default stale period: 180 days.
@@ -72,6 +77,10 @@ func (o *Options) defaults() {
 	if o.HistoryDepth <= 0 {
 		o.HistoryDepth = 30
 	}
+	if o.Now == nil {
+		o.Now = time.Now
+	}
+	o.Reconciler.defaults()
 }
 
 // Checker runs the engine's checks in read mode for one accepted declaration.
@@ -92,7 +101,9 @@ type Collector struct {
 	checker    Checker
 	log        *slog.Logger
 	now        func() time.Time
-	running    atomic.Bool
+	// blobs fetches artifact blobs from their signed URLs: no token.
+	blobs   *http.Client
+	running atomic.Bool
 
 	srcMu    sync.Mutex
 	srcCache *sources
@@ -105,7 +116,8 @@ func New(opts Options, reader *gh.Reader, store *inventory.Store, checker Checke
 	if log == nil {
 		log = slog.Default()
 	}
-	return &Collector{opts: opts, reader: reader, gql: newGraphQL(reader.GraphQLURL(), reader.HTTP(), opts.BudgetFloor), store: store, checker: checker, log: log, now: time.Now}
+	return &Collector{opts: opts, reader: reader, gql: newGraphQL(reader.GraphQLURL(), reader.HTTP(), opts.BudgetFloor), store: store, checker: checker, log: log, now: opts.Now,
+		blobs: &http.Client{Timeout: 90 * time.Second}}
 }
 
 // Options are the collector's options.
@@ -261,7 +273,7 @@ func (c *Collector) existing(ctx context.Context) (map[string]*inventory.Record,
 }
 
 // Refresh rebuilds one record: after a reconciler run (run set, source
-// reconciler) or on demand. A repository neither declared nor on GitHub loses
+// reconciler — the poller read the run's artifact) or on demand. A repository neither declared nor on GitHub loses
 // its record and is reported as inventory.ErrNotFound.
 // OnReconciled registers the hook a refresh with a reconciler run calls after
 // the record is stored: the completion message to the team's channel.
@@ -413,7 +425,9 @@ func (c *Collector) build(name string, node *repoNode, src *sources, old *invent
 		rec.Setup = old.Setup
 	}
 	if run != nil {
-		rec.Setup.LastRun = run
+		// The run reported: a pending Reconcile now is answered, a missing
+		// one no longer is.
+		rec.Setup.LastRun, rec.Setup.PendingRun, rec.Setup.MissingRun = run, nil, nil
 	}
 	if node != nil {
 		rec.CircleCI = circleCI(node, rec.Setup.LastRun)

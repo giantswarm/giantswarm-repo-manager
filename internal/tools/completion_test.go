@@ -50,7 +50,7 @@ var (
 
 // TestCompletionText: one sentence about the change for the kinds a person
 // made, one each for a failed step and a finding of that person's run, and
-// nothing for the reconciler doing its job — a Reconcile now, the nightly, an
+// nothing for the reconciler doing its job — an Align now, the nightly, an
 // artifact without a change block — findings and failures included.
 func TestCompletionText(t *testing.T) {
 	transfer := change(inventory.ChangeTransferred)

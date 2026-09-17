@@ -228,12 +228,12 @@ type Setup struct {
 	// LastRun is the reconciler's last run over this repository — the
 	// reconcile-<name> artifact its workflow run uploaded, read by the poller.
 	LastRun *LastRun `json:"lastRun,omitempty"`
-	// PendingRun is a Reconcile now dispatched for this repository whose run
+	// PendingRun is an Align now dispatched for this repository whose run
 	// has not reported yet (a workflow_dispatch returns no run id). The run's
 	// artifact clears it; so does the pending window running out, which
 	// leaves MissingRun.
 	PendingRun *PendingRun `json:"pendingRun,omitempty"`
-	// MissingRun is a Reconcile now whose run did not report within the
+	// MissingRun is an Align now whose run did not report within the
 	// pending window: the finding reconcile-run-missing, until the next
 	// artifact or dispatch.
 	MissingRun *MissingRun `json:"missingRun,omitempty"`
@@ -292,7 +292,7 @@ const (
 	ChangeDeprecated  = "deprecated"
 	// ChangeChanged: any other edit of the entry.
 	ChangeChanged = "changed"
-	// ChangeDispatched: a Reconcile now.
+	// ChangeDispatched: an Align now.
 	ChangeDispatched = "dispatched"
 	// ChangeNightly: the schedule.
 	ChangeNightly = "nightly"
@@ -386,7 +386,7 @@ func (r *Record) findings() []Finding {
 	if m := r.Setup.MissingRun; m != nil {
 		out = append(out, Finding{Kind: FindingReconcileRunMissing, Source: FindingSourceInventory,
 			Message: fmt.Sprintf("the reconciler run %s dispatched at %s for %s had not reported by %s", m.By, m.DispatchedAt.Format(time.RFC3339), r.Repository, m.NoticedAt.Format(time.RFC3339)),
-			Fix:     fmt.Sprintf("look for the run on %s — it may have failed before its report step, or the dispatch started none; dispatch again with reconcile_repository", m.RunsURL)})
+			Fix:     fmt.Sprintf("look for the run on %s — it may have failed before its report step, or the dispatch started none; dispatch again with align_repository", m.RunsURL)})
 	}
 	if r.Setup.Checks != nil {
 		for _, f := range r.Setup.Checks.Findings() {
@@ -396,7 +396,7 @@ func (r *Record) findings() []Finding {
 	return out
 }
 
-// Dispatched marks a Reconcile now by login at now: setup.pendingRun, until
+// Dispatched marks an Align now by login at now: setup.pendingRun, until
 // the run's artifact or the pending window's end; an earlier missing run is
 // forgotten. The findings follow.
 func (r *Record) Dispatched(now time.Time, by string) {

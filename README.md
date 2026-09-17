@@ -27,7 +27,7 @@ exposes it, with the repository lifecycle, as MCP tools with the prefix `giantsw
 | `transfer_repository` | the entry moved between two team files in one pull request naming the giving and the receiving team; the ask to the receiving team's channel, a notice to the giving team's |
 | `set_lifecycle` | `deprecated` or `archived` set on the entry; the ask to the owning team's channel |
 | `approve_change` | the caller's GitHub team membership checked (the team named in the pull request), then the approving review submitted as the caller — what the Slack ask's Approve button calls as the clicking member |
-| `reconcile_repository` | the reconciler workflow (`reconcile-repositories.yaml` in giantswarm/github) dispatched for one repository as the caller; the record shows `setup.pendingRun` until the inventory has read the run's artifact as `setup.lastRun` (with the run's `change` block); the team's standup channel hears nothing about it -- a Reconcile now is the caller's, and its failed steps and findings are on the record and in the run |
+| `align_repository` | *Align now*: the reconciler workflow (`reconcile-repositories.yaml` in giantswarm/github) dispatched for one repository as the caller — it changes the repository to its declared set-up and the company baseline only when the owning team has opted in (`alignOptIn` in its policy file), and checks otherwise; the answer carries the mode, the opt-in, the planned changes of the last check and a warning paragraph; the record shows `setup.pendingRun` until the inventory has read the run's artifact as `setup.lastRun` (with the run's `change` block); the team's standup channel hears nothing about it -- an Align now is the caller's, and its failed steps and findings are on the record and in the run |
 
 Every tool's description and input schema, as muster exposes them: [`docs/tools.md`](docs/tools.md).
 
@@ -53,7 +53,7 @@ new repo: bumblebee-repo (app, go)`, `alice added the existing repo … to team-
 transferred the repo … (app, go) from team-planeteers to team-bumblebee`, `alice archived the repo …`,
 `alice deprecated the repo …` — linking the pull request, plus one sentence per failed step or finding
 of that person's run with what to do, linking the run — bar a finding of kind `unchecked`, a check the
-reconciler's own token could not run, which is the platform's to fix and stays on the record. A run nobody's change is behind — a Reconcile now,
+reconciler's own token could not run, which is the platform's to fix and stays on the record. A run nobody's change is behind — an Align now,
 the schedule, an artifact without a `change` block — posts nothing, findings and failures included: the
 reconciler doing its job is not news, and the nightly's findings would repeat every night; they stay on the
 record and in the run's summary per team. An edit a person made (`changed`) posts its failed steps and
@@ -113,7 +113,7 @@ login App that signs people in to the portal is untouched and gains no write sco
 
 One Valkey record per repository of the org, filled by a full sweep on a schedule (`inventory.sweep.interval`,
 default daily), one repository per artifact of each completed reconciler run (the poller reads the workflow's runs from
-GitHub as the inventory App every `inventory.reconciler.pollInterval`, default 5 min, every 30 s while a Reconcile now is
+GitHub as the inventory App every `inventory.reconciler.pollInterval`, default 5 min, every 30 s while an Align now is
 pending — nothing reaches the server from the workflow) and on demand (`refresh_repository`). GitHub is read as the App through
 GraphQL — repository metadata 20 a page (halved when GitHub cannot answer a page), default-branch history in aliased batches of 20 — and the engine's checks run
 in read mode per accepted declaration (`inventory.sweep.engineChecks`). `--sweep-once` runs one sweep and prints the
@@ -132,8 +132,8 @@ the budget runs low. The record and its findings are described in
   team's; `set_lifecycle: archived` opens the pull request and posts the ask whose Approve calls
   `approve_change`; `approve_change` refuses the outsider and lands the member's review; `update_repository` rewrites
   one entry and leaves the rest of the file byte-identical; `list_repositories` scopes per caller (their GitHub
-  teams, read as them) and applies the page's filters; `reconcile_repository` dispatches the workflow as the person, the
-  run's artifact lands as `setup.lastRun` with its `change` block and a converged Reconcile now posts nothing, while the
+  teams, read as them) and applies the page's filters; `align_repository` dispatches the workflow as the person, the
+  run's artifact lands as `setup.lastRun` with its `change` block and a converged Align now posts nothing, while the
   run of a merged pull request that created the repository posts the one sentence about it to the team's standup
   channel, linking the pull request, and its finding as a second sentence linking the run.
 - `go test ./...` — the write framework refuses `mode: apply` for every registered write tool and

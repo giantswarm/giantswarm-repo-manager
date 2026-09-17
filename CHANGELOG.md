@@ -9,6 +9,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- `reconcile_repository` is `align_repository` (*Align now*). Its description warns what an alignment changes on the repository — merge settings, wiki and projects, team permissions, branch protection with `enforce_admins` and the required checks, the CircleCI follow, a CODEOWNERS pull request, description and visibility, lifecycle, catalog, a missed release build — and that it runs as the caller. The answer (dry run and commit) carries `mode` (`align` when the owning team has opted in, `check` otherwise), `optedIn`, `team`, the `planned` changes of the inventory's last check per step with `checkedAt`, and a `warning` paragraph for the person to read before confirming. The policy file's opt-in key is `alignOptIn` (was `repairOptIn`); a file with the old key reads as not opted in (giantswarm/giantswarm-repo-manager#46).
+
 ### Added
 
 - The muster pin takes an optional scope parameter: `muster.mcpServer.auth.authorizationServer.scopes` (space-separated; default empty omits the field) renders as the MCPServer's `authorizationServer.scopes`, for an authorization server that needs one — a Dex standing in for GitHub in a lab takes `openid profile email offline_access`; GitHub takes none, a GitHub App's permissions are the App's. The lab shape is the fixture `tests/lab-oauth-values.yaml` (giantswarm/giantswarm-repo-manager#24).

@@ -21,11 +21,11 @@ import (
 // and the ask that would follow) and, in mode commit, opens the pull request
 // as the person and hands the ask to klaus-gateway.
 const (
-	ToolUpdateRepository    = "update_repository"
-	ToolTransferRepository  = "transfer_repository"
-	ToolSetLifecycle        = "set_lifecycle"
-	ToolApproveChange       = "approve_change"
-	ToolReconcileRepository = "reconcile_repository"
+	ToolUpdateRepository   = "update_repository"
+	ToolTransferRepository = "transfer_repository"
+	ToolSetLifecycle       = "set_lifecycle"
+	ToolApproveChange      = "approve_change"
+	ToolAlignRepository    = "align_repository"
 
 	argToTeam      = "toTeam"
 	argLifecycle   = "lifecycle"
@@ -622,9 +622,23 @@ func (t *tools) decidingTeam(ctx context.Context, repo teamfiles.Repo, n int) (s
 	}
 }
 
-// --- reconcile_repository -------------------------------------------------
+// --- align_repository -----------------------------------------------------
 
-// Dispatch is reconcile_repository's result.
+// Mode of an align_repository run: the team opted in and the run applies
+// what it finds, or it checks and changes nothing.
+const (
+	DispatchModeAlign = "align"
+	DispatchModeCheck = "check"
+)
+
+// PlannedStep is one step's planned changes from the inventory's last check:
+// what an alignment applies.
+type PlannedStep struct {
+	Step    string   `json:"step"`
+	Changes []string `json:"changes"`
+}
+
+// Dispatch is align_repository's result.
 type Dispatch struct {
 	Workflow string         `json:"workflow"`
 	Inputs   map[string]any `json:"inputs"`
@@ -641,14 +655,56 @@ type Dispatch struct {
 	// inventory reads the run's artifact within seconds of its completion,
 	// get_repository shows setup.lastRun then.
 	PendingRun *inventory.PendingRun `json:"pendingRun,omitempty"`
+	// Team is the team whose policy file decides the mode: the team input,
+	// else the declaration's.
+	Team string `json:"team,omitempty"`
+	// OptedIn is that team's alignOptIn (repository-setup/<team>.yaml).
+	// Without it the run is a check whatever the mode asked.
+	OptedIn bool `json:"optedIn"`
+	// Mode is what the run does to the repository: align or check.
+	Mode string `json:"mode"`
+	// Planned are the changes the inventory's last check found, per step —
+	// what an alignment applies; absent without a check or when converged.
+	Planned []PlannedStep `json:"planned,omitempty"`
+	// CheckedAt is when that check ran.
+	CheckedAt string `json:"checkedAt,omitempty"`
+	// Warning says in one paragraph what an alignment changes on the
+	// repository and whether this run changes anything.
+	Warning string `json:"warning"`
 }
 
-func (t *tools) reconcileRepository() WriteTool {
+// alignChanges is what an alignment does to a repository, for the warning
+// and the tool description: the engine's baseline in one sentence.
+const alignChanges = "merge settings (squash only, auto-merge, delete branch on merge, update branch), wiki and projects off, issues on, " +
+	"team permissions (employees admin, bots push), branch protection (one approving review, enforce_admins on, strict up-to-date, " +
+	"every reporting check required), the CircleCI follow and setup workflows, a CODEOWNERS pull request, description and visibility, " +
+	"lifecycle, catalog and mapping, and a missed release build"
+
+// alignWarning is the paragraph a person reads before confirming: what an
+// alignment changes on this repository, that it runs as them, and whether
+// this run changes anything — the team's opt-in decides.
+func alignWarning(repository, team string, optedIn bool) string {
+	head := fmt.Sprintf("Align now changes %s on GitHub and CircleCI to its declared set-up and the company baseline: %s. It runs as you. ",
+		repository, alignChanges)
+	switch {
+	case team == "":
+		return head + "No team is known for this repository: pass team. Without a team's opt-in the run checks and changes nothing."
+	case optedIn:
+		return head + fmt.Sprintf("%s has opted in (alignOptIn in repository-setup/%s.yaml): the planned changes are applied.", team, team)
+	default:
+		return head + fmt.Sprintf("%s has not opted in (repository-setup/%s.yaml): this run checks and reports the drift; nothing changes.", team, team)
+	}
+}
+
+func (t *tools) alignRepository() WriteTool {
 	return WriteTool{
-		Name: ToolReconcileRepository,
-		Description: "Run the reconciler for one repository now (Reconcile now): dispatches the reconcile-repositories workflow in giantswarm/github " +
-			"as you, which runs the engine's set-up steps for that repository — settings, permissions, protection, CircleCI, Renovate check, CODEOWNERS, " +
-			"metadata, lifecycle, catalog, release. The record shows setup.pendingRun until the inventory has read the run's artifact (within " +
+		Name: ToolAlignRepository,
+		Description: "Align now: aligns one repository with its declared set-up and the company baseline by dispatching the reconcile-repositories " +
+			"workflow in giantswarm/github as you. WARNING — an alignment changes the repository on GitHub and CircleCI: " + alignChanges + ". " +
+			"It does so only when the owning team has opted in (alignOptIn: true in repository-setup/<team>.yaml); for any other team the run " +
+			"checks and reports the drift and changes nothing. The answer (dry run and commit alike) says which: mode align or check, optedIn, " +
+			"team, the planned changes from the inventory's last check (per step, with checkedAt) and a warning paragraph to show the person " +
+			"before they confirm. The record shows setup.pendingRun until the inventory has read the run's artifact (within " +
 			"seconds of the run completing) as setup.lastRun, with the run's change block (kind, by, pullRequest) — its failed steps and findings " +
 			"are on the record and in the run. The team's standup channel hears nothing about a dispatch: the sentences about who created, added, " +
 			"transferred, archived or deprecated a repository, and the failed steps and findings of that run, follow a merged pull request only. " +
@@ -656,7 +712,7 @@ func (t *tools) reconcileRepository() WriteTool {
 			"commit means: dispatch.",
 		Options: []mcp.ToolOption{
 			mcp.WithString(argRepository, mcp.Required(), mcp.Description("Repository name, with or without the org.")),
-			mcp.WithString(argTeam, mcp.Description("Team slug; required for a repository without an entry (it is then reconciled from the team alone), optional otherwise.")),
+			mcp.WithString(argTeam, mcp.Description("Team slug; required for a repository without an entry (it is then aligned from the team alone), optional otherwise.")),
 		},
 		DryRun: func(ctx context.Context, args map[string]any) (any, error) {
 			return t.dispatch(ctx, args, false)
@@ -695,6 +751,32 @@ func (t *tools) dispatch(ctx context.Context, args map[string]any, run bool) (*D
 		return nil, err
 	}
 	d.As, d.RunsURL = p.login, p.repo.WorkflowURL(workflow)
+	// The team's opt-in decides what the run does; the last check says what
+	// an alignment would apply. Both are in the answer for the person to read
+	// before confirming.
+	if team, _ := inputs[argTeam].(string); team != "" {
+		d.Team = team
+	} else if rec != nil && rec.Declaration != nil {
+		d.Team = rec.Declaration.Team
+	}
+	if d.Team != "" {
+		if pol, err := p.repo.Policy(ctx, d.Team); err == nil {
+			d.OptedIn = pol.AlignOptIn
+		}
+	}
+	d.Mode = DispatchModeCheck
+	if d.OptedIn {
+		d.Mode = DispatchModeAlign
+	}
+	if rec != nil && rec.Setup.Checks != nil {
+		d.CheckedAt = rec.Setup.Checks.FinishedAt.UTC().Format(time.RFC3339)
+		for _, s := range rec.Setup.Checks.Steps {
+			if s.Verdict == reconcile.VerdictDrift {
+				d.Planned = append(d.Planned, PlannedStep{Step: string(s.Step), Changes: s.Changes})
+			}
+		}
+	}
+	d.Warning = alignWarning("giantswarm/"+name, d.Team, d.OptedIn)
 	if !run {
 		return d, nil
 	}

@@ -141,11 +141,11 @@
                     "properties": {
                         "pollInterval": {
                             "type": "string",
-                            "description": "Read the reconciler workflow's completed runs from GitHub as the inventory App every interval (a Go duration) and store each run's `reconcile-<repository>` artifact as the repository's `setup.lastRun`; every 30 s while a Reconcile now (`reconcile_repository`) is pending. `\"0\"` turns the poller off. Nothing reaches the server from the workflow: the App needs Actions read on `teamFiles.repository`."
+                            "description": "Read the reconciler workflow's completed runs from GitHub as the inventory App every interval (a Go duration) and store each run's `reconcile-<repository>` artifact as the repository's `setup.lastRun`; every 30 s while a Align now (`align_repository`) is pending. `\"0\"` turns the poller off. Nothing reaches the server from the workflow: the App needs Actions read on `teamFiles.repository`."
                         },
                         "workflow": {
                             "type": "string",
-                            "description": "The reconciler's workflow file in `teamFiles.repository`: the one `reconcile_repository` dispatches and the poller reads the runs of."
+                            "description": "The reconciler's workflow file in `teamFiles.repository`: the one `align_repository` dispatches and the poller reads the runs of."
                         }
                     }
                 },
@@ -286,7 +286,7 @@
                         },
                         "timeout": {
                             "type": "integer",
-                            "description": "Seconds muster waits for one call before it cancels it (the CR's `spec.timeout`; muster's own default is 30, the CRD allows 1–300). 180 because `create_repository` in `mode: commit` does its writes in one call — create the repository, fetch and render the template, push the scaffold, open the pull request — and `reconcile_repository` and `set_lifecycle` with the ask come close to muster's default as well.",
+                            "description": "Seconds muster waits for one call before it cancels it (the CR's `spec.timeout`; muster's own default is 30, the CRD allows 1–300). 180 because `create_repository` in `mode: commit` does its writes in one call — create the repository, fetch and render the template, push the scaffold, open the pull request — and `align_repository` and `set_lifecycle` with the ask come close to muster's default as well.",
                             "maximum": 300,
                             "minimum": 1
                         }

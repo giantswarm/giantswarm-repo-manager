@@ -10,7 +10,7 @@ is what `get_repository` and `refresh_repository` return.
 | Trigger | What | Source |
 |---|---|---|
 | Schedule (`inventory.sweep.interval`, default `24h`) | Full sweep: every repository of the org, records of repositories that are neither on GitHub nor declared are removed; the summary is stored | `sweep` |
-| Reconciler poll (`inventory.reconciler.pollInterval`, default `5m`; every 30 s while a Reconcile now is pending) | One repository per `reconcile-<name>` artifact of a completed reconciler run, read from GitHub as the inventory App; the run is stored as `setup.lastRun` | `reconciler` |
+| Reconciler poll (`inventory.reconciler.pollInterval`, default `5m`; every 30 s while an Align now is pending) | One repository per `reconcile-<name>` artifact of a completed reconciler run, read from GitHub as the inventory App; the run is stored as `setup.lastRun` | `reconciler` |
 | Tool `refresh_repository` | One repository on demand | `refresh` |
 
 Every read fills `age` (now minus `refreshedAt`). A refresh rebuilds the whole record except `setup.lastRun`, which
@@ -37,7 +37,7 @@ the oldest run still open — running, or whose artifacts could not be read this
 newer one is not missed; it never lies more than seven days back (the first poll reads the last seven days). Without an
 inventory App or a store there is no poller (one log line at start); `pollInterval: "0"` turns it off.
 
-**Reconcile now.** `reconcile_repository` dispatches the workflow as the caller; a `workflow_dispatch` returns no run id,
+**Align now.** `align_repository` dispatches the workflow as the caller; a `workflow_dispatch` returns no run id,
 so the record carries `setup.pendingRun {dispatchedAt, by}` until the repository's next artifact arrives. While any
 `pendingRun` is younger than 15 minutes the poller runs every 30 s. After 15 minutes without an artifact the pending run
 becomes `setup.missingRun` with the finding `reconcile-run-missing` (`source: inventory`), whose fix names the workflow's
@@ -50,7 +50,7 @@ the row) carry the state the Repositories page shows.
 `workflowRun {id, url, attempt, event, trigger, devctl}`, `finishedAt` and `change {kind, by, pullRequest {number, url},
 fromTeam}` — the reconciler's classification of the team-file change the run followed: `kind` is `created` (the
 repository is younger than its pull request), `added` (an existing repository declared), `transferred` (`fromTeam` names
-the giving team), `archived`, `deprecated`, `changed` (any other edit), `dispatched` (a Reconcile now) or `nightly`; `by` is
+the giving team), `archived`, `deprecated`, `changed` (any other edit), `dispatched` (an Align now) or `nightly`; `by` is
 the pull request's author or the dispatching person (absent for the schedule). The poller stores the result unchanged as
 `lastRun.result`, with `workflowRun.url`, `finishedAt` and the change block as `lastRun.change`. The change block is what
 the message to the team's standup channel is rendered from (README, "Asks and messages go through Swarmgeist").
@@ -112,7 +112,7 @@ the message to the team's standup channel is rendered from (README, "Asks and me
     "checkError": "",                   // why checks is missing (no read identity, …); a refused entry has checks = the engine's Refused result
     "lastRun": {"result": {"…": "reconcile.Result"}, "runUrl": "…", "timestamp": "…", "runId": 1, "attempt": 1,
                 "change": {"kind": "created", "by": "alice", "pullRequest": {"number": 4711, "url": "…"}}},  // kind: created | added | transferred (+fromTeam) | archived | deprecated | changed | dispatched | nightly
-    "pendingRun": {"dispatchedAt": "…", "by": "alice"},     // a Reconcile now waiting for its run's artifact
+    "pendingRun": {"dispatchedAt": "…", "by": "alice"},     // an Align now waiting for its run's artifact
     "missingRun": {"dispatchedAt": "…", "by": "alice", "noticedAt": "…", "runsUrl": "…"}   // one that did not report in 15 min
   },
   "findings": [
@@ -127,7 +127,7 @@ the message to the team's standup channel is rendered from (README, "Asks and me
 ### Findings
 
 The inventory's own kinds (`source: inventory`): `declared-but-gone` (declaration, no repository), `undeclared-on-github`
-(repository, no declaration — archived ones included), `reconcile-run-missing` (a Reconcile now whose run did not report
+(repository, no declaration — archived ones included), `reconcile-run-missing` (an Align now whose run did not report
 within 15 minutes; the fix names the workflow's Actions page). The engine's kinds pass through with `source: engine`:
 `entry-refused` and `gen-circleci-refused` (the engine refuses the entry — `setup.checks` is its `Refused` result, the
 `entry` step reported and no step run, one finding per problem naming the field to fix), `repository-missing`, `renamed`,

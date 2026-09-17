@@ -17,7 +17,7 @@ import (
 // as the unattended identity — one sentence about the change when a person
 // made one, one per failed step and per finding of that person's run; nothing
 // when the run has nothing to tell, and nothing at all for a run nobody's
-// change is behind (a Reconcile now, the schedule). Nothing to approve.
+// change is behind (an Align now, the schedule). Nothing to approve.
 func (ts *Tools) Reconciled(ctx context.Context, rec *inventory.Record) {
 	t := ts.t
 	if rec == nil || rec.Declaration == nil || rec.Setup.LastRun == nil {
@@ -64,7 +64,7 @@ type Completion struct {
 // about the change when a person made one — created, added, transferred,
 // archived or deprecated the repository — then one sentence per failed step
 // and per finding of that person's run, each with what to do. A run nobody's
-// change is behind — a Reconcile now, the schedule, an artifact without a
+// change is behind — an Align now, the schedule, an artifact without a
 // change block — yields nothing, findings and failures included: the
 // reconciler doing its job is not news, and the nightly's findings would
 // repeat every night; they stay on the record and in the run's summary per
@@ -177,7 +177,7 @@ func changeLink(run *inventory.LastRun) string {
 }
 
 // failureSentence says which step failed for the repository, why, and what
-// to do: the run has the log, and a Reconcile now retries.
+// to do: the run has the log, and an Align now retries.
 func failureSentence(name string, st reconcile.StepResult) string {
 	why := ""
 	if st.Summary != "" {

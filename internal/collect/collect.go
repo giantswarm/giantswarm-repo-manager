@@ -414,7 +414,7 @@ func (c *Collector) build(name string, node *repoNode, src *sources, old *invent
 		rec.Setup = old.Setup
 	}
 	if run != nil {
-		// The run reported: a pending Reconcile now is answered, a missing
+		// The run reported: a pending Align now is answered, a missing
 		// one no longer is.
 		rec.Setup.LastRun, rec.Setup.PendingRun, rec.Setup.MissingRun = run, nil, nil
 	}

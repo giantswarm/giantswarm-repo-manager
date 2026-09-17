@@ -4,18 +4,52 @@ Generated from the registered tools (`make tools-doc`); through muster every too
 
 | Tool | Kind |
 |---|---|
+| `align_repository` | write (dryRun, mode: commit) |
 | `approve_change` | write (dryRun, mode: commit) |
 | `create_repository` | write (dryRun, mode: commit) |
 | `get_info` | read-only |
 | `get_repository` | read-only |
 | `list_repositories` | read-only |
-| `reconcile_repository` | write (dryRun, mode: commit) |
 | `refresh_repository` | cache annotation |
 | `set_lifecycle` | write (dryRun, mode: commit) |
 | `sweep_inventory` | cache annotation |
 | `transfer_repository` | write (dryRun, mode: commit) |
 | `update_repository` | write (dryRun, mode: commit) |
 | `validate_repository` | read-only |
+
+## `align_repository`
+
+WRITES (as you, with your own GitHub token through the App giantswarm-repo-manager). Align now: aligns one repository with its declared set-up and the company baseline by dispatching the reconcile-repositories workflow in giantswarm/github as you. WARNING — an alignment changes the repository on GitHub and CircleCI: merge settings (squash only, auto-merge, delete branch on merge, update branch), wiki and projects off, issues on, team permissions (employees admin, bots push), branch protection (one approving review, enforce_admins on, strict up-to-date, every reporting check required), the CircleCI follow and setup workflows, a CODEOWNERS pull request, description and visibility, lifecycle, catalog and mapping, and a missed release build. It does so only when the owning team has opted in (alignOptIn: true in repository-setup/<team>.yaml); for any other team the run checks and reports the drift and changes nothing. The answer (dry run and commit alike) says which: mode align or check, optedIn, team, the planned changes from the inventory's last check (per step, with checkedAt) and a warning paragraph to show the person before they confirm. The record shows setup.pendingRun until the inventory has read the run's artifact (within seconds of the run completing) as setup.lastRun, with the run's change block (kind, by, pullRequest) — its failed steps and findings are on the record and in the run. The team's standup channel hears nothing about a dispatch: the sentences about who created, added, transferred, archived or deprecated a repository, and the failed steps and findings of that run, follow a merged pull request only. A run that does not report within 15 minutes leaves the finding reconcile-run-missing. Nothing is written to the team files. Here mode commit means: dispatch. Every write takes dryRun and mode: dryRun: true returns the rendered change and writes nothing; mode: "commit" opens the team-file pull request as you and may take up to a minute (its writes run on GitHub within the call) — wait for the one answer. mode: "apply" is refused for every write tool (a repository without its declaration is drift), and mode is required unless dryRun is true.
+
+```json
+{
+  "properties": {
+    "dryRun": {
+      "description": "Render the change and write nothing (default false).",
+      "type": "boolean"
+    },
+    "mode": {
+      "description": "How the change lands: \"commit\" (a team-file pull request as you). \"apply\" is refused.",
+      "enum": [
+        "commit"
+      ],
+      "type": "string"
+    },
+    "repository": {
+      "description": "Repository name, with or without the org.",
+      "type": "string"
+    },
+    "team": {
+      "description": "Team slug; required for a repository without an entry (it is then aligned from the team alone), optional otherwise.",
+      "type": "string"
+    }
+  },
+  "required": [
+    "repository"
+  ],
+  "type": "object"
+}
+```
 
 ## `approve_change`
 
@@ -199,40 +233,6 @@ Read-only. The inventory of the org's repositories from the store: one row per r
     }
   },
   "required": [],
-  "type": "object"
-}
-```
-
-## `reconcile_repository`
-
-WRITES (as you, with your own GitHub token through the App giantswarm-repo-manager). Run the reconciler for one repository now (Reconcile now): dispatches the reconcile-repositories workflow in giantswarm/github as you, which runs the engine's set-up steps for that repository — settings, permissions, protection, CircleCI, Renovate check, CODEOWNERS, metadata, lifecycle, catalog, release. The record shows setup.pendingRun until the inventory has read the run's artifact (within seconds of the run completing) as setup.lastRun, with the run's change block (kind, by, pullRequest) — its failed steps and findings are on the record and in the run. The team's standup channel hears nothing about a dispatch: the sentences about who created, added, transferred, archived or deprecated a repository, and the failed steps and findings of that run, follow a merged pull request only. A run that does not report within 15 minutes leaves the finding reconcile-run-missing. Nothing is written to the team files. Here mode commit means: dispatch. Every write takes dryRun and mode: dryRun: true returns the rendered change and writes nothing; mode: "commit" opens the team-file pull request as you and may take up to a minute (its writes run on GitHub within the call) — wait for the one answer. mode: "apply" is refused for every write tool (a repository without its declaration is drift), and mode is required unless dryRun is true.
-
-```json
-{
-  "properties": {
-    "dryRun": {
-      "description": "Render the change and write nothing (default false).",
-      "type": "boolean"
-    },
-    "mode": {
-      "description": "How the change lands: \"commit\" (a team-file pull request as you). \"apply\" is refused.",
-      "enum": [
-        "commit"
-      ],
-      "type": "string"
-    },
-    "repository": {
-      "description": "Repository name, with or without the org.",
-      "type": "string"
-    },
-    "team": {
-      "description": "Team slug; required for a repository without an entry (it is then reconciled from the team alone), optional otherwise.",
-      "type": "string"
-    }
-  },
-  "required": [
-    "repository"
-  ],
   "type": "object"
 }
 ```

@@ -213,13 +213,15 @@ func (r Repo) FindEntry(ctx context.Context, name, hint string) (*TeamFile, erro
 // message of the set-up automation goes to — asks with an Approve button
 // (archive, deprecate, an incoming transfer, a repair review) to
 // SlackChannel, notices (what someone did, a failed step, a finding) to
-// StandupChannel — and the repair opt-in. Both channels are required; a file
-// without one is refused, nothing stands in for it.
+// StandupChannel — and the opt-in to alignment (AlignOptIn): without it the
+// automation checks the team's repositories and changes nothing. Both
+// channels are required; a file without one is refused, nothing stands in
+// for it.
 type Policy struct {
 	Team           string `json:"team" yaml:"-"`
 	SlackChannel   string `json:"slackChannel" yaml:"slackChannel"`
 	StandupChannel string `json:"standupChannel" yaml:"standupChannel"`
-	RepairOptIn    bool   `json:"repairOptIn" yaml:"repairOptIn"`
+	AlignOptIn     bool   `json:"alignOptIn" yaml:"alignOptIn"`
 }
 
 // Policy reads repository-setup/<team>.yaml.

@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -35,14 +36,25 @@ type fakeGitHub struct {
 	// files is the fake giantswarm/github: team files, policy files, pull
 	// requests, reviews, dispatches.
 	files *fakeTeamFiles
+	// repos are the org's other repositories: the ones create_repository
+	// creates and scaffolds, and the name checks' answers.
+	repos *fakeRepos
+	// roles are each login's role in the org (owner = admin); a login
+	// without one is not a member.
+	roles map[string]string
+	// writes records every non-GET call, in order: the proof of what a call
+	// wrote and in which order.
+	mu     sync.Mutex
+	writes []string
 }
 
 func newFakeGitHub(t *testing.T, logins map[string]string) *fakeGitHub {
 	t.Helper()
-	g := &fakeGitHub{logins: logins, teams: map[string][]string{}, org: &fakeOrg{remaining: 5000, now: time.Now()}, files: newFakeTeamFiles()}
+	g := &fakeGitHub{logins: logins, teams: map[string][]string{}, org: &fakeOrg{remaining: 5000, now: time.Now()}, files: newFakeTeamFiles(), repos: newFakeRepos(), roles: map[string]string{}}
 	mux := http.NewServeMux()
 	mux.HandleFunc("POST /api/v3/graphql", g.org.handle)
 	g.files.register(mux, g)
+	g.repos.register(mux, g)
 	mux.HandleFunc("GET /api/v3/user/teams", func(w http.ResponseWriter, r *http.Request) {
 		login, ok := g.logins[bearer(r)]
 		if !ok {
@@ -74,12 +86,23 @@ func newFakeGitHub(t *testing.T, logins map[string]string) *fakeGitHub {
 		}
 		writeJSON(w, http.StatusOK, map[string]any{kLogin: login, kID: userID(login)})
 	})
-	mux.HandleFunc("GET /api/v3/repos/{owner}/{repo}", func(w http.ResponseWriter, _ *http.Request) {
-		ghMessage(w, http.StatusNotFound, "Not Found")
-	})
-	g.Server = httptest.NewServer(mux)
+	g.Server = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			g.mu.Lock()
+			g.writes = append(g.writes, r.Method+" "+r.URL.Path)
+			g.mu.Unlock()
+		}
+		mux.ServeHTTP(w, r)
+	}))
 	t.Cleanup(g.Close)
 	return g
+}
+
+// written are the non-GET calls so far, in order.
+func (g *fakeGitHub) written() []string {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	return append([]string(nil), g.writes...)
 }
 
 // userID is a login's stable numeric id in the fake.

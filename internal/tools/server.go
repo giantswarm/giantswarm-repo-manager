@@ -10,6 +10,7 @@ import (
 	"log/slog"
 	"runtime/debug"
 
+	"github.com/giantswarm/devctl/v8/pkg/reposetup/reconcile"
 	"github.com/mark3labs/mcp-go/mcp"
 	mcpserver "github.com/mark3labs/mcp-go/server"
 
@@ -64,7 +65,12 @@ type Deps struct {
 	// Review is klaus-gateway's team-review endpoint; nil leaves the asks
 	// undelivered and reported as such.
 	Review *review.Client
-	Log    *slog.Logger
+	// Scaffold renders the scaffold create_repository pushes as the caller.
+	// nil is the engine's renderer over the templates on GitHub, downloaded
+	// with the caller's token (giantswarm/template is private); tests set a
+	// fixed one.
+	Scaffold reconcile.ScaffoldRenderer
+	Log      *slog.Logger
 }
 
 // NewMCPServer builds the MCP server with every tool registered.

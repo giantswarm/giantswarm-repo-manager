@@ -38,6 +38,9 @@ const (
 	kType          = "type"
 	kGitHub        = "github"
 	kSHA           = "sha"
+	kObject        = "object"
+	kDescription   = "description"
+	kHTMLURL       = "html_url"
 	kRef           = "ref"
 	kChartName     = "chartName"
 	argPullRequest = "pullRequest"
@@ -172,7 +175,7 @@ func (f *fakeTeamFiles) register(mux *http.ServeMux, g *fakeGitHub) {
 		f.mu.Lock()
 		defer f.mu.Unlock()
 		if sha, ok := f.refs[r.PathValue("ref")]; ok {
-			writeJSON(w, http.StatusOK, map[string]any{kRef: "refs/" + r.PathValue(kRef), "object": map[string]any{kSHA: sha, kType: modeCommit}})
+			writeJSON(w, http.StatusOK, map[string]any{kRef: "refs/" + r.PathValue(kRef), kObject: map[string]any{kSHA: sha, kType: modeCommit}})
 			return
 		}
 		ghMessage(w, http.StatusNotFound, "Not Found")
@@ -226,6 +229,18 @@ func (f *fakeTeamFiles) register(mux *http.ServeMux, g *fakeGitHub) {
 		f.next++
 		writeJSON(w, http.StatusCreated, f.pullJSON(pr))
 	})
+	mux.HandleFunc("GET "+base+"/pulls", func(w http.ResponseWriter, r *http.Request) {
+		head := strings.TrimPrefix(r.URL.Query().Get("head"), org+":")
+		f.mu.Lock()
+		defer f.mu.Unlock()
+		out := []map[string]any{}
+		for _, pr := range f.pulls {
+			if head == "" || pr.Head == head {
+				out = append(out, f.pullJSON(pr))
+			}
+		}
+		writeJSON(w, http.StatusOK, out)
+	})
 	mux.HandleFunc("GET "+base+"/pulls/{n}", func(w http.ResponseWriter, r *http.Request) {
 		f.mu.Lock()
 		defer f.mu.Unlock()
@@ -261,7 +276,7 @@ func (f *fakeTeamFiles) register(mux *http.ServeMux, g *fakeGitHub) {
 			return
 		}
 		pr.Reviews = append(pr.Reviews, fakeReview{User: login, Event: req.Event, Body: req.Body})
-		writeJSON(w, http.StatusOK, map[string]any{kID: len(pr.Reviews), kState: "APPROVED", "html_url": fmt.Sprintf("https://github.com/%s/github/pull/%d#pullrequestreview-%d", org, pr.Number, len(pr.Reviews)), "user": map[string]any{kLogin: login}})
+		writeJSON(w, http.StatusOK, map[string]any{kID: len(pr.Reviews), kState: "APPROVED", kHTMLURL: fmt.Sprintf("https://github.com/%s/github/pull/%d#pullrequestreview-%d", org, pr.Number, len(pr.Reviews)), "user": map[string]any{kLogin: login}})
 	})
 	mux.HandleFunc("POST "+base+"/actions/workflows/{file}/dispatches", func(w http.ResponseWriter, r *http.Request) {
 		body, _ := io.ReadAll(r.Body)
@@ -282,7 +297,7 @@ func (f *fakeTeamFiles) pull(r *http.Request) *fakePullRequest {
 }
 
 func (f *fakeTeamFiles) pullJSON(pr *fakePullRequest) map[string]any {
-	return map[string]any{"number": pr.Number, "title": pr.Title, "body": pr.Body, "html_url": fmt.Sprintf("https://github.com/%s/github/pull/%d", org, pr.Number),
+	return map[string]any{"number": pr.Number, "title": pr.Title, "body": pr.Body, kHTMLURL: fmt.Sprintf("https://github.com/%s/github/pull/%d", org, pr.Number),
 		"user": map[string]any{kLogin: pr.Author}, "head": map[string]any{kRef: pr.Head}, "created_at": time.Now().UTC().Format(time.RFC3339)}
 }
 

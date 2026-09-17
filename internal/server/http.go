@@ -1,8 +1,8 @@
 // Package server assembles the single HTTP listener: the health endpoints the
-// chart probes and the MCP streamable-HTTP endpoint behind the OAuth guard.
+// chart probes and the MCP streamable-HTTP endpoint behind the bearer guard.
 // Without OAuth there is no authentication and no caller: only a server
 // nothing but a trusted proxy can reach runs that way, and every tool then
-// reports an anonymous caller without a GitHub grant.
+// reports an anonymous caller who nothing acts as.
 package server
 
 import (
@@ -20,8 +20,8 @@ import (
 type Config struct {
 	Addr    string
 	MCPPath string
-	// OAuth, when set, makes the MCP endpoint require a bearer token the
-	// platform IdP issued (forwarded by muster) or this server's own.
+	// OAuth, when set, makes the MCP endpoint require a GitHub user token as
+	// the bearer — behind muster the person's — verified with GET /user.
 	OAuth *OAuthConfig
 	// Internal, when set, serves /internal/ — the reconciler's refresh trigger
 	// and the sweep control, authenticated by their own static token.
@@ -37,7 +37,7 @@ const InternalPrefix = "/internal/"
 // Server is the assembled HTTP server.
 type Server struct {
 	http  *http.Server
-	oauth *oauthRuntime
+	guard *bearerGuard
 	log   *slog.Logger
 }
 
@@ -53,20 +53,20 @@ func New(cfg Config, mcpSrv *mcpserver.MCPServer, log *slog.Logger) (*Server, er
 	mux.HandleFunc("GET /healthz", ok)
 	// Readiness is the store's: a Valkey that is not there yet or is lost
 	// keeps the pod unready — the Deployment shows it — while the process
-	// stays up and answers the identity tools. GitHub and muster are not
-	// tracked; their failures are read from get_info.
+	// stays up and answers the identity tools. GitHub is not tracked; its
+	// failures are read from get_info.
 	mux.HandleFunc("GET /readyz", readiness(cfg.Ready))
 
 	s := &Server{log: log}
 	if cfg.OAuth != nil {
-		o, err := newOAuth(*cfg.OAuth, cfg.MCPPath, log)
+		g, err := newBearerGuard(*cfg.OAuth, cfg.MCPPath, log)
 		if err != nil {
 			return nil, err
 		}
-		o.register(mux)
-		s.oauth = o
+		g.register(mux)
+		s.guard = g
 	}
-	mux.Handle(cfg.MCPPath, s.guard(mcpserver.NewStreamableHTTPServer(mcpSrv, mcpserver.WithEndpointPath(cfg.MCPPath))))
+	mux.Handle(cfg.MCPPath, s.protect(mcpserver.NewStreamableHTTPServer(mcpSrv, mcpserver.WithEndpointPath(cfg.MCPPath))))
 	if cfg.Internal != nil {
 		mux.Handle(InternalPrefix, cfg.Internal)
 	}
@@ -106,12 +106,12 @@ func readiness(check func(context.Context) error) http.HandlerFunc {
 	}
 }
 
-// guard requires an authenticated caller when OAuth is on.
-func (s *Server) guard(next http.Handler) http.Handler {
-	if s.oauth == nil {
+// protect requires a verified caller when OAuth is on.
+func (s *Server) protect(next http.Handler) http.Handler {
+	if s.guard == nil {
 		return next
 	}
-	return s.oauth.protect(next)
+	return s.guard.protect(next)
 }
 
 // Handler exposes the mux (tests).
@@ -135,9 +135,6 @@ func (s *Server) Run(ctx context.Context) error {
 	}
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
-	if s.oauth != nil {
-		s.oauth.shutdown(shutdownCtx)
-	}
 	if err := s.http.Shutdown(shutdownCtx); err != nil {
 		return fmt.Errorf("shutdown: %w", err)
 	}

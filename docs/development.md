@@ -10,17 +10,18 @@ make build-linux-amd64  # the binary the Dockerfile expects
 make docker-build       # a local image, giantswarm-repo-manager:dev
 ```
 
-`internal/e2e` starts the server in-process behind fakes — a Dex (TLS, RS256 tokens), muster's token
-broker, GitHub — and calls it through a real MCP client with the forwarded `id_token` as the bearer.
+`internal/e2e` starts the server in-process behind fakes — GitHub (the person's `GET /user` and teams,
+the App), giantswarm/github, klaus-gateway — and calls it through a real MCP client with the person's
+GitHub user token as the bearer, the way muster does.
 `tests/scenarios` are muster scenarios (`muster test --config tests/scenarios`); the CI job
 `scenario-test` (`.circleci/custom.yml`) runs both against a Valkey service container.
 
 ## Running locally
 
 Every flag has an environment variable (`giantswarm-repo-manager -h`). Without OAuth the server answers
-anonymously — `get_info` reports no caller and no grant; with `--enable-oauth` it needs a Dex
-(`--dex-issuer-url`, `--dex-client-id`, `--dex-client-secret`, `--oauth-trusted-audiences`) and a public
-base URL. The broker client (`--muster-url`, `--broker-client-id`, `--broker-client-secret`), the App
+anonymously — `get_info` reports no caller (`auth.mode: none`); with `--enable-oauth` every MCP request
+needs a GitHub user token as the bearer (verified with `GET /user`), `--oauth-base-url` names the resource
+of the protected-resource metadata and `--oauth-authorization-server` the pinned App. The App
 (`--github-app-*`) and the store (`--valkey-addr`) are each optional and reported by `get_info`.
 
 The image only assembles the runtime around the binary CircleCI's `go-build` produces; it is not a

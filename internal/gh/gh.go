@@ -1,9 +1,10 @@
-// Package gh holds the GitHub identities this server uses: the
-// giantswarm-align-files App installation (unattended, read-only inventory
-// reads on its own rate budget) and the person, through the grant the broker
-// client released. Nothing here writes as the App on a person's behalf. In
-// development a personal token can stand in for the App (TokenReader); it
-// then draws from that person's budget.
+// Package gh holds the GitHub identities this server uses: the App
+// installation for unattended, read-only inventory reads on its own rate
+// budget, and the person, through the GitHub user token muster puts on every
+// call (the person's authorization of the App giantswarm-repo-manager).
+// Nothing here writes as an App on a person's behalf. In development a
+// personal token can stand in for the read App (TokenReader); it then draws
+// from that person's budget.
 package gh
 
 import (
@@ -199,24 +200,24 @@ func (t *bearerTransport) RoundTrip(req *http.Request) (*http.Response, error) {
 	return t.base.RoundTrip(r)
 }
 
-// AsPerson returns a client that calls GitHub with the person's released
-// grant — every write goes through it.
+// AsPerson returns a client that calls GitHub with the person's user token —
+// every write goes through it.
 func AsPerson(apiURL, accessToken string) (*github.Client, error) {
 	return newClient(apiURL, github.WithAuthToken(accessToken))
 }
 
-// Login is the login of the person the token belongs to (GET /user) — the
-// read call that proves a released grant works.
-func Login(ctx context.Context, apiURL, accessToken string) (string, error) {
+// User is the person the token belongs to (GET /user): the call that verifies
+// a bearer. A refusal keeps GitHub's *github.ErrorResponse in the chain.
+func User(ctx context.Context, apiURL, accessToken string) (login string, id int64, err error) {
 	c, err := AsPerson(apiURL, accessToken)
 	if err != nil {
-		return "", err
+		return "", 0, err
 	}
 	u, _, err := c.Users.Get(ctx, "")
 	if err != nil {
-		return "", fmt.Errorf("github: GET /user as the person: %w", err)
+		return "", 0, fmt.Errorf("github: GET /user as the person: %w", err)
 	}
-	return u.GetLogin(), nil
+	return u.GetLogin(), u.GetID(), nil
 }
 
 // newClient builds a go-github client with a 15 s timeout, against apiURL

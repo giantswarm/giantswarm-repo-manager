@@ -19,7 +19,7 @@ Generated from the registered tools (`TOOLS_DOC_UPDATE=1 go test ./internal/tool
 
 ## `approve_change`
 
-WRITES (as you, through your GitHub grant). Approve a team-file pull request as you, after this server has checked on GitHub that you are a member of the team the change belongs to (the owning team; for a transfer the receiving team). The Approve button of a Slack ask calls this tool as the clicking member; a member may also call it directly, and approving on GitHub is equivalent. A non-member is refused. Every write takes dryRun and mode: dryRun: true returns the rendered change and writes nothing; mode: "commit" opens the team-file pull request as you. mode: "apply" is refused for every write tool (a repository without its declaration is drift), and mode is required unless dryRun is true.
+WRITES (as you, with your own GitHub token through the App giantswarm-repo-manager). Approve a team-file pull request as you, after this server has checked on GitHub that you are a member of the team the change belongs to (the owning team; for a transfer the receiving team). The Approve button of a Slack ask calls this tool as the clicking member; a member may also call it directly, and approving on GitHub is equivalent. A non-member is refused. Every write takes dryRun and mode: dryRun: true returns the rendered change and writes nothing; mode: "commit" opens the team-file pull request as you. mode: "apply" is refused for every write tool (a repository without its declaration is drift), and mode is required unless dryRun is true.
 
 ```json
 {
@@ -49,7 +49,7 @@ WRITES (as you, through your GitHub grant). Approve a team-file pull request as 
 
 ## `create_repository`
 
-WRITES (as you, through your GitHub grant). Declare one or more new repositories of the giantswarm org: entries added to the team's file (repositories/<team>.yaml in giantswarm/github); the reconciler creates and scaffolds the repositories once the pull request merges. The dry run is validate_repository's result; refusals are data (entries[].problems), an error means the validation could not run. mode commit opens the pull request as you — machine-approved when you are in the team (or team-planeteers) and at most three entries are added, else your team reviews it. Every write takes dryRun and mode: dryRun: true returns the rendered change and writes nothing; mode: "commit" opens the team-file pull request as you. mode: "apply" is refused for every write tool (a repository without its declaration is drift), and mode is required unless dryRun is true.
+WRITES (as you, with your own GitHub token through the App giantswarm-repo-manager). Declare one or more new repositories of the giantswarm org: entries added to the team's file (repositories/<team>.yaml in giantswarm/github); the reconciler creates and scaffolds the repositories once the pull request merges. The dry run is validate_repository's result; refusals are data (entries[].problems), an error means the validation could not run. mode commit opens the pull request as you — machine-approved when you are in the team (or team-planeteers) and at most three entries are added, else your team reviews it. Every write takes dryRun and mode: dryRun: true returns the rendered change and writes nothing; mode: "commit" opens the team-file pull request as you. mode: "apply" is refused for every write tool (a repository without its declaration is drift), and mode is required unless dryRun is true.
 
 ```json
 {
@@ -128,7 +128,7 @@ Leave a decision note on a repository's inventory record as you (verdict keep, w
 
 ## `get_info`
 
-Read-only. Report the service version and the identity chain of this call: the caller muster forwarded (subject, email, groups), whether the caller's GitHub grant was obtained from muster's token broker and the GitHub login it belongs to (proven with a read call), the App identity used for unattended inventory reads, the inventory store, the engine (devctl reposetup package) and the write modes. Call first.
+Read-only. Report the service version and how this call is authenticated: the caller (the GitHub login and id GET /user answered for the bearer muster put on the call — the person's own user token through the App giantswarm-repo-manager) and the authorization server pinned for it, the App identity used for unattended inventory reads, the inventory store, the engine (devctl reposetup package) and the write modes. Call first.
 
 ```json
 {
@@ -163,7 +163,7 @@ Read-only. The full inventory record of one repository: declaration, GitHub real
 
 ## `list_repositories`
 
-Read-only. The inventory of the org's repositories from the store: one row per repository with team, lifecycle, visibility, orphan score and reasons, finding kinds, set-up state and record age, sorted by orphan score, plus the last sweep's summary. Scope per caller: mine (the teams you belong to — your GitHub teams through your grant, else your IdP groups), team (the team argument, or your teams), unassigned (on GitHub without a declaration), all. Filters as on the Repositories page: search, renovate, team including none, visibility, fork, lifecycle, inactiveDays, minOrphanScore, decision, finding. get_repository has the full record.
+Read-only. The inventory of the org's repositories from the store: one row per repository with team, lifecycle, visibility, orphan score and reasons, finding kinds, set-up state and record age, sorted by orphan score, plus the last sweep's summary. Scope per caller: mine (the teams you belong to on GitHub, read as you), team (the team argument, or your teams), unassigned (on GitHub without a declaration), all. Filters as on the Repositories page: search, renovate, team including none, visibility, fork, lifecycle, inactiveDays, minOrphanScore, decision, finding. get_repository has the full record.
 
 ```json
 {
@@ -248,7 +248,7 @@ Read-only. The inventory of the org's repositories from the store: one row per r
 
 ## `reconcile_repository`
 
-WRITES (as you, through your GitHub grant). Run the reconciler for one repository now (Reconcile now): dispatches the reconcile-repositories workflow in giantswarm/github as you, which runs the engine's set-up steps for that repository — settings, permissions, protection, CircleCI, Renovate check, CODEOWNERS, metadata, lifecycle, catalog, release — and then refreshes its inventory record with the run as lastRun; the completion message follows in the team's channel. Nothing is written to the team files. Here mode commit means: dispatch. Every write takes dryRun and mode: dryRun: true returns the rendered change and writes nothing; mode: "commit" opens the team-file pull request as you. mode: "apply" is refused for every write tool (a repository without its declaration is drift), and mode is required unless dryRun is true.
+WRITES (as you, with your own GitHub token through the App giantswarm-repo-manager). Run the reconciler for one repository now (Reconcile now): dispatches the reconcile-repositories workflow in giantswarm/github as you, which runs the engine's set-up steps for that repository — settings, permissions, protection, CircleCI, Renovate check, CODEOWNERS, metadata, lifecycle, catalog, release — and then refreshes its inventory record with the run as lastRun; the completion message follows in the team's channel. Nothing is written to the team files. Here mode commit means: dispatch. Every write takes dryRun and mode: dryRun: true returns the rendered change and writes nothing; mode: "commit" opens the team-file pull request as you. mode: "apply" is refused for every write tool (a repository without its declaration is drift), and mode is required unless dryRun is true.
 
 ```json
 {
@@ -301,7 +301,7 @@ Rebuild one repository's inventory record now from GitHub, CircleCI and the team
 
 ## `set_lifecycle`
 
-WRITES (as you, through your GitHub grant). Deprecate or archive a declared repository by setting lifecycle in its team-file entry. deprecated: security-only Renovate and a catalog flag. archived: the reconciler archives the repository on GitHub and unfollows it on CircleCI; the entry stays as the record. Deletion is not expressible. The ask goes to the owning team's channel; a member's Approve (or an approving review on GitHub) lands it. Every write takes dryRun and mode: dryRun: true returns the rendered change and writes nothing; mode: "commit" opens the team-file pull request as you. mode: "apply" is refused for every write tool (a repository without its declaration is drift), and mode is required unless dryRun is true.
+WRITES (as you, with your own GitHub token through the App giantswarm-repo-manager). Deprecate or archive a declared repository by setting lifecycle in its team-file entry. deprecated: security-only Renovate and a catalog flag. archived: the reconciler archives the repository on GitHub and unfollows it on CircleCI; the entry stays as the record. Deletion is not expressible. The ask goes to the owning team's channel; a member's Approve (or an approving review on GitHub) lands it. Every write takes dryRun and mode: dryRun: true returns the rendered change and writes nothing; mode: "commit" opens the team-file pull request as you. mode: "apply" is refused for every write tool (a repository without its declaration is drift), and mode is required unless dryRun is true.
 
 ```json
 {
@@ -344,7 +344,7 @@ WRITES (as you, through your GitHub grant). Deprecate or archive a declared repo
 
 ## `transfer_repository`
 
-WRITES (as you, through your GitHub grant). Move a declared repository to another team: its entry leaves the giving team's file and enters the receiving team's file in one pull request that names both teams. The ask goes to the receiving team's channel (its member approves), the giving team gets a notice. The reconciler then re-applies permissions, CODEOWNERS and the catalog mapping for the new owner. Every write takes dryRun and mode: dryRun: true returns the rendered change and writes nothing; mode: "commit" opens the team-file pull request as you. mode: "apply" is refused for every write tool (a repository without its declaration is drift), and mode is required unless dryRun is true.
+WRITES (as you, with your own GitHub token through the App giantswarm-repo-manager). Move a declared repository to another team: its entry leaves the giving team's file and enters the receiving team's file in one pull request that names both teams. The ask goes to the receiving team's channel (its member approves), the giving team gets a notice. The reconciler then re-applies permissions, CODEOWNERS and the catalog mapping for the new owner. Every write takes dryRun and mode: dryRun: true returns the rendered change and writes nothing; mode: "commit" opens the team-file pull request as you. mode: "apply" is refused for every write tool (a repository without its declaration is drift), and mode is required unless dryRun is true.
 
 ```json
 {
@@ -383,7 +383,7 @@ WRITES (as you, through your GitHub grant). Move a declared repository to anothe
 
 ## `update_repository`
 
-WRITES (as you, through your GitHub grant). Change the configuration of a declared repository: its team-file entry is replaced by the entry you pass (the whole entry — name, componentType, gen and every other field as it should read afterwards). The entry is validated against the repositories schema (not the creation rules, which apply to new repositories only); the reconciler applies the change after the team's review. Use set_lifecycle to deprecate or archive and transfer_repository to move a repository to another team. Every write takes dryRun and mode: dryRun: true returns the rendered change and writes nothing; mode: "commit" opens the team-file pull request as you. mode: "apply" is refused for every write tool (a repository without its declaration is drift), and mode is required unless dryRun is true.
+WRITES (as you, with your own GitHub token through the App giantswarm-repo-manager). Change the configuration of a declared repository: its team-file entry is replaced by the entry you pass (the whole entry — name, componentType, gen and every other field as it should read afterwards). The entry is validated against the repositories schema (not the creation rules, which apply to new repositories only); the reconciler applies the change after the team's review. Use set_lifecycle to deprecate or archive and transfer_repository to move a repository to another team. Every write takes dryRun and mode: dryRun: true returns the rendered change and writes nothing; mode: "commit" opens the team-file pull request as you. mode: "apply" is refused for every write tool (a repository without its declaration is drift), and mode is required unless dryRun is true.
 
 ```json
 {

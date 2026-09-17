@@ -16,9 +16,10 @@ import (
 	"github.com/giantswarm/giantswarm-repo-manager/internal/tools"
 )
 
-// The nine tools against the fakes: GitHub (org GraphQL, the team-files
-// repository with its git data, pull requests, reviews and dispatches), the
-// broker, Dex, klaus-gateway's team-review endpoint and a seeded store.
+// The nine tools against the fakes: GitHub (the person behind their user
+// token, org GraphQL, the team-files repository with its git data, pull
+// requests, reviews and dispatches), klaus-gateway's team-review endpoint and
+// a seeded store.
 
 var newEntry = map[string]any{
 	kName: "shiny-service", kComponentType: kService,
@@ -30,7 +31,7 @@ var newEntry = map[string]any{
 // notices — team-review for an outsider, batch-review above three entries.
 func TestValidateRepositoryRendersAndRefuses(t *testing.T) {
 	st := newStack(t)
-	asAlice := st.as(t, st.idp.mint(t, alice, aliceEmail))
+	asAlice := st.as(t, aliceToken)
 	var v tools.Validation
 	st.callJSON(t, asAlice, tools.ToolValidateRepository, map[string]any{argTeam: team, argEntry: newEntry}, &v)
 	if !v.Accepted || len(v.Entries) != 1 || v.Entries[0].Template != "giantswarm/template" || v.Entries[0].NameCheck.Verdict != "free" ||
@@ -44,7 +45,7 @@ func TestValidateRepositoryRendersAndRefuses(t *testing.T) {
 		t.Errorf("refusal should be data: %+v", v.Result)
 	}
 
-	asCarol := st.as(t, st.idp.mint(t, carol, "carol@example.com"))
+	asCarol := st.as(t, carolToken)
 	st.callJSON(t, asCarol, tools.ToolValidateRepository, map[string]any{argTeam: team, argEntry: newEntry}, &v)
 	if !v.Accepted || v.MachineApproved || len(v.Notices) != 1 || string(v.Notices[0].Kind) != "team-review" {
 		t.Errorf("outsider should see the team-review notice: %+v", v.Notices)
@@ -64,7 +65,7 @@ func TestValidateRepositoryRendersAndRefuses(t *testing.T) {
 // TestCreateDryRunOpensNothingAndApplyIsRefusedEverywhere.
 func TestCreateDryRunOpensNothingAndApplyIsRefusedEverywhere(t *testing.T) {
 	st := newStack(t)
-	c := st.as(t, st.idp.mint(t, alice, aliceEmail))
+	c := st.as(t, aliceToken)
 	text, isErr := call(t, c, tools.ToolCreateRepository, map[string]any{argDryRun: true, argTeam: team, argEntry: newEntry})
 	if isErr || !strings.Contains(text, `"accepted": true`) {
 		t.Errorf("dry run: isError=%v %s", isErr, text)
@@ -84,17 +85,12 @@ func TestCreateDryRunOpensNothingAndApplyIsRefusedEverywhere(t *testing.T) {
 }
 
 // TestCreateCommitOpensThePullRequestAsThePerson: alice's commit is a
-// creation-only pull request under her name; a person without a grant is
-// told to connect GitHub and nothing opens.
+// creation-only pull request under her name (a person without a token never
+// reaches the tool: the endpoint is a 401, identity_chain_test.go).
 func TestCreateCommitOpensThePullRequestAsThePerson(t *testing.T) {
 	st := newStack(t)
-	bob := st.as(t, st.idp.mint(t, bob, "bob@example.com"))
-	text, isErr := call(t, bob, tools.ToolCreateRepository, map[string]any{argMode: modeCommit, argTeam: team, argEntry: newEntry})
-	if !isErr || !strings.Contains(text, "connect GitHub") {
-		t.Errorf("bob without a grant: isError=%v %s", isErr, text)
-	}
 	var out tools.Committed
-	st.callJSON(t, st.as(t, st.idp.mint(t, alice, aliceEmail)), tools.ToolCreateRepository, map[string]any{argMode: modeCommit, argTeam: team, argEntry: newEntry, "reason": "the shiny thing"}, &out)
+	st.callJSON(t, st.as(t, aliceToken), tools.ToolCreateRepository, map[string]any{argMode: modeCommit, argTeam: team, argEntry: newEntry, "reason": "the shiny thing"}, &out)
 	prs := st.ghs.files.pullRequests()
 	if len(prs) != 1 || out.PullRequest == nil || out.PullRequest.Number != prs[0].Number || prs[0].Author != alice || out.PullRequest.Author != alice {
 		t.Fatalf("pull request as alice: %+v %+v", out.PullRequest, prs)
@@ -112,7 +108,7 @@ func TestCreateCommitOpensThePullRequestAsThePerson(t *testing.T) {
 // team the notice.
 func TestTransferNamesBothTeams(t *testing.T) {
 	st := newStack(t)
-	c := st.as(t, st.idp.mint(t, alice, aliceEmail))
+	c := st.as(t, aliceToken)
 	var plan tools.Plan
 	st.callJSON(t, c, tools.ToolTransferRepository, map[string]any{argDryRun: true, kRepository: repoPresent, argToTeam: teamPlaneteers}, &plan)
 	if plan.Team != teamPlaneteers || plan.FromTeam != team || len(plan.PullRequest.Files) != 2 || plan.Ask == nil || !plan.Ask.Deliverable || plan.Ask.Channel != planeteersChannel ||
@@ -138,7 +134,7 @@ func TestTransferNamesBothTeams(t *testing.T) {
 // approve_change refuses the outsider and lands the member's review.
 func TestSetLifecycleArchivedAndApproveChange(t *testing.T) {
 	st := newStack(t)
-	c := st.as(t, st.idp.mint(t, alice, aliceEmail))
+	c := st.as(t, aliceToken)
 	var out tools.Committed
 	st.callJSON(t, c, tools.ToolSetLifecycle, map[string]any{argMode: modeCommit, kRepository: repoPresent, argLifecycle: "archived", "reason": "superseded"}, &out)
 	pr := st.ghs.files.pullRequests()[0]
@@ -159,7 +155,7 @@ func TestSetLifecycleArchivedAndApproveChange(t *testing.T) {
 	}
 
 	// The clicking member is carol — not in team-bumblebee: refused, no review.
-	text, isErr := call(t, st.as(t, st.idp.mint(t, carol, "carol@example.com")), tools.ToolApproveChange, map[string]any{argMode: modeCommit, argPullRequest: pr.Number})
+	text, isErr := call(t, st.as(t, carolToken), tools.ToolApproveChange, map[string]any{argMode: modeCommit, argPullRequest: pr.Number})
 	if !isErr || !strings.Contains(text, "not a member") || len(pr.Reviews) != 0 {
 		t.Errorf("carol: isError=%v %s reviews=%v", isErr, text, pr.Reviews)
 	}
@@ -174,7 +170,7 @@ func TestSetLifecycleArchivedAndApproveChange(t *testing.T) {
 // place, the rest of the file is byte-identical, the schema judges it.
 func TestUpdateRepositoryReplacesOneEntry(t *testing.T) {
 	st := newStack(t)
-	c := st.as(t, st.idp.mint(t, alice, aliceEmail))
+	c := st.as(t, aliceToken)
 	entry := map[string]any{"name": repoPresent, kComponentType: kService, "description": "now described",
 		kGen: map[string]any{kLanguage: kGo, kFlavours: []any{kApp}, kCI: map[string]any{kChartName: repoPresent}}}
 	var plan tools.Plan
@@ -214,7 +210,7 @@ func TestListScopesPerCaller(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	c := st.as(t, st.idp.mint(t, alice, aliceEmail))
+	c := st.as(t, aliceToken)
 	names := func(args map[string]any) []string {
 		var l tools.Listing
 		st.callJSON(t, c, tools.ToolListRepositories, args, &l)
@@ -244,19 +240,17 @@ func TestListScopesPerCaller(t *testing.T) {
 			t.Errorf("%v: got %q want %q", tc.args, got, tc.want)
 		}
 	}
-	// bob has no grant: his teams come from the IdP groups (the fake Dex
-	// puts everyone in team-bumblebee).
-	var l tools.Listing
-	st.callJSON(t, st.as(t, st.idp.mint(t, bob, "bob@example.com")), tools.ToolListRepositories, map[string]any{argScope: "mine"}, &l)
-	if l.TeamsSource != "idp-groups" || strings.Join(l.Teams, ",") != team || l.Matched != 2 {
-		t.Errorf("bob's scope mine: teams=%v/%s matched=%d", l.Teams, l.TeamsSource, l.Matched)
+	// dave is in no team: scope mine has nothing to scope to and says so.
+	text, isErr := call(t, st.as(t, daveToken), tools.ToolListRepositories, map[string]any{argScope: "mine"})
+	if !isErr || !strings.Contains(text, "no team known for you (none)") {
+		t.Errorf("dave's scope mine: isError=%v %s", isErr, text)
 	}
 }
 
 // TestReconcileDispatchesAsThePersonAndTheCompletionMessageFollows.
 func TestReconcileDispatchesAsThePersonAndTheCompletionMessageFollows(t *testing.T) {
 	st := newStack(t)
-	c := st.as(t, st.idp.mint(t, alice, aliceEmail))
+	c := st.as(t, aliceToken)
 	var d tools.Dispatch
 	st.callJSON(t, c, tools.ToolReconcileRepository, map[string]any{argDryRun: true, kRepository: repoPresent}, &d)
 	if d.Dispatched || d.As != alice || d.Workflow != "reconcile-repositories.yaml" || len(st.ghs.files.dispatches) != 0 {

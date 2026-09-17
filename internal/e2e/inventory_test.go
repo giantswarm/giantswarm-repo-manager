@@ -101,7 +101,7 @@ func TestInventoryToolsAndReconcilerRefresh(t *testing.T) {
 	if _, err := st.col.Sweep(ctx); err != nil {
 		t.Fatal(err)
 	}
-	c := st.as(t, st.idp.mint(t, alice, aliceEmail))
+	c := st.as(t, aliceToken)
 
 	var all tools.Listing
 	st.callJSON(t, c, tools.ToolListRepositories, nil, &all)

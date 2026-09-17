@@ -192,7 +192,7 @@ func TestGetInfoWithoutComponents(t *testing.T) {
 	if err := json.Unmarshal([]byte(text), &info); err != nil {
 		t.Fatal(err)
 	}
-	if info.Caller != nil || info.GitHub.Grant.Obtained || info.GitHub.Grant.Reason == "" || info.GitHub.AppError == "" ||
+	if info.Caller != nil || info.Auth.Mode != AuthModeNone || info.Auth.Reason == "" || info.GitHub.AppError == "" ||
 		info.Inventory.Connected || !info.Capabilities.ApplyRefused || info.Engine.Package != engineModule+"/pkg/reposetup" {
 		t.Errorf("unexpected info: %s", text)
 	}

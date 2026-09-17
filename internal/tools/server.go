@@ -1,20 +1,17 @@
 // Package tools is the MCP surface: behind muster the tools appear as
-// x_giantswarm-repo-manager_<tool>. get_info proves the identity chain; the
+// x_giantswarm-repo-manager_<tool>. get_info reports who the call runs as; the
 // write tools go through the framework in write.go.
 package tools
 
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"log/slog"
 	"runtime/debug"
-	"time"
 
 	"github.com/mark3labs/mcp-go/mcp"
 	mcpserver "github.com/mark3labs/mcp-go/server"
 
-	"github.com/giantswarm/giantswarm-repo-manager/internal/broker"
 	"github.com/giantswarm/giantswarm-repo-manager/internal/collect"
 	"github.com/giantswarm/giantswarm-repo-manager/internal/gh"
 	"github.com/giantswarm/giantswarm-repo-manager/internal/identity"
@@ -47,8 +44,11 @@ type Deps struct {
 	// GitHubAPIURL is the API base URL person and App calls go to (empty:
 	// api.github.com; the fake in tests).
 	GitHubAPIURL string
-	Broker       *broker.Client
-	App          *gh.App
+	// AuthorizationServer is the issuer identity muster pins for this server
+	// (the App giantswarm-repo-manager's), reported by get_info; empty when
+	// the server runs without OAuth.
+	AuthorizationServer string
+	App                 *gh.App
 	// Reader is the unattended read identity when it is not the App (the
 	// development token); nil when App is set or nothing reads.
 	Reader    *gh.Reader
@@ -88,10 +88,10 @@ func (ts *Tools) MCPServer() *mcpserver.MCPServer {
 	d, t := ts.t.d, ts.t
 	s := mcpserver.NewMCPServer(ToolPrefix, d.Version,
 		mcpserver.WithToolCapabilities(false),
-		mcpserver.WithInstructions("Giant Swarm's repository set-up service. The team files in giantswarm/github (repositories/team-*.yaml) are the desired state of every repository; GitHub is the reality. Call get_info first: it reports who you are to this server, whether your GitHub grant could be obtained through muster (connect GitHub in muster if not), the App identity used for unattended reads and the inventory store. The inventory (list_repositories, get_repository) is one record per repository of the org — declaration, GitHub reality, set-up state, orphan score with reasons, findings — refreshed by a scheduled sweep, after every reconciler run and on refresh_repository; every record carries its age. Every write tool takes dryRun and mode; the only write mode is commit — a team-file pull request opened as you — and apply is refused."),
+		mcpserver.WithInstructions("Giant Swarm's repository set-up service. The team files in giantswarm/github (repositories/team-*.yaml) are the desired state of every repository; GitHub is the reality. Call get_info first: it reports who you are to this server (the GitHub login of the token muster put on the call — your own authorization of the App giantswarm-repo-manager), the App identity used for unattended reads and the inventory store. The inventory (list_repositories, get_repository) is one record per repository of the org — declaration, GitHub reality, set-up state, orphan score with reasons, findings — refreshed by a scheduled sweep, after every reconciler run and on refresh_repository; every record carries its age. Every write tool takes dryRun and mode; the only write mode is commit — a team-file pull request opened as you — and apply is refused."),
 	)
 	s.AddTool(mcp.NewTool(ToolGetInfo,
-		mcp.WithDescription("Read-only. Report the service version and the identity chain of this call: the caller muster forwarded (subject, email, groups), whether the caller's GitHub grant was obtained from muster's token broker and the GitHub login it belongs to (proven with a read call), the App identity used for unattended inventory reads, the inventory store, the engine (devctl reposetup package) and the write modes. Call first."),
+		mcp.WithDescription("Read-only. Report the service version and how this call is authenticated: the caller (the GitHub login and id GET /user answered for the bearer muster put on the call — the person's own user token through the App giantswarm-repo-manager) and the authorization server pinned for it, the App identity used for unattended inventory reads, the inventory store, the engine (devctl reposetup package) and the write modes. Call first."),
 		mcp.WithReadOnlyHintAnnotation(true),
 	), t.getInfo)
 	t.registerInventory(s)
@@ -106,34 +106,44 @@ type tools struct{ d Deps }
 
 // Info is get_info's result.
 type Info struct {
-	Version      string             `json:"version"`
-	ToolPrefix   string             `json:"toolPrefix"`
+	Version    string `json:"version"`
+	ToolPrefix string `json:"toolPrefix"`
+	// Caller is the person the bearer belongs to; null without OAuth.
 	Caller       *identity.Identity `json:"caller"`
+	Auth         AuthInfo           `json:"auth"`
 	GitHub       GitHubInfo         `json:"github"`
 	Inventory    InventoryInfo      `json:"inventory"`
 	Engine       EngineInfo         `json:"engine"`
 	Capabilities Capabilities       `json:"capabilities"`
 }
 
-// GitHubInfo is the person's grant and the App identity.
+// Authentication modes get_info reports.
+const (
+	// AuthModeBearer: the person's GitHub user token is the bearer of every
+	// call, verified with GET /user.
+	AuthModeBearer = "bearer"
+	// AuthModeNone: the server runs without OAuth; nothing acts as a person.
+	AuthModeNone = "none"
+)
+
+// AuthInfo is how this call was authenticated.
+type AuthInfo struct {
+	Mode string `json:"mode"`
+	// AuthorizationServer is the issuer identity muster pins for this server:
+	// the App giantswarm-repo-manager's.
+	AuthorizationServer string `json:"authorizationServer,omitempty"`
+	// Reason says why there is no caller.
+	Reason string `json:"reason,omitempty"`
+}
+
+// GitHubInfo is the App identity and the API the calls go to.
 type GitHubInfo struct {
 	APIURL string       `json:"apiUrl"`
-	Grant  GrantInfo    `json:"grant"`
 	App    *gh.Identity `json:"app,omitempty"`
 	// AppError says why the App identity is missing.
 	AppError string `json:"appError,omitempty"`
 	// CircleCIConfigured says whether the CircleCI token is set.
 	CircleCIConfigured bool `json:"circleciConfigured"`
-}
-
-// GrantInfo is the outcome of the broker exchange for this call.
-type GrantInfo struct {
-	Obtained bool `json:"obtained"`
-	// Login is the GitHub login the released grant belongs to (GET /user).
-	Login     string `json:"login,omitempty"`
-	ExpiresIn string `json:"expiresIn,omitempty"`
-	Audience  string `json:"audience,omitempty"`
-	Reason    string `json:"reason,omitempty"`
 }
 
 // InventoryInfo is the store's state.
@@ -172,8 +182,10 @@ func (t *tools) getInfo(ctx context.Context, _ mcp.CallToolRequest) (*mcp.CallTo
 	}
 	if id, ok := identity.FromContext(ctx); ok {
 		info.Caller = id
+		info.Auth = AuthInfo{Mode: AuthModeBearer, AuthorizationServer: t.d.AuthorizationServer}
+	} else {
+		info.Auth = AuthInfo{Mode: AuthModeNone, Reason: "the request carried no verified bearer: the server runs without OAuth (oauth.enabled), nothing acts as a person"}
 	}
-	info.GitHub.Grant = t.grant(ctx)
 	if t.d.App != nil {
 		app, err := t.d.App.Identity(ctx)
 		if err != nil {
@@ -185,38 +197,6 @@ func (t *tools) getInfo(ctx context.Context, _ mcp.CallToolRequest) (*mcp.CallTo
 	}
 	info.Inventory = t.inventory(ctx)
 	return result(info, nil)
-}
-
-// grant runs the identity chain for this call: the forwarded id_token is
-// exchanged at muster's broker for the caller's GitHub grant, and the grant
-// is proven with GET /user.
-func (t *tools) grant(ctx context.Context) GrantInfo {
-	if t.d.Broker == nil {
-		return GrantInfo{Reason: "broker client not configured (MUSTER_URL, BROKER_CLIENT_ID, BROKER_CLIENT_SECRET)"}
-	}
-	g := GrantInfo{Audience: t.d.Broker.Audience()}
-	tok, ok := identity.TokenFromContext(ctx)
-	if !ok {
-		g.Reason = "the request carried no IdP id_token to exchange (is the server behind muster with OAuth on?)"
-		return g
-	}
-	grant, err := t.d.Broker.Exchange(ctx, tok)
-	if err != nil {
-		g.Reason = err.Error()
-		if errors.Is(err, broker.ErrNoGrant) {
-			g.Reason = "no GitHub grant for you yet: connect GitHub in muster (core_auth_login on the GitHub server), then call again"
-		}
-		return g
-	}
-	g.Obtained = true
-	g.ExpiresIn = grant.ExpiresIn.Round(time.Second).String()
-	login, err := gh.Login(ctx, t.d.GitHubAPIURL, grant.AccessToken)
-	if err != nil {
-		g.Reason = "grant obtained, but the read call with it failed: " + err.Error()
-		return g
-	}
-	g.Login = login
-	return g
 }
 
 func (t *tools) inventory(ctx context.Context) InventoryInfo {

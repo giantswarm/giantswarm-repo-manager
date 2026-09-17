@@ -1,0 +1,13 @@
+# The platform shape on top of tests/test-values.yaml: registered with muster
+# in oauth mode, pinned to the GitHub App giantswarm-repo-manager.
+#
+#   helm template giantswarm-repo-manager helm/giantswarm-repo-manager \
+#     -f tests/test-values.yaml -f tests/oauth-values.yaml -s templates/mcpserver.yaml
+#
+# renders the MCPServer with the pin; the Deployment carries OAUTH_ENABLED,
+# OAUTH_BASE_URL and OAUTH_AUTHORIZATION_SERVER.
+oauth:
+  enabled: true
+muster:
+  mcpServer:
+    enabled: true

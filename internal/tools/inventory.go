@@ -80,7 +80,7 @@ func (t *tools) registerInventory(s *mcpserver.MCPServer) {
 	s.AddTool(mcp.NewTool(ToolListRepositories,
 		mcp.WithDescription("Read-only. The inventory of the org's repositories from the store: one row per repository with team, lifecycle, "+
 			"visibility, orphan score and reasons, finding kinds, set-up state and record age, sorted by orphan score, plus the last sweep's summary. "+
-			"Scope per caller: mine (the teams you belong to — your GitHub teams through your grant, else your IdP groups), team (the team "+
+			"Scope per caller: mine (the teams you belong to on GitHub, read as you), team (the team "+
 			"argument, or your teams), unassigned (on GitHub without a declaration), all. Filters as on the Repositories page: search, renovate, "+
 			"team including none, visibility, fork, lifecycle, inactiveDays, minOrphanScore, decision, finding. get_repository has the full record."),
 		mcp.WithReadOnlyHintAnnotation(true),
@@ -157,7 +157,7 @@ type RowSetup struct {
 type Listing struct {
 	Scope string `json:"scope"`
 	// Teams are the caller's teams a mine/team scope was resolved to, and
-	// where they came from (github, idp-groups, argument, none).
+	// where they came from (github, argument, none).
 	Teams        []string                `json:"teams,omitempty"`
 	TeamsSource  string                  `json:"teamsSource,omitempty"`
 	Sweep        *inventory.SweepSummary `json:"sweep"`

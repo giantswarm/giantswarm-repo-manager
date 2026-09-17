@@ -34,7 +34,7 @@ its own app, not as a component of the `agent-platform` meta chart.
 
 | Key | Type | Default | Description |
 |-----|------|---------|-------------|
-| global | object | `{}` | Platform-wide values an umbrella chart shares with every component and Helm forwards here. `oauth.*` reads the identity contract as its defaults: `global.identity.issuerUrl`, `global.identity.clientId`, `global.identity.existingSecret`, `global.identity.ca.secretName` / `.key`, and `global.domain` for the OAuth base URL. Empty here; a standalone install sets `oauth.*` directly. |
+| global | object | `{}` | Platform-wide values an umbrella chart shares with every component and Helm forwards here; this chart reads none of them. |
 | replicaCount | int | `1` | Number of replicas. The server holds its state in Valkey; more than one is fine. |
 | image.registry | string | `"gsoci.azurecr.io"` | Image registry. |
 | image.repository | string | `"giantswarm/giantswarm-repo-manager"` | Image repository. |
@@ -59,27 +59,20 @@ its own app, not as a component of the `agent-platform` meta chart.
 | reviews.audience | string | `"klaus-gateway"` | The audience of the projected token — the gateway's `reviews.audience`; this ServiceAccount must be in its `reviews.allowedCallers`. |
 | reviews.channels | object | `{}` | Slack channel IDs by the channel name a team's policy file carries (`slackChannel`): the gateway takes IDs. A policy file that carries the ID itself needs no entry. |
 | mcp.path | string | `"/mcp"` | MCP streamable-HTTP endpoint path. |
-| oauth.enabled | bool | `false` | Make the server an OAuth 2.1 resource server (mcp-oauth): the MCP endpoint requires a bearer token the platform Dex issued, and every call carries the caller's identity and id_token — the subject token of the broker exchange that releases the caller's GitHub grant. muster forwards the session's id_token byte-identical (MCPServer `auth.forwardToken`, rendered below); it is validated against Dex's JWKS when its audience is in `trustedAudiences`. Off: anonymous — no caller, no grant, tools report so; only for a server nothing but a trusted proxy can reach. |
-| oauth.baseURL | string | `""` | Public base URL of this server: the issuer of its own OAuth metadata (https, or http on loopback). Empty derives `https://<fullname>.<global.domain>` when `global.domain` is set. |
-| oauth.dex.issuerURL | string | `""` | Dex issuer URL. Empty falls back to `global.identity.issuerUrl`. |
-| oauth.dex.clientID | string | `""` | Dex OAuth client ID this server is registered as. Empty falls back to `global.identity.clientId`. |
-| oauth.dex.clientSecret | string | `""` | Dex OAuth client secret (prefer `oauth.existingSecret`). |
-| oauth.dex.allowPrivateURLs | bool | `false` | Let the issuer resolve to a private or loopback address (an in-cluster Dex). |
-| oauth.dex.caSecret | object | `{"key":"ca.crt","name":""}` | Secret with the CA of a Dex that serves a private certificate; mounted and passed as `DEX_CA_FILE`. Empty name falls back to `global.identity.ca.secretName` / `global.identity.ca.key`. |
-| oauth.existingSecret | string | `""` | Existing Secret with the Dex client secret under `dex-client-secret`. Empty falls back to `global.identity.existingSecret`; without that, the chart renders a Secret from `oauth.dex.clientSecret`. |
-| oauth.trustedAudiences | list | `[]` | OAuth client IDs whose Dex id_tokens are accepted as bearer tokens (SSO token forwarding). Empty falls back to `[global.identity.clientId]`. The server trusts the union of this list and `muster.mcpServer.auth.requiredAudiences`. |
-| oauth.sso.allowPrivateIPs | bool | `false` | Let the IdP's JWKS endpoint resolve to a private address when validating forwarded tokens (an in-cluster Dex). |
-| oauth.allowPublicClientRegistration | bool | `false` | Accept unauthenticated dynamic client registration (labs only). |
-| muster.url | string | `""` | muster's base URL as reached from the pod (for example `http://muster.muster.svc:8090`): the broker exchange goes to `<url>/oauth/token`. Empty leaves the broker client off; `get_info` reports it. |
+| oauth.enabled | bool | `false` | Require a GitHub user token as the bearer of every MCP request, verified with `GET /user`; the server then acts as that person. Behind muster the token is the person's own: muster runs the consent for the GitHub App `giantswarm-repo-manager` once (the MCPServer's `authorizationServer` pin under `muster.mcpServer.auth`), stores and refreshes the user token and puts it on every call. Off: anonymous — no caller, nothing acts as a person, the tools say so; only for a server nothing but a trusted proxy can reach. |
+| oauth.baseURL | string | `""` | URL muster reaches this server at, without the MCP path: the resource of its OAuth protected-resource metadata. Empty derives the in-cluster Service URL, `http://<fullname>.<namespace>.svc.cluster.local:<service.port>`. |
 | muster.mcpServer.enabled | bool | `false` | Register this server with muster by rendering an `mcpservers.muster.giantswarm.io` CR in the release namespace. Tools then appear as `x_<name>_<tool>`. |
 | muster.mcpServer.name | string | `"giantswarm-repo-manager"` | MCPServer CR name (drives the tool prefix). |
 | muster.mcpServer.autoStart | bool | `true` | Start the server connection when muster initializes. |
 | muster.mcpServer.description | string | `"Giant Swarm's repository set-up service — the giantswarm org's repositories, every write as the person"` | Human-readable description shown by muster. |
 | muster.mcpServer.labels | object | `{}` | Extra labels on the MCPServer CR. |
-| muster.mcpServer.auth | object | `{"forwardToken":true,"requiredAudiences":[]}` | How muster authenticates to this server; rendered only with `oauth.enabled`. `forwardToken` makes muster forward the session's Dex id_token byte-identical. `requiredAudiences` are extra audiences that token must carry (the Dex cross-client audience of the platform, e.g. `dex-k8s-authenticator`); they are trusted as bearer audiences by construction. |
-| broker.clientID | string | `"giantswarm-repo-manager"` | This server's client id at muster's token-exchange broker (`tokenExchangeBroker.brokerClients.<id>`, allowed audience `github`). |
-| broker.existingSecret | string | `""` | Existing Secret with the broker client credentials under `client-secret` (and optionally `client-id`) — the same Secret muster's `brokerClients.<id>.clientCredentialsSecretRef` reads. Empty leaves the broker client off. |
-| broker.audience | string | `"github"` | Broker target that releases the person's GitHub grant (`tokenExchangeBroker.targets.<audience>.grantIssuer`). |
+| muster.mcpServer.auth | object | `{"authorizationServer":{"authorizationEndpoint":"https://github.com/login/oauth/authorize","clientCredentialsSecretRef":{"name":"giantswarm-repo-manager-oauth-client","namespace":""},"grantScope":"subject","issuer":"https://github.com/apps/giantswarm-repo-manager","tokenEndpoint":"https://github.com/login/oauth/access_token"}}` | How muster authenticates to this server; rendered only with `oauth.enabled`: `auth.type: oauth` with the GitHub App `giantswarm-repo-manager` pinned as the authorization server — the pattern of the `github` and `pro` servers on the platform. GitHub publishes no discovery document, so the endpoints are named; the App's client credentials come from a Secret; no `scopes` (the App's permissions are the App's). muster runs the consent once per person and puts their user token on every call. |
+| muster.mcpServer.auth.authorizationServer.issuer | string | `"https://github.com/apps/giantswarm-repo-manager"` | The issuer identity the person's grant is filed under: the App's own, so the login App's GitHub grant stays separate. |
+| muster.mcpServer.auth.authorizationServer.authorizationEndpoint | string | `"https://github.com/login/oauth/authorize"` | GitHub's authorize endpoint. |
+| muster.mcpServer.auth.authorizationServer.tokenEndpoint | string | `"https://github.com/login/oauth/access_token"` | GitHub's token endpoint. |
+| muster.mcpServer.auth.authorizationServer.clientCredentialsSecretRef.name | string | `"giantswarm-repo-manager-oauth-client"` | Secret with the App's OAuth client under `client-id` and `client-secret`. |
+| muster.mcpServer.auth.authorizationServer.clientCredentialsSecretRef.namespace | string | `""` | Namespace of that Secret; empty is the release namespace. |
+| muster.mcpServer.auth.authorizationServer.grantScope | string | `"subject"` | `subject`: the grant belongs to the person, not to one login session — every session of theirs (the portal, an agent, a Slack click) carries the same token. |
 | githubApp.appID | int | `0` | The App used for unattended, read-only inventory reads (the giantswarm-align-files App) and its installation on the org. 0 leaves the App identity off. |
 | githubApp.installationID | int | `0` |  |
 | githubApp.existingSecret | string | `""` | Existing Secret with the App's PEM private key under `private-key`. |

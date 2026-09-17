@@ -35,7 +35,7 @@ type Options struct {
 	// declaration during a sweep (REST, the read identity's budget); a refresh
 	// always runs them.
 	EngineChecks bool
-	// Concurrency bounds the parallel CircleCI and engine reads.
+	// Concurrency bounds the parallel engine reads.
 	Concurrency int
 	// PageSize, HistoryBatch and HistoryDepth are the GraphQL paging shape.
 	PageSize, HistoryBatch, HistoryDepth int
@@ -79,12 +79,6 @@ type Checker interface {
 	Check(ctx context.Context, team string, entry reposetup.Entry) (*reconcile.Result, error)
 }
 
-// CircleCI reads one project's state; Calls counts the API calls made.
-type CircleCI interface {
-	Project(ctx context.Context, org, repo string) *inventory.CircleCI
-	Calls() int
-}
-
 // ErrSweepRunning is returned when a sweep is already running.
 var ErrSweepRunning = errors.New("a sweep is already running")
 
@@ -96,7 +90,6 @@ type Collector struct {
 	gql        *graphQL
 	store      *inventory.Store
 	checker    Checker
-	circle     CircleCI
 	log        *slog.Logger
 	now        func() time.Time
 	running    atomic.Bool
@@ -106,13 +99,13 @@ type Collector struct {
 	srcAt    time.Time
 }
 
-// New builds a collector; checker and circle may be nil.
-func New(opts Options, reader *gh.Reader, store *inventory.Store, checker Checker, circle CircleCI, log *slog.Logger) *Collector {
+// New builds a collector; checker may be nil.
+func New(opts Options, reader *gh.Reader, store *inventory.Store, checker Checker, log *slog.Logger) *Collector {
 	opts.defaults()
 	if log == nil {
 		log = slog.Default()
 	}
-	return &Collector{opts: opts, reader: reader, gql: newGraphQL(reader.GraphQLURL(), reader.HTTP(), opts.BudgetFloor), store: store, checker: checker, circle: circle, log: log, now: time.Now}
+	return &Collector{opts: opts, reader: reader, gql: newGraphQL(reader.GraphQLURL(), reader.HTTP(), opts.BudgetFloor), store: store, checker: checker, log: log, now: time.Now}
 }
 
 // Options are the collector's options.
@@ -132,10 +125,6 @@ func (c *Collector) Sweep(ctx context.Context) (*inventory.SweepSummary, error) 
 	sum := &inventory.SweepSummary{StartedAt: start}
 	restBefore := c.reader.Usage()
 	gqlBefore := c.gql.snapshot()
-	circleBefore := 0
-	if c.circle != nil {
-		circleBefore = c.circle.Calls()
-	}
 	c.log.Info("sweep starting", "org", c.opts.Org, "identity", c.reader.Name(), "engineChecks", c.opts.EngineChecks && c.checker != nil)
 
 	src, err := c.fetchSources(ctx)
@@ -191,10 +180,9 @@ func (c *Collector) Sweep(ctx context.Context) (*inventory.SweepSummary, error) 
 
 	records := make([]*inventory.Record, 0, len(names))
 	for _, n := range names {
-		records = append(records, c.build(n, nodes[n], src, old[c.opts.Org+"/"+n]))
+		records = append(records, c.build(n, nodes[n], src, old[c.opts.Org+"/"+n], nil))
 	}
-	c.log.Info("records assembled", "repositories", len(records), "circleci", c.circle != nil, "engineChecks", c.opts.EngineChecks && c.checker != nil)
-	c.readCircleCI(ctx, records)
+	c.log.Info("records assembled", "repositories", len(records), "engineChecks", c.opts.EngineChecks && c.checker != nil)
 	if c.opts.EngineChecks {
 		sum.EngineChecks = c.runChecks(ctx, records, src, true)
 	}
@@ -232,15 +220,12 @@ func (c *Collector) Sweep(ctx context.Context) (*inventory.SweepSummary, error) 
 		t := rest.ResetAt
 		sum.REST.ResetAt = &t
 	}
-	if c.circle != nil {
-		sum.CircleCI = c.circle.Calls() - circleBefore
-	}
 	if err := c.store.PutSweep(ctx, sum); err != nil {
 		return nil, err
 	}
 	c.log.Info("sweep finished", "repositories", sum.Repositories, "declared", sum.Declared, "undeclared", sum.Undeclared, "gone", sum.Gone,
 		"duration", sum.Duration, "graphqlCalls", sum.GraphQL.Calls, "graphqlCost", sum.GraphQL.Cost, "graphqlRemaining", sum.GraphQL.Remaining,
-		"restCalls", sum.REST.Calls, "restRemaining", sum.REST.Remaining, "circleciCalls", sum.CircleCI, "complete", complete)
+		"restCalls", sum.REST.Calls, "restRemaining", sum.REST.Remaining, "complete", complete)
 	if !complete {
 		return sum, ErrBudget
 	}
@@ -306,12 +291,8 @@ func (c *Collector) Refresh(ctx context.Context, repository string, run *invento
 		}
 		return nil, fmt.Errorf("%w: %s is neither declared nor on GitHub", inventory.ErrNotFound, key)
 	}
-	rec := c.build(name, node, src, old)
-	c.readCircleCI(ctx, []*inventory.Record{rec})
+	rec := c.build(name, node, src, old, run)
 	c.runChecks(ctx, []*inventory.Record{rec}, src, false)
-	if run != nil {
-		rec.Setup.LastRun = run
-	}
 	rec.Finalize(c.opts.Stale, c.now())
 	rec.RefreshedAt, rec.Source = c.now(), source
 	if err := c.store.Put(ctx, rec); err != nil {
@@ -345,18 +326,6 @@ func (c *Collector) setCachedSources(src *sources) {
 	c.srcMu.Lock()
 	defer c.srcMu.Unlock()
 	c.srcCache, c.srcAt = src, c.now()
-}
-
-// readCircleCI fills CircleCI for the records that exist on GitHub.
-func (c *Collector) readCircleCI(ctx context.Context, records []*inventory.Record) {
-	if c.circle == nil {
-		return
-	}
-	c.parallel(records, func(r *inventory.Record) {
-		if r.Reality != nil {
-			r.CircleCI = c.circle.Project(ctx, c.opts.Org, r.Name)
-		}
-	})
 }
 
 // runChecks runs the engine's read-mode checks for every accepted, present
@@ -423,7 +392,10 @@ func (c *Collector) parallel(records []*inventory.Record, fn func(*inventory.Rec
 
 // build assembles a record from the GitHub node (nil: gone), the sources and
 // the previous record (decision and last reconciler run survive).
-func (c *Collector) build(name string, node *repoNode, src *sources, old *inventory.Record) *inventory.Record {
+// build assembles the record from the sources, the GraphQL node and the old
+// record (decision and set-up state survive); run is the reconciler's run a
+// refresh hands in, else the stored one counts for the CircleCI state.
+func (c *Collector) build(name string, node *repoNode, src *sources, old *inventory.Record, run *inventory.LastRun) *inventory.Record {
 	rec := &inventory.Record{Repository: c.opts.Org + "/" + name, Name: name}
 	if d := src.declarations[name]; d != nil {
 		decl := d.Declaration
@@ -439,7 +411,12 @@ func (c *Collector) build(name string, node *repoNode, src *sources, old *invent
 	if old != nil {
 		rec.Decision = old.Decision
 		rec.Setup = old.Setup
-		rec.CircleCI = old.CircleCI
+	}
+	if run != nil {
+		rec.Setup.LastRun = run
+	}
+	if node != nil {
+		rec.CircleCI = circleCI(node, rec.Setup.LastRun)
 	}
 	return rec
 }
@@ -627,7 +604,9 @@ fragment RepoFields on Repository {
   openPRs: pullRequests(states: OPEN, first: 40, orderBy: {field: CREATED_AT, direction: ASC}) {
     totalCount nodes { number title createdAt headRefName author { login } }
   }
-  defaultBranchRef { name }
+  defaultBranchRef { name target { ... on Commit { statusCheckRollup { state contexts(first: 100) {
+    pageInfo { hasNextPage } nodes { ... on StatusContext { context state createdAt } }
+  } } } } }
   codeowners: object(expression: "HEAD:CODEOWNERS") { ... on Blob { text } }
   codeownersGh: object(expression: "HEAD:.github/CODEOWNERS") { ... on Blob { text } }
   codeownersDocs: object(expression: "HEAD:docs/CODEOWNERS") { ... on Blob { text } }
@@ -705,10 +684,8 @@ type repoNode struct {
 		Nodes      []prNode `json:"nodes"`
 	} `json:"openPRs"`
 	DefaultBranchRef *struct {
-		Name   string `json:"name"`
-		Target *struct {
-			History *historyConn `json:"history"`
-		} `json:"target"`
+		Name   string        `json:"name"`
+		Target *branchTarget `json:"target"`
 	} `json:"defaultBranchRef"`
 	Codeowners     *blob   `json:"codeowners"`
 	CodeownersGh   *blob   `json:"codeownersGh"`
@@ -729,6 +706,29 @@ type repoNode struct {
 	Readme     *idNode `json:"readme"`
 	Dockerfile *idNode `json:"dockerfile"`
 	Helm       *idNode `json:"helm"`
+}
+
+// branchTarget is the default branch's head commit: its recent history (the
+// aliased batch) and its status rollup (read with the repository).
+type branchTarget struct {
+	History           *historyConn  `json:"history"`
+	StatusCheckRollup *statusRollup `json:"statusCheckRollup"`
+}
+
+// statusRollup is the head commit's statusCheckRollup: the contexts are
+// commit statuses and check runs; only the StatusContext fields are read.
+type statusRollup struct {
+	State    string `json:"state"`
+	Contexts struct {
+		PageInfo struct {
+			HasNextPage bool `json:"hasNextPage"`
+		} `json:"pageInfo"`
+		Nodes []struct {
+			Context   string    `json:"context"`
+			State     string    `json:"state"`
+			CreatedAt time.Time `json:"createdAt"`
+		} `json:"nodes"`
+	} `json:"contexts"`
 }
 
 type idNode struct {
@@ -844,8 +844,12 @@ func (c *Collector) fetchHistories(ctx context.Context, names []string, nodes ma
 			if r == nil || r.DefaultBranchRef == nil || r.DefaultBranchRef.Target == nil {
 				continue
 			}
+			// The history joins the head's status rollup the page read.
 			if node := nodes[r.Name]; node != nil && node.DefaultBranchRef != nil {
-				node.DefaultBranchRef.Target = r.DefaultBranchRef.Target
+				if node.DefaultBranchRef.Target == nil {
+					node.DefaultBranchRef.Target = &branchTarget{}
+				}
+				node.DefaultBranchRef.Target.History = r.DefaultBranchRef.Target.History
 			}
 		}
 		if err != nil {

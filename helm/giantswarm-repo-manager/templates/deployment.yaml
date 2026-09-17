@@ -87,13 +87,6 @@ spec:
             - name: GITHUB_API_URL
               value: {{ . | quote }}
             {{- end }}
-            {{- with .Values.circleci.existingSecret }}
-            - name: CIRCLECI_API_TOKEN
-              valueFrom:
-                secretKeyRef:
-                  name: {{ . }}
-                  key: token
-            {{- end }}
             - name: TEAM_FILES_REPOSITORY
               value: {{ .Values.teamFiles.repository | quote }}
             - name: TEAM_FILES_REF

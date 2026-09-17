@@ -27,7 +27,8 @@ type Record struct {
 	Declaration *Declaration `json:"declaration"`
 	// Reality is the repository on GitHub; nil means gone.
 	Reality *Reality `json:"reality"`
-	// CircleCI is nil when the server has no CircleCI token.
+	// CircleCI is the project's state on CircleCI as GitHub and the
+	// reconciler tell it; nil when the repository is gone.
 	CircleCI *CircleCI `json:"circleci,omitempty"`
 	Renovate Renovate  `json:"renovate"`
 	Catalog  Catalog   `json:"catalog"`
@@ -137,20 +138,51 @@ type Presence struct {
 	Codeowners bool `json:"codeowners"`
 }
 
-// CircleCI is the project's state on CircleCI (read-scope token).
+// CircleCI is the project's state on CircleCI without a CircleCI token: the
+// `ci/circleci:` commit statuses on the default branch head say whether
+// CircleCI builds the repository (it posts them for the projects it builds,
+// nothing else does), the reconciler's last run — its circleci step — says
+// whether the project is followed and setup workflows are on. Source names
+// the sources that answered, Unknown the facts none of them yields; the last
+// pipeline is not derivable and is not part of the record.
 type CircleCI struct {
-	Followed       bool      `json:"followed"`
-	SetupWorkflows *bool     `json:"setupWorkflows,omitempty"`
-	LastPipeline   *Pipeline `json:"lastPipeline,omitempty"`
-	Error          string    `json:"error,omitempty"`
+	// Followed says CircleCI builds the repository: statuses on the head, or
+	// the reconciler's circleci step found (or made) the project followed.
+	Followed bool `json:"followed"`
+	// SetupWorkflows is the project's setup-workflows setting as the
+	// reconciler's last run saw or set it; nil when no run tells.
+	SetupWorkflows *bool `json:"setupWorkflows,omitempty"`
+	// Head is the default branch head's CircleCI statuses; nil when it has
+	// none.
+	Head *HeadStatus `json:"head,omitempty"`
+	// Source is what answered: statuses, artifact, or statuses+artifact.
+	Source string `json:"source"`
+	// Unknown names the facts no source yields: followed (the head's status
+	// contexts were truncated and none was CircleCI's), setupWorkflows.
+	Unknown []string `json:"unknown,omitempty"`
+	// Error is the reconciler's circleci step failing, as its run reported it.
+	Error string `json:"error,omitempty"`
 }
 
-// Pipeline is the project's most recent pipeline.
-type Pipeline struct {
-	Number    int64     `json:"number"`
-	State     string    `json:"state"`
-	CreatedAt time.Time `json:"createdAt"`
-	Ref       string    `json:"ref,omitempty"`
+// Sources of the CircleCI state and the facts that can be unknown.
+const (
+	CircleCISourceStatuses = "statuses"
+	CircleCISourceArtifact = "artifact"
+	CircleCISourceBoth     = CircleCISourceStatuses + "+" + CircleCISourceArtifact
+
+	CircleCIFactFollowed       = "followed"
+	CircleCIFactSetupWorkflows = "setupWorkflows"
+)
+
+// HeadStatus is the default branch head's `ci/circleci:` commit statuses.
+type HeadStatus struct {
+	// State is the worst state among the contexts: failure, error, pending,
+	// expected or success.
+	State string `json:"state"`
+	// Contexts are the status contexts, `ci/circleci: <job>`, sorted.
+	Contexts []string `json:"contexts"`
+	// At is when the newest of them was posted.
+	At time.Time `json:"at"`
 }
 
 // Renovate is the repository's Renovate configuration and activity.
@@ -256,7 +288,6 @@ type SweepSummary struct {
 	Removed      int       `json:"removed"`
 	GraphQL      Budget    `json:"graphql"`
 	REST         Budget    `json:"rest"`
-	CircleCI     int       `json:"circleciCalls"`
 	Errors       []string  `json:"errors,omitempty"`
 }
 

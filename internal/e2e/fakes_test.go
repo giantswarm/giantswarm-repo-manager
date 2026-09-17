@@ -14,10 +14,14 @@ import (
 	"time"
 )
 
+// inventoryApp is the slug GET /app answers: the read-only App of the
+// unattended reads.
+const inventoryApp = "giantswarm-repo-manager-inventory"
+
 // fakeGitHub answers the calls of the identity chain: GET /user as the person
 // (the bearer verification and the read as the person), GET /user/teams, GET
-// /app as the App (its JWT) and the installation token; every name check finds
-// the repository free.
+// /app as the inventory App (its JWT) and the installation token; every name
+// check finds the repository free.
 type fakeGitHub struct {
 	*httptest.Server
 	logins map[string]string // person user token → login
@@ -56,7 +60,7 @@ func newFakeGitHub(t *testing.T, logins map[string]string) *fakeGitHub {
 			ghMessage(w, http.StatusUnauthorized, "app JWT required")
 			return
 		}
-		writeJSON(w, http.StatusOK, map[string]any{"id": 17164699, kSlug: "giantswarm-align-files"})
+		writeJSON(w, http.StatusOK, map[string]any{"id": 17164699, kSlug: inventoryApp})
 	})
 	mux.HandleFunc("POST /api/v3/app/installations/{id}/access_tokens", func(w http.ResponseWriter, _ *http.Request) {
 		writeJSON(w, http.StatusCreated, map[string]any{"token": "installation-token", "expires_at": time.Now().Add(time.Hour).UTC().Format(time.RFC3339)})

@@ -85,6 +85,8 @@ type fakeTeamFiles struct {
 	pulls      map[int]*fakePullRequest
 	next       int
 	dispatches []map[string]any
+	// denied are the logins whose credential does not reach the repository.
+	denied map[string]bool
 }
 
 func newFakeTeamFiles() *fakeTeamFiles {
@@ -98,6 +100,24 @@ func newFakeTeamFiles() *fakeTeamFiles {
 		refs: map[string]string{"heads/" + mainBranch: "base000"}, trees: map[string]map[string][]byte{}, commits: map[string]string{}, pulls: map[int]*fakePullRequest{}, next: 4711,
 	}
 	return f
+}
+
+// deny makes the repository unreachable for login: every read as them
+// answers 404, as GitHub does for a person whose authorization of the App
+// does not reach the repository.
+func (f *fakeTeamFiles) deny(login string) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.denied == nil {
+		f.denied = map[string]bool{}
+	}
+	f.denied[login] = true
+}
+
+func (f *fakeTeamFiles) deniedFor(r *http.Request, g *fakeGitHub) bool {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.denied[g.logins[bearer(r)]]
 }
 
 // pullRequests are the pull requests opened so far, in order.
@@ -114,7 +134,21 @@ func (f *fakeTeamFiles) pullRequests() []*fakePullRequest {
 
 func (f *fakeTeamFiles) register(mux *http.ServeMux, g *fakeGitHub) {
 	base := "/api/v3/repos/" + org + "/github"
+	// The repository itself: 404 for a person whose credential does not reach
+	// it (GitHub's answer for a repository the App is not installed on), the
+	// same as for its files.
+	mux.HandleFunc("GET "+base, func(w http.ResponseWriter, r *http.Request) {
+		if f.deniedFor(r, g) {
+			ghMessage(w, http.StatusNotFound, "Not Found")
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]any{kName: "github", "full_name": org + "/github", "private": true, "default_branch": mainBranch})
+	})
 	mux.HandleFunc("GET "+base+"/contents/{path...}", func(w http.ResponseWriter, r *http.Request) {
+		if f.deniedFor(r, g) {
+			ghMessage(w, http.StatusNotFound, "Not Found")
+			return
+		}
 		f.mu.Lock()
 		defer f.mu.Unlock()
 		p := r.PathValue("path")

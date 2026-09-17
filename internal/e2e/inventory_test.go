@@ -39,8 +39,8 @@ func TestSweepFillsOneRecordPerRepository(t *testing.T) {
 	if n, _ := st.store.Count(ctx); n != 5 {
 		t.Errorf("records: %d, want 5", n)
 	}
-	if st.checker.calls.Load() != 2 || st.circle.Calls() != 4 {
-		t.Errorf("engine checks %d (want 2: present and legacy, both accepted by the schema), circleci calls %d (want 4)", st.checker.calls.Load(), st.circle.Calls())
+	if st.checker.calls.Load() != 2 {
+		t.Errorf("engine checks %d (want 2: present and legacy, both accepted by the schema)", st.checker.calls.Load())
 	}
 
 	present := st.record(t, repoPresent)
@@ -50,8 +50,16 @@ func TestSweepFillsOneRecordPerRepository(t *testing.T) {
 	if present.Setup.Checks == nil || !present.Setup.Checks.Converged || present.Setup.CheckedAt == nil || len(present.Findings) != 1 || present.Findings[0].Kind != string(reconcile.FindingDefaultIcon) || present.Findings[0].Source != inventory.FindingSourceEngine {
 		t.Errorf("present set-up state: %+v findings %+v", present.Setup, present.Findings)
 	}
-	if present.CircleCI == nil || !present.CircleCI.Followed || present.CircleCI.LastPipeline == nil || !present.Catalog.Present || present.Mapping.Team != "bumblebee" {
-		t.Errorf("present circleci/catalog/mapping: %+v %+v %+v", present.CircleCI, present.Catalog, present.Mapping)
+	// CircleCI without a token: the head's ci/circleci: statuses say it builds
+	// the repository (the other systems' contexts are ignored, the worst
+	// state counts), setup workflows are unknown until a reconciler run tells.
+	if ci := present.CircleCI; ci == nil || !ci.Followed || ci.Source != inventory.CircleCISourceStatuses || ci.SetupWorkflows != nil || ci.Error != "" ||
+		ci.Head == nil || ci.Head.State != "pending" || strings.Join(ci.Head.Contexts, ",") != circleBuild+","+circlePush || ci.Head.At.IsZero() ||
+		strings.Join(ci.Unknown, ",") != inventory.CircleCIFactSetupWorkflows {
+		t.Errorf("present circleci: %+v head=%+v", ci, ci.Head)
+	}
+	if !present.Catalog.Present || present.Mapping.Team != "bumblebee" {
+		t.Errorf("present catalog/mapping: %+v %+v", present.Catalog, present.Mapping)
 	}
 	if r := present.Renovate; !r.Configured || !r.Enabled || !r.Preset || r.DashboardIssue == nil || r.DashboardIssue.Number != 3 || r.LastPullRequest == nil || r.LastPullRequest.Number != 10 || r.LastCommit == nil {
 		t.Errorf("present renovate: %+v", r)
@@ -72,6 +80,11 @@ func TestSweepFillsOneRecordPerRepository(t *testing.T) {
 	// name is a creation rule, not a finding, and the checks run for it.
 	if legacy.Declaration == nil || !legacy.Declaration.Accepted || hasKind(legacy, string(reconcile.FindingEntryRefused)) || legacy.Setup.CheckError != "" {
 		t.Errorf("legacy: %+v setup %+v findings %+v", legacy.Declaration, legacy.Setup, legacy.Findings)
+	}
+	// No ci/circleci: status on the head and no run: CircleCI does not build
+	// it, setup workflows unknown — nothing guessed.
+	if ci := legacy.CircleCI; ci == nil || ci.Followed || ci.Head != nil || ci.Source != inventory.CircleCISourceStatuses || strings.Join(ci.Unknown, ",") != inventory.CircleCIFactSetupWorkflows {
+		t.Errorf("legacy circleci: %+v", ci)
 	}
 	stray := st.record(t, repoStray)
 	if stray.Declaration != nil || !hasKind(stray, inventory.FindingUndeclaredOnGitHub) || stray.Orphan.Score != 100 || stray.Renovate.Enabled || len(stray.Reality.UnknownCodeownersTeams) != 1 || len(stray.Reality.OpenPullRequests.Onboarding) != 1 {
@@ -150,11 +163,17 @@ func TestInventoryToolsAndReconcilerRefresh(t *testing.T) {
 	}
 
 	// The reconciler's trigger: its run lands in setup.lastRun, the decision survives.
-	run := inventory.LastRun{RunURL: fakeRunURL, Timestamp: time.Now().UTC(), Result: reconcile.Result{Repository: org + "/" + repoPresent, Mode: reconcile.ModeRepair, Converged: true}}
+	run := inventory.LastRun{RunURL: fakeRunURL, Timestamp: time.Now().UTC(), Result: reconcile.Result{Repository: org + "/" + repoPresent, Mode: reconcile.ModeRepair, Converged: true,
+		Steps: []reconcile.StepResult{{Step: reconcile.StepCircleCI, Verdict: reconcile.VerdictOK, Summary: "followed, setup workflows on, checkout key present"}}}}
 	status, body := st.internal(t, http.MethodPost, "/internal/refresh", internalToken, collect.RefreshRequest{Repository: org + "/" + repoPresent, LastRun: &run})
 	var rec inventory.Record
 	if err := json.Unmarshal(body, &rec); status != http.StatusOK || err != nil {
 		t.Fatalf("internal refresh: %d %s", status, body)
+	}
+	// The run's circleci step is the second source of the CircleCI state:
+	// setup workflows are known now, nothing is left unknown.
+	if ci := rec.CircleCI; ci == nil || !ci.Followed || ci.Source != inventory.CircleCISourceBoth || ci.SetupWorkflows == nil || !*ci.SetupWorkflows || len(ci.Unknown) != 0 || ci.Head == nil {
+		t.Errorf("circleci after the reconciler's run: %+v", ci)
 	}
 	if rec.Setup.LastRun == nil || rec.Setup.LastRun.RunURL != fakeRunURL || rec.Setup.LastRun.Result.Mode != reconcile.ModeRepair || rec.Source != inventory.SourceReconciler || rec.Decision == nil || rec.Age == "" {
 		t.Errorf("reconciler refresh: setup %+v source %q decision %+v", rec.Setup, rec.Source, rec.Decision)

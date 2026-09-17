@@ -34,12 +34,25 @@ const (
 // ErrEntryNotFound says no team file declares the repository.
 var ErrEntryNotFound = errors.New("no team file declares the repository")
 
-// Repo is the repository that holds the team files, at Ref, as Client.
+// Repo is the repository that holds the team files, at Ref, as Client. As
+// names the client's identity for messages: the person's login, or empty for
+// the inventory App.
 type Repo struct {
 	Client      *github.Client
 	Owner, Name string
 	Ref         string
+	As          string
 }
+
+// WriteApp is the App whose authorization a person's token carries; a read
+// that fails with 404 or 403 as the person names it.
+const WriteApp = "giantswarm-repo-manager"
+
+// ErrNotReachable says the credential does not reach the repository: the
+// person's authorization of the App, or the inventory App's installation,
+// does not include it. GitHub answers 404 for that, the same as for a
+// missing file; Read tells them apart with one probe of the repository.
+var ErrNotReachable = errors.New("the repository is not reachable with this credential")
 
 // New returns the Repo for "owner/name" (DefaultRepository when empty) at
 // ref (DefaultRef when empty).
@@ -70,14 +83,13 @@ type File struct {
 	SHA     string
 }
 
-// Read reads one file at Ref.
+// Read reads one file at Ref. A 404 is one of two things and the error says
+// which: the file is missing on Ref, or the credential does not reach the
+// repository at all (the repository itself answers 404 or 403).
 func (r Repo) Read(ctx context.Context, path string) (*File, error) {
 	fc, _, resp, err := r.Client.Repositories.GetContents(ctx, r.Owner, r.Name, path, &github.RepositoryContentGetOptions{Ref: r.Ref})
 	if err != nil {
-		if resp != nil && resp.StatusCode == http.StatusNotFound {
-			return nil, fmt.Errorf("%s: %s not found", r.Slug(), path)
-		}
-		return nil, fmt.Errorf("%s: read %s: %w", r.Slug(), path, err)
+		return nil, r.readError(ctx, path, resp, err)
 	}
 	if fc == nil {
 		return nil, fmt.Errorf("%s: %s is not a file", r.Slug(), path)
@@ -87,6 +99,53 @@ func (r Repo) Read(ctx context.Context, path string) (*File, error) {
 		return nil, fmt.Errorf("%s: decode %s: %w", r.Slug(), path, err)
 	}
 	return &File{Path: path, Content: []byte(content), SHA: fc.GetSHA()}, nil
+}
+
+// readError is the error of a failed read of path: on 404 or 403 the
+// repository is probed once to tell a credential that does not reach it from
+// a path missing on Ref.
+func (r Repo) readError(ctx context.Context, path string, resp *github.Response, err error) error {
+	if denied(resp) {
+		reachable, perr := r.Reachable(ctx)
+		switch {
+		case perr != nil:
+			return fmt.Errorf("%s: read %s: %w (and probing the repository: %v)", r.Slug(), path, err, perr)
+		case !reachable:
+			return r.notReachable(resp.StatusCode)
+		case resp.StatusCode == http.StatusNotFound:
+			return fmt.Errorf("%s/%s: %s not found in %s", r.Owner, r.Name, path, r.Ref)
+		}
+	}
+	return fmt.Errorf("%s: read %s: %w", r.Slug(), path, err)
+}
+
+// Reachable says whether Client reaches the repository at all (GET
+// /repos/{owner}/{name}): false on 404 or 403, an error on anything else.
+func (r Repo) Reachable(ctx context.Context) (bool, error) {
+	_, resp, err := r.Client.Repositories.Get(ctx, r.Owner, r.Name)
+	switch {
+	case err == nil:
+		return true, nil
+	case denied(resp):
+		return false, nil
+	}
+	return false, fmt.Errorf("%s: GET /repos/%s/%s: %w", r.Slug(), r.Owner, r.Name, err)
+}
+
+// notReachable is the error of a read the credential cannot make, naming
+// the credential and the fix.
+func (r Repo) notReachable(status int) error {
+	repo := r.Owner + "/" + r.Name
+	if r.As == "" {
+		return fmt.Errorf("reading %s as the inventory App failed (%d): %w — the App's installation must include the repository", repo, status, ErrNotReachable)
+	}
+	return fmt.Errorf("reading %s as %s failed (%d): %w — your authorization of the App %s does not reach the repository: the App must be installed on all repositories (an org owner's setting), or your own access does not include it", repo, r.As, status, ErrNotReachable, WriteApp)
+}
+
+// denied is GitHub's answer for what the credential cannot see: 404 (the
+// usual, also for a repository it has no access to) or 403.
+func denied(resp *github.Response) bool {
+	return resp != nil && (resp.StatusCode == http.StatusNotFound || resp.StatusCode == http.StatusForbidden)
 }
 
 // TeamFile is a team's file with its parsed entries.
@@ -111,9 +170,9 @@ func (r Repo) TeamFile(ctx context.Context, team string) (*TeamFile, error) {
 
 // Teams lists the teams that have a team file.
 func (r Repo) Teams(ctx context.Context) ([]string, error) {
-	_, dir, _, err := r.Client.Repositories.GetContents(ctx, r.Owner, r.Name, reposetup.TeamFilesDir, &github.RepositoryContentGetOptions{Ref: r.Ref})
+	_, dir, resp, err := r.Client.Repositories.GetContents(ctx, r.Owner, r.Name, reposetup.TeamFilesDir, &github.RepositoryContentGetOptions{Ref: r.Ref})
 	if err != nil {
-		return nil, fmt.Errorf("%s: list %s: %w", r.Slug(), reposetup.TeamFilesDir, err)
+		return nil, r.readError(ctx, reposetup.TeamFilesDir, resp, err)
 	}
 	var teams []string
 	for _, e := range dir {

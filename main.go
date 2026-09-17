@@ -4,9 +4,12 @@
 // inventory of every repository of the org.
 //
 // Every flag can also be set through the environment variable named next to
-// it; flags win over the environment. Optional components (the GitHub App,
-// the inventory store) that are not configured leave the server running and
-// are reported as missing by get_info.
+// it; flags win over the environment. Optional components (the inventory App
+// giantswarm-repo-manager-inventory for the unattended reads, the inventory
+// store) that are not configured leave the server running and are reported
+// as missing by get_info; nothing stands in for them. The server holds no
+// CircleCI token: the inventory's CircleCI facts come from the `ci/circleci:`
+// commit statuses GitHub carries and from the reconciler's run artifact.
 package main
 
 import (
@@ -23,8 +26,6 @@ import (
 	"strings"
 	"syscall"
 	"time"
-
-	"github.com/giantswarm/devctl/v8/pkg/circleciclient"
 
 	"github.com/giantswarm/giantswarm-repo-manager/internal/collect"
 	"github.com/giantswarm/giantswarm-repo-manager/internal/gh"
@@ -44,10 +45,8 @@ type options struct {
 	sweepConcurrency, staleDays    int
 	graphqlBudgetFloor             int
 
-	githubAPIURL, githubAppPrivateKeyFile, githubToken string
-	githubAppID, githubAppInstallationID               int64
-
-	circleciToken string
+	githubAPIURL, githubAppPrivateKeyFile string
+	githubAppID, githubAppInstallationID  int64
 
 	teamFilesRepository, teamFilesRef             string
 	reviewsURL, reviewsTokenFile, reviewsChannels string
@@ -66,17 +65,15 @@ func parseFlags(args []string) (*options, error) {
 	f.StringVar(&o.org, "org", envOr("INVENTORY_ORG", "giantswarm"), "The GitHub organization the inventory covers (INVENTORY_ORG)")
 	f.DurationVar(&o.sweepInterval, "sweep-interval", envDuration("SWEEP_INTERVAL", 24*time.Hour), "Full inventory sweep every interval; 0 turns the schedule off (SWEEP_INTERVAL)")
 	f.BoolVar(&o.sweepEngineChecks, "sweep-engine-checks", envBoolDefault("SWEEP_ENGINE_CHECKS", true), "Run the engine's set-up checks in read mode for every declared repository during a sweep (SWEEP_ENGINE_CHECKS)")
-	f.IntVar(&o.sweepConcurrency, "sweep-concurrency", int(envInt64Default("SWEEP_CONCURRENCY", 4)), "Parallel CircleCI and engine reads during a sweep (SWEEP_CONCURRENCY)")
+	f.IntVar(&o.sweepConcurrency, "sweep-concurrency", int(envInt64Default("SWEEP_CONCURRENCY", 4)), "Parallel engine reads during a sweep (SWEEP_CONCURRENCY)")
 	f.IntVar(&o.staleDays, "stale-days", int(envInt64Default("ORPHAN_STALE_DAYS", 180)), "Stale period of the orphan score in days (ORPHAN_STALE_DAYS)")
 	f.IntVar(&o.graphqlBudgetFloor, "graphql-budget-floor", int(envInt64Default("GRAPHQL_BUDGET_FLOOR", 0)), "Stop a sweep cleanly when the GraphQL budget's remaining points fall below this; 0 never stops (GRAPHQL_BUDGET_FLOOR)")
 	f.BoolVar(&o.sweepOnce, "sweep-once", envBool("SWEEP_ONCE"), "Run one full sweep, print its summary as JSON and exit (SWEEP_ONCE)")
 	f.StringVar(&o.internalToken, "internal-token", envSecret("INTERNAL_TOKEN"), "Bearer token of the internal endpoints (/internal/refresh for the reconciler, /internal/sweep); empty disables them (INTERNAL_TOKEN)")
 	f.StringVar(&o.githubAPIURL, "github-api-url", envOr("GITHUB_API_URL", ""), "GitHub API base URL; empty is api.github.com (GITHUB_API_URL)")
-	f.Int64Var(&o.githubAppID, "github-app-id", envInt64("GITHUB_APP_ID"), "GitHub App id for unattended reads (GITHUB_APP_ID)")
-	f.Int64Var(&o.githubAppInstallationID, "github-app-installation-id", envInt64("GITHUB_APP_INSTALLATION_ID"), "The App's installation id on the org (GITHUB_APP_INSTALLATION_ID)")
-	f.StringVar(&o.githubAppPrivateKeyFile, "github-app-private-key-file", envOr("GITHUB_APP_PRIVATE_KEY_FILE", ""), "PEM private key of the App (GITHUB_APP_PRIVATE_KEY_FILE)")
-	f.StringVar(&o.githubToken, "github-token", envSecret("GITHUB_TOKEN"), "Development only: a personal token for the unattended reads when no App is configured; draws from that person's budget (GITHUB_TOKEN)")
-	f.StringVar(&o.circleciToken, "circleci-api-token", envSecret("CIRCLECI_API_TOKEN"), "CircleCI API token, read scope; prefer the environment (CIRCLECI_API_TOKEN)")
+	f.Int64Var(&o.githubAppID, "github-app-id", envInt64("GITHUB_APP_ID"), "Id of the read-only GitHub App giantswarm-repo-manager-inventory, the identity of the unattended reads (GITHUB_APP_ID)")
+	f.Int64Var(&o.githubAppInstallationID, "github-app-installation-id", envInt64("GITHUB_APP_INSTALLATION_ID"), "The inventory App's installation id on the org (GITHUB_APP_INSTALLATION_ID)")
+	f.StringVar(&o.githubAppPrivateKeyFile, "github-app-private-key-file", envOr("GITHUB_APP_PRIVATE_KEY_FILE", ""), "PEM private key of the inventory App (GITHUB_APP_PRIVATE_KEY_FILE)")
 	f.StringVar(&o.teamFilesRepository, "team-files-repository", envOr("TEAM_FILES_REPOSITORY", teamfiles.DefaultRepository), "owner/name of the repository that holds the team files and policy files (TEAM_FILES_REPOSITORY)")
 	f.StringVar(&o.teamFilesRef, "team-files-ref", envOr("TEAM_FILES_REF", teamfiles.DefaultRef), "Branch the team files are read from and pull requests target (TEAM_FILES_REF)")
 	f.StringVar(&o.reviewsURL, "reviews-url", envOr("REVIEWS_URL", ""), "klaus-gateway's base URL for the team-review endpoint (POST /reviews, /notices); empty leaves the asks undelivered (REVIEWS_URL)")
@@ -106,13 +103,12 @@ func main() {
 
 // run wires the components and serves until ctx is done.
 func run(ctx context.Context, o *options, log *slog.Logger) error {
-	deps := tools.Deps{Version: version(), GitHubAPIURL: o.githubAPIURL, CircleCIConfigured: o.circleciToken != "", Log: log,
+	deps := tools.Deps{Version: version(), GitHubAPIURL: o.githubAPIURL, Log: log,
 		TeamFilesRepository: o.teamFilesRepository, TeamFilesRef: o.teamFilesRef,
 		Review: review.New(review.Config{BaseURL: o.reviewsURL, TokenFile: o.reviewsTokenFile, Channels: channelMap(o.reviewsChannels)})}
 
 	var reader *gh.Reader
-	switch {
-	case o.githubAppID != 0 || o.githubAppInstallationID != 0 || o.githubAppPrivateKeyFile != "":
+	if o.githubAppID != 0 || o.githubAppInstallationID != 0 || o.githubAppPrivateKeyFile != "" {
 		key, err := os.ReadFile(o.githubAppPrivateKeyFile) // #nosec G304 G703 -- operator-provided path
 		if err != nil {
 			return fmt.Errorf("github app private key: %w", err)
@@ -123,14 +119,6 @@ func run(ctx context.Context, o *options, log *slog.Logger) error {
 		}
 		deps.App = app
 		reader = app.Reader()
-	case o.githubToken != "":
-		r, err := gh.TokenReader(o.githubAPIURL, o.githubToken)
-		if err != nil {
-			return err
-		}
-		reader = r
-		deps.Reader = r
-		log.Warn("reading GitHub with a personal token (GITHUB_TOKEN): development only, it draws from that person's budget")
 	}
 	var store *inventory.Store
 	if o.valkeyAddr != "" {
@@ -141,24 +129,11 @@ func run(ctx context.Context, o *options, log *slog.Logger) error {
 		defer s.Close()
 		store, deps.Inventory = s, s
 	}
-	var circle *collect.CircleCIClient
-	if o.circleciToken != "" {
-		c, err := collect.NewCircleCI(o.circleciToken)
-		if err != nil {
-			return err
-		}
-		circle = c
-	}
 	if reader != nil && deps.Inventory != nil {
-		var cc *circleciclient.Client
-		var circleReads collect.CircleCI
-		if circle != nil {
-			cc, circleReads = circle.Client(), circle
-		}
 		deps.Collector = collect.New(collect.Options{
 			Org: o.org, Stale: time.Duration(o.staleDays) * 24 * time.Hour, EngineChecks: o.sweepEngineChecks,
 			Concurrency: o.sweepConcurrency, BudgetFloor: o.graphqlBudgetFloor,
-		}, reader, deps.Inventory, collect.NewEngine(o.org, reader, cc), circleReads, log)
+		}, reader, deps.Inventory, collect.NewEngine(o.org, reader), log)
 	}
 	if o.sweepOnce {
 		if store != nil {
@@ -223,7 +198,7 @@ func run(ctx context.Context, o *options, log *slog.Logger) error {
 // too and is not a failure.
 func sweepOnce(ctx context.Context, c *collect.Collector) error {
 	if c == nil {
-		return errors.New("--sweep-once needs the inventory store (VALKEY_ADDR) and a GitHub read identity (the App, or GITHUB_TOKEN)")
+		return errors.New("--sweep-once needs the inventory store (VALKEY_ADDR) and the inventory App giantswarm-repo-manager-inventory (GITHUB_APP_ID, GITHUB_APP_INSTALLATION_ID, GITHUB_APP_PRIVATE_KEY_FILE)")
 	}
 	sum, err := c.Sweep(ctx)
 	if err != nil && !errors.Is(err, collect.ErrBudget) {
@@ -273,8 +248,7 @@ func envOr(key, def string) string {
 
 // envSecret reads a secret from the environment with surrounding whitespace
 // and quotes trimmed: a Secret created from a file carries the file's
-// trailing newline, and a token copied from a YAML file may carry its quotes,
-// which CircleCI answers with 401.
+// trailing newline, and a token copied from a YAML file may carry its quotes.
 func envSecret(key string) string {
 	return strings.Trim(strings.TrimSpace(os.Getenv(key)), `"'`)
 }

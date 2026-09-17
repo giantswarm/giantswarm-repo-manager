@@ -75,9 +75,13 @@ posts it unchanged as `lastRun.result`, with the run's URL and the time it finis
     "unknownCodeownersTeams": [],       // CODEOWNERS teams the org does not have
     "has": {"renovate": true, "dependabot": false, "circleci": true, "workflows": true, "dockerfile": true, "helm": true, "readme": true, "codeowners": true}
   },
-  "circleci": {                         // absent without a CircleCI token
-    "followed": true, "setupWorkflows": true,
-    "lastPipeline": {"number": 42, "state": "created", "createdAt": "…", "ref": "main"}
+  "circleci": {                         // absent when the repository is gone; no CircleCI token is involved
+    "followed": true,                   // ci/circleci: statuses on the head, or the reconciler's circleci step found the project followed
+    "setupWorkflows": true,             // from the reconciler's run artifact only; absent and named in unknown until a run tells
+    "head": {"state": "success", "contexts": ["ci/circleci: go-build", "ci/circleci: push-to-registries"], "at": "…"},  // the default branch head's ci/circleci: statuses (worst state)
+    "source": "statuses+artifact",      // statuses | artifact | statuses+artifact: the sources that answered
+    "unknown": [],                      // the facts no source yields: setupWorkflows, followed (status contexts truncated, none CircleCI's)
+    "error": ""                         // the reconciler's circleci step failing, as its run reported it
   },
   "renovate": {
     "configured": true, "path": "renovate.json5",
@@ -133,7 +137,7 @@ repositories are not scored (score 0, one reason saying so).
 
 `startedAt`, `finishedAt`, `duration`, `repositories`, `declared`, `undeclared`, `gone`, `archived`, `engineChecks`,
 `removed`, `graphql {calls, cost, remaining, limit, resetAt}`, `rest {calls, remaining, limit, resetAt}`,
-`circleciCalls`, `errors[]` (source problems, a budget stop). The GitHub reads follow the prototype's paging:
+`errors[]` (source problems, a budget stop). The GitHub reads follow the prototype's paging:
 repository metadata 20 a page (halved down to 5 on a page GitHub cannot answer — over the whole org 50 a page was answered with 502 and 25 with a truncated body), default-branch history in aliased batches of 20 (halved on a failing batch), the team
 files, catalog, mapping and org teams in one query — one combined metadata+history query made GitHub answer 502. With
 `inventory.sweep.graphqlBudgetFloor` set, a sweep stops cleanly when the GraphQL budget falls below it: what was

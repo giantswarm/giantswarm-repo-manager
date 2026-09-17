@@ -13,8 +13,6 @@ import (
 
 	"github.com/giantswarm/devctl/v8/pkg/reposetup"
 	"github.com/giantswarm/devctl/v8/pkg/reposetup/reconcile"
-
-	"github.com/giantswarm/giantswarm-repo-manager/internal/inventory"
 )
 
 // The fake org: one declared repository that exists, one declared but gone,
@@ -52,6 +50,8 @@ const (
 	dissolvedTeam   = "team-dissolved"
 	fakeRunURL      = "https://github.com/giantswarm/github/actions/runs/1"
 	fakeGraphQLCost = 7
+	circleBuild     = "ci/circleci: go-build"
+	circlePush      = "ci/circleci: push-to-registries"
 )
 
 var teamFile = `# yaml-language-server: $schema=../repositories.schema.json
@@ -121,7 +121,14 @@ func (o *fakeOrg) handle(w http.ResponseWriter, r *http.Request) {
 	case contains(req.Query, "repository(owner: $org, name: $name)"):
 		name, _ := req.Variables["name"].(string)
 		if n := o.node(name); n != nil {
-			n["defaultBranchRef"] = map[string]any{kName: mainBranch, "target": map[string]any{"history": o.history(name)}}
+			// The history joins the head's status rollup the node carries.
+			target := map[string]any{"history": o.history(name)}
+			if ref, ok := n["defaultBranchRef"].(map[string]any); ok {
+				if t, ok := ref["target"].(map[string]any); ok {
+					target["statusCheckRollup"] = t["statusCheckRollup"]
+				}
+			}
+			n["defaultBranchRef"] = map[string]any{kName: mainBranch, "target": target}
 			data["repository"] = n
 		} else {
 			data["repository"] = nil
@@ -172,6 +179,7 @@ func (o *fakeOrg) node(name string) map[string]any {
 		n["codeowners"] = map[string]any{kText: "* @giantswarm/" + team + "\n"}
 		n["renovate0"] = map[string]any{kText: "{\n  // generated\n  \"extends\": [\"github>giantswarm/renovate-presets:default.json5\"],\n  packageRules: [{ enabled: false, matchPackageNames: [\"x\"] },],\n}\n"}
 		n["circleci"] = map[string]any{"id": "2"}
+		n["defaultBranchRef"] = map[string]any{kName: mainBranch, "target": map[string]any{"statusCheckRollup": o.rollup()}}
 		n["dockerfile"] = map[string]any{"id": "3"}
 		n["helm"] = map[string]any{"id": "4"}
 		return n
@@ -189,6 +197,20 @@ func (o *fakeOrg) node(name string) map[string]any {
 		return base(true)
 	}
 	return nil
+}
+
+// rollup is the present repository's head status rollup: CircleCI's two job
+// statuses (one still pending) among a GitHub Actions check run and another
+// system's status.
+func (o *fakeOrg) rollup() map[string]any {
+	return map[string]any{"state": "PENDING", "contexts": map[string]any{
+		"pageInfo": map[string]any{"hasNextPage": false},
+		kNodes: []map[string]any{
+			{kName: "lint"}, // a CheckRun: no context
+			{"context": circleBuild, "state": "SUCCESS", kCreatedAt: o.now.Add(-2 * time.Hour).Format(time.RFC3339)},
+			{"context": circlePush, "state": "PENDING", kCreatedAt: o.now.Add(-time.Hour).Format(time.RFC3339)},
+			{"context": "sonar", "state": "FAILURE", kCreatedAt: o.now.Format(time.RFC3339)},
+		}}}
 }
 
 // history is the default branch's recent commits: the stray repository saw
@@ -218,14 +240,3 @@ func (c *fakeChecker) Check(_ context.Context, teamSlug string, entry reposetup.
 			Findings: []reconcile.Finding{{Kind: reconcile.FindingDefaultIcon, Message: "the chart carries the template's icon", Fix: "replace helm/<chart>/icon.svg"}}}},
 	}, nil
 }
-
-// fakeCircleCI follows every repository.
-type fakeCircleCI struct{ calls atomic.Int32 }
-
-func (c *fakeCircleCI) Project(_ context.Context, _, _ string) *inventory.CircleCI {
-	c.calls.Add(1)
-	yes := true
-	return &inventory.CircleCI{Followed: true, SetupWorkflows: &yes, LastPipeline: &inventory.Pipeline{Number: 42, State: "created", CreatedAt: time.Now(), Ref: mainBranch}}
-}
-
-func (c *fakeCircleCI) Calls() int { return int(c.calls.Load()) }

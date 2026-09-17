@@ -49,7 +49,7 @@ its own app, not as a component of the `agent-platform` meta chart.
 | inventory.org | string | `"giantswarm"` | The GitHub organization the inventory covers. |
 | inventory.sweep.interval | string | `"24h"` | Full sweep over the org every interval (a Go duration); `"0"` turns the schedule off. The first sweep runs at start when the last one is older than the interval. |
 | inventory.sweep.engineChecks | bool | `true` | Run the engine's set-up checks in read mode for every accepted declaration during a sweep (REST as the App, about ten calls per repository). A `refresh_repository` always runs them. |
-| inventory.sweep.concurrency | int | `4` | Parallel CircleCI and engine reads during a sweep. |
+| inventory.sweep.concurrency | int | `4` | Parallel engine reads during a sweep. |
 | inventory.sweep.graphqlBudgetFloor | int | `0` | Stop a sweep cleanly when the GraphQL budget's remaining points fall below this; 0 never stops. |
 | inventory.orphan.staleDays | int | `180` | Stale period of the orphan score in days (no commit by a person, no Renovate activity within it). |
 | inventory.internal.existingSecret | string | `""` | Existing Secret with the bearer token of the internal endpoints under `token`: `POST /internal/refresh` (the reconciler workflow's trigger after a run, with the run as `lastRun`) and `/internal/sweep`. Empty disables them (404). |
@@ -73,11 +73,10 @@ its own app, not as a component of the `agent-platform` meta chart.
 | muster.mcpServer.auth.authorizationServer.clientCredentialsSecretRef.name | string | `"giantswarm-repo-manager-oauth-client"` | Secret with the App's OAuth client under `client-id` and `client-secret`. |
 | muster.mcpServer.auth.authorizationServer.clientCredentialsSecretRef.namespace | string | `""` | Namespace of that Secret; empty is the release namespace. |
 | muster.mcpServer.auth.authorizationServer.grantScope | string | `"subject"` | `subject`: the grant belongs to the person, not to one login session — every session of theirs (the portal, an agent, a Slack click) carries the same token. |
-| githubApp.appID | int | `0` | The App used for unattended, read-only inventory reads (the giantswarm-align-files App) and its installation on the org. 0 leaves the App identity off. |
-| githubApp.installationID | int | `0` |  |
-| githubApp.existingSecret | string | `""` | Existing Secret with the App's PEM private key under `private-key`. |
+| githubApp.appID | int | `0` | Id of the read-only GitHub App `giantswarm-repo-manager-inventory`, the one identity of the unattended reads: the org sweep, the engine's checks in read mode and the name check of a dry run run as its installation, on its own rate budget. Its permissions, all read: Administration, Contents, Pull requests, Issues, Commit statuses (the `ci/circleci:` contexts on the default branch head), Metadata, Organization members. 0 leaves the unattended reads unconfigured — nothing stands in for the App; the tools that need it say so. |
+| githubApp.installationID | int | `0` | The inventory App's installation id on the org. |
+| githubApp.existingSecret | string | `""` | Existing Secret with the inventory App's PEM private key under `private-key`. |
 | githubApp.apiURL | string | `""` | GitHub API base URL; empty is api.github.com. |
-| circleci.existingSecret | string | `""` | Existing Secret with the CircleCI API token (read scope) under `token`, passed as `CIRCLECI_API_TOKEN`. Empty leaves it unset. |
 | serviceAccount.create | bool | `true` | Create a ServiceAccount. |
 | serviceAccount.annotations | object | `{}` | Annotations on the ServiceAccount. |
 | serviceAccount.name | string | `""` | ServiceAccount name (generated when empty). |

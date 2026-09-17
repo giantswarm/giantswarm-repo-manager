@@ -1,10 +1,10 @@
-// Package gh holds the GitHub identities this server uses: the App
-// installation for unattended, read-only inventory reads on its own rate
-// budget, and the person, through the GitHub user token muster puts on every
-// call (the person's authorization of the App giantswarm-repo-manager).
-// Nothing here writes as an App on a person's behalf. In development a
-// personal token can stand in for the read App (TokenReader); it then draws
-// from that person's budget.
+// Package gh holds the GitHub identities this server uses: the installation
+// of the read-only App giantswarm-repo-manager-inventory for unattended
+// inventory reads on its own rate budget, and the person, through the GitHub
+// user token muster puts on every call (the person's authorization of the
+// App giantswarm-repo-manager). Nothing here writes as an App on a person's
+// behalf, and nothing stands in for either identity: without the inventory
+// App there are no unattended reads.
 package gh
 
 import (
@@ -89,8 +89,7 @@ func (a *App) Installation() *github.Client { return a.reader.REST() }
 func (a *App) Reader() *Reader { return a.reader }
 
 // Reader is the unattended read identity: REST and GraphQL as the App
-// installation, or as a token in development, with the REST budget it drew
-// read from the response headers.
+// installation, with the REST budget it drew read from the response headers.
 type Reader struct {
 	apiURL  string
 	rest    *github.Client
@@ -98,18 +97,6 @@ type Reader struct {
 	counter *counter
 	name    string
 	token   func(ctx context.Context) (string, error)
-}
-
-// TokenReader is a Reader on a personal or fine-grained token — development
-// only: it draws from the token owner's shared budget.
-func TokenReader(apiURL, token string) (*Reader, error) {
-	token = strings.TrimSpace(token)
-	if token == "" {
-		return nil, fmt.Errorf("github: a token is required")
-	}
-	counter := &counter{base: http.DefaultTransport}
-	tr := &bearerTransport{token: token, base: counter}
-	return newReader(apiURL, tr, counter, "token", func(context.Context) (string, error) { return token, nil })
 }
 
 func newReader(apiURL string, tr http.RoundTripper, counter *counter, name string, token func(ctx context.Context) (string, error)) (*Reader, error) {
@@ -126,7 +113,7 @@ func (r *Reader) REST() *github.Client { return r.rest }
 // HTTP is an authenticated client (GraphQL).
 func (r *Reader) HTTP() *http.Client { return r.http }
 
-// Name says which identity reads: "app installation <id>" or "token".
+// Name says which identity reads: "app installation <id>".
 func (r *Reader) Name() string { return r.name }
 
 // APIURL is the REST base URL ("" for api.github.com).
@@ -187,17 +174,6 @@ func (c *counter) snapshot() Usage {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	return c.usage
-}
-
-type bearerTransport struct {
-	token string
-	base  http.RoundTripper
-}
-
-func (t *bearerTransport) RoundTrip(req *http.Request) (*http.Response, error) {
-	r := req.Clone(req.Context())
-	r.Header.Set("Authorization", "Bearer "+t.token)
-	return t.base.RoundTrip(r)
 }
 
 // AsPerson returns a client that calls GitHub with the person's user token —

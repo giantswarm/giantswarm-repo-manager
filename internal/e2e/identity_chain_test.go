@@ -66,14 +66,13 @@ type stack struct {
 	store   *inventory.Store
 	col     *collect.Collector
 	checker *fakeChecker
-	circle  *fakeCircleCI
 	log     *slog.Logger
 }
 
 // newCollector builds another collector over the same store and fakes, with
 // a GraphQL budget floor.
 func (st *stack) newCollector(floor int) *collect.Collector {
-	return collect.New(collect.Options{Org: org, EngineChecks: true, Concurrency: 2, BudgetFloor: floor}, st.app.Reader(), st.store, st.checker, st.circle, st.log)
+	return collect.New(collect.Options{Org: org, EngineChecks: true, Concurrency: 2, BudgetFloor: floor}, st.app.Reader(), st.store, st.checker, st.log)
 }
 
 func newStack(t *testing.T) *stack {
@@ -115,9 +114,9 @@ func newStack(t *testing.T) *stack {
 	if err != nil {
 		t.Fatal(err)
 	}
-	st := &stack{ghs: ghs, gw: gw, app: app, store: store, checker: &fakeChecker{}, circle: &fakeCircleCI{}, log: log}
+	st := &stack{ghs: ghs, gw: gw, app: app, store: store, checker: &fakeChecker{}, log: log}
 	st.col = st.newCollector(0)
-	ts := tools.New(tools.Deps{Version: testVersion, GitHubAPIURL: apiURL, AuthorizationServer: server.DefaultAuthorizationServer, App: app, Inventory: store, Collector: st.col, CircleCIConfigured: true, Log: log,
+	ts := tools.New(tools.Deps{Version: testVersion, GitHubAPIURL: apiURL, AuthorizationServer: server.DefaultAuthorizationServer, App: app, Inventory: store, Collector: st.col, Log: log,
 		TeamFilesRepository: org + "/github", TeamFilesRef: mainBranch,
 		Review: review.New(review.Config{BaseURL: gws.URL, TokenFile: tokenFile, Channels: map[string]string{teamPlaneteers: planeteersChannel}})})
 	st.col.OnReconciled(ts.Reconciled)
@@ -219,19 +218,25 @@ func TestCallerFromTheBearer(t *testing.T) {
 	if a := info.Auth; a.Mode != tools.AuthModeBearer || a.AuthorizationServer != server.DefaultAuthorizationServer || a.Reason != "" {
 		t.Errorf("auth: %+v", a)
 	}
-	if a := info.GitHub.App; a == nil || a.Slug != "giantswarm-align-files" || a.ID != 17164699 || a.InstallationID != 7 || info.GitHub.AppError != "" {
+	if a := info.GitHub.App; a == nil || a.Slug != inventoryApp || a.ID != 17164699 || a.InstallationID != 7 || info.GitHub.AppError != "" {
 		t.Errorf("app: %+v (%s)", a, info.GitHub.AppError)
 	}
-	if inv := info.Inventory; !inv.Connected || inv.Records != 1 || inv.Error != "" {
+	if inv := info.Inventory; !inv.Connected || inv.Records != 1 || inv.Error != "" || inv.Identity != "app "+inventoryApp+" (installation 7)" {
 		t.Errorf("inventory: %+v", inv)
+	}
+	if info.CircleCI.Source != inventory.CircleCISourceBoth {
+		t.Errorf("circleci source: %+v", info.CircleCI)
+	}
+	if tf := info.TeamFiles; tf.Readable != tools.ReadableTrue || tf.Repository != org+"/github" || tf.Ref != mainBranch || tf.Reason != "" {
+		t.Errorf("team files as alice: %+v", tf)
 	}
 	// The engine's version comes from the binary's build info; whether a
 	// *test* binary lists module deps depends on the toolchain (Go 1.27 does,
 	// 1.26 does not), so only the module and package are asserted here — the
 	// built binary is checked with `go version -m`.
-	if !info.GitHub.CircleCIConfigured || !info.Capabilities.ApplyRefused || info.Engine.Version == "" ||
+	if !info.Capabilities.ApplyRefused || info.Engine.Version == "" ||
 		info.Engine.Module != "github.com/giantswarm/devctl/v8" || !strings.HasSuffix(info.Engine.Package, "/pkg/reposetup") {
-		t.Errorf("info: circleci=%v caps=%+v engine=%+v", info.GitHub.CircleCIConfigured, info.Capabilities, info.Engine)
+		t.Errorf("info: caps=%+v engine=%+v", info.Capabilities, info.Engine)
 	}
 	// initialize and two get_info calls: the token was verified once.
 	getInfo(t, c)

@@ -150,7 +150,9 @@ type RowSetup struct {
 	Refused   bool   `json:"refused,omitempty"`
 	CheckedAt string `json:"checkedAt,omitempty"`
 	LastRun   string `json:"lastRun,omitempty"`
-	Error     string `json:"error,omitempty"`
+	// PendingRun is a Reconcile now waiting for its run's artifact.
+	PendingRun *inventory.PendingRun `json:"pendingRun,omitempty"`
+	Error      string                `json:"error,omitempty"`
 }
 
 // Listing is list_repositories' result.
@@ -242,6 +244,7 @@ func row(r *inventory.Record, now time.Time) Row {
 	if r.Setup.LastRun != nil {
 		row.Setup.LastRun = r.Setup.LastRun.RunURL
 	}
+	row.Setup.PendingRun = r.Setup.PendingRun
 	row.Setup.Error = r.Setup.CheckError
 	if r.Decision != nil {
 		row.Decision = r.Decision.Verdict

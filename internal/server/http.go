@@ -23,8 +23,8 @@ type Config struct {
 	// OAuth, when set, makes the MCP endpoint require a GitHub user token as
 	// the bearer — behind muster the person's — verified with GET /user.
 	OAuth *OAuthConfig
-	// Internal, when set, serves /internal/ — the reconciler's refresh trigger
-	// and the sweep control, authenticated by their own static token.
+	// Internal, when set, serves /internal/ — the sweep control, authenticated
+	// by its own static token.
 	Internal http.Handler
 	// Ready, when set, is what /readyz asks: an error makes the probe fail
 	// (503 with the reason) while the process stays up and keeps serving.

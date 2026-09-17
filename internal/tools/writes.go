@@ -5,11 +5,13 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/giantswarm/devctl/v8/pkg/reposetup"
 	"github.com/giantswarm/devctl/v8/pkg/reposetup/reconcile"
 	"github.com/mark3labs/mcp-go/mcp"
 
+	"github.com/giantswarm/giantswarm-repo-manager/internal/inventory"
 	"github.com/giantswarm/giantswarm-repo-manager/internal/review"
 	"github.com/giantswarm/giantswarm-repo-manager/internal/teamfiles"
 )
@@ -619,6 +621,10 @@ type Dispatch struct {
 	// Findings is the inventory's refusal of the entry when its last check
 	// refused it: the run would report the refusal and run no step.
 	Findings []reconcile.Finding `json:"findings,omitempty"`
+	// PendingRun is the record's pending run after the dispatch: the
+	// inventory reads the run's artifact within seconds of its completion,
+	// get_repository shows setup.lastRun then.
+	PendingRun *inventory.PendingRun `json:"pendingRun,omitempty"`
 }
 
 func (t *tools) reconcileRepository() WriteTool {
@@ -626,8 +632,9 @@ func (t *tools) reconcileRepository() WriteTool {
 		Name: ToolReconcileRepository,
 		Description: "Run the reconciler for one repository now (Reconcile now): dispatches the reconcile-repositories workflow in giantswarm/github " +
 			"as you, which runs the engine's set-up steps for that repository — settings, permissions, protection, CircleCI, Renovate check, CODEOWNERS, " +
-			"metadata, lifecycle, catalog, release — and then refreshes its inventory record with the run as lastRun; the completion message follows " +
-			"in the team's channel. Nothing is written to the team files. Here mode commit means: dispatch.",
+			"metadata, lifecycle, catalog, release. The record shows setup.pendingRun until the inventory has read the run's artifact (within " +
+			"seconds of the run completing) as setup.lastRun; the completion message follows in the team's channel; a run that does not report " +
+			"within 15 minutes leaves the finding reconcile-run-missing. Nothing is written to the team files. Here mode commit means: dispatch.",
 		Options: []mcp.ToolOption{
 			mcp.WithString(argRepository, mcp.Required(), mcp.Description("Repository name, with or without the org.")),
 			mcp.WithString(argTeam, mcp.Description("Team slug; required for a repository without an entry (it is then reconciled from the team alone), optional otherwise.")),
@@ -650,11 +657,16 @@ func (t *tools) dispatch(ctx context.Context, args map[string]any, run bool) (*D
 	if team, _ := args[argTeam].(string); strings.TrimSpace(team) != "" {
 		inputs[argTeam] = strings.TrimSpace(team)
 	}
-	d := &Dispatch{Workflow: teamfiles.ReconcilerWorkflow, Inputs: inputs,
-		Then: "the workflow posts the run to this server's /internal/refresh: get_repository then shows setup.lastRun, and the team's channel gets the completion message"}
+	workflow := t.d.reconcilerWorkflow()
+	d := &Dispatch{Workflow: workflow, Inputs: inputs,
+		Then: "the inventory reads the run's reconcile-" + name + " artifact from GitHub within seconds of the run completing: get_repository shows setup.pendingRun until then, setup.lastRun after, and the team's channel gets the completion message"}
+	var rec *inventory.Record
 	if t.d.Inventory != nil {
 		key, _ := t.repositoryKey(args)
-		if rec, err := t.d.Inventory.Get(ctx, key); err == nil && rec.Setup.Checks != nil && rec.Setup.Checks.Step(reconcile.StepEntry) != nil {
+		if r, err := t.d.Inventory.Get(ctx, key); err == nil {
+			rec = r
+		}
+		if rec != nil && rec.Setup.Checks != nil && rec.Setup.Checks.Step(reconcile.StepEntry) != nil {
 			d.Findings = rec.Setup.Checks.Findings()
 			d.Then = "the inventory's last check refused the entry (findings): unless the team file changed since, the run reports the refusal and runs no step — fix the entry with update_repository first; " + d.Then
 		}
@@ -663,14 +675,24 @@ func (t *tools) dispatch(ctx context.Context, args map[string]any, run bool) (*D
 	if err != nil {
 		return nil, err
 	}
-	d.As, d.RunsURL = p.login, p.repo.WorkflowURL(teamfiles.ReconcilerWorkflow)
+	d.As, d.RunsURL = p.login, p.repo.WorkflowURL(workflow)
 	if !run {
 		return d, nil
 	}
-	if err := p.repo.Dispatch(ctx, teamfiles.ReconcilerWorkflow, inputs); err != nil {
+	if err := p.repo.Dispatch(ctx, workflow, inputs); err != nil {
 		return nil, fmt.Errorf("%w (the dispatch runs as you: it needs Actions write on %s/%s for you through the App giantswarm-repo-manager)", err, p.repo.Owner, p.repo.Name)
 	}
 	d.Dispatched = true
 	t.d.Log.Info("reconciler dispatched", "repository", name, "as", p.login)
+	// A workflow_dispatch returns no run id: the record waits for the run's
+	// artifact as pendingRun, which the poller answers or gives up.
+	if rec != nil {
+		rec.Dispatched(time.Now().UTC(), p.login)
+		if err := t.d.Inventory.Put(ctx, rec); err != nil {
+			t.d.Log.Error("pending run not stored", "repository", name, "error", err)
+		} else {
+			d.PendingRun = rec.Setup.PendingRun
+		}
+	}
 	return d, nil
 }

@@ -27,7 +27,7 @@ exposes it, with the repository lifecycle, as MCP tools with the prefix `giantsw
 | `transfer_repository` | the entry moved between two team files in one pull request naming the giving and the receiving team; the ask to the receiving team's channel, a notice to the giving team's |
 | `set_lifecycle` | `deprecated` or `archived` set on the entry; the ask to the owning team's channel |
 | `approve_change` | the caller's GitHub team membership checked (the team named in the pull request), then the approving review submitted as the caller — what the Slack ask's Approve button calls as the clicking member |
-| `reconcile_repository` | the reconciler workflow (`reconcile-repositories.yaml` in giantswarm/github) dispatched for one repository as the caller; the run reports back through `/internal/refresh` and the completion message ("repository · catalog entity · first release") reaches the team's channel |
+| `reconcile_repository` | the reconciler workflow (`reconcile-repositories.yaml` in giantswarm/github) dispatched for one repository as the caller; the record shows `setup.pendingRun` until the inventory has read the run's artifact, and the completion message ("repository · catalog entity · first release") reaches the team's channel |
 
 Every tool's description and input schema, as muster exposes them: [`docs/tools.md`](docs/tools.md).
 
@@ -88,8 +88,8 @@ write tool takes `dryRun` and `mode`.
 No CircleCI token. The inventory's CircleCI facts come from GitHub and the reconciler: whether CircleCI builds
 a repository from the `ci/circleci:` commit statuses on its default branch head (read with the repository, as
 the inventory App — CircleCI posts them for the projects it builds) together with the `.circleci/config.yml`
-blob; whether the project is followed and setup workflows are on from the reconciler's run artifact, posted to
-`POST /internal/refresh` after every run (its `circleci` step). What neither source yields, the record names as
+blob; whether the project is followed and setup workflows are on from the reconciler's run artifact, read from
+GitHub after every run (its `circleci` step). What neither source yields, the record names as
 `unknown` — the last pipeline is not derivable and is not part of the record. `get_info` reports
 `circleci.source: statuses+artifact`. The engine's read-mode checks run without a CircleCI client, so their
 `circleci` and `release` steps are skipped.
@@ -101,8 +101,9 @@ login App that signs people in to the portal is untouched and gains no write sco
 ## The inventory
 
 One Valkey record per repository of the org, filled by a full sweep on a schedule (`inventory.sweep.interval`,
-default daily), one repository after each reconciler run (`POST /internal/refresh` with the run, authenticated by the
-token of `inventory.internal.existingSecret`) and on demand (`refresh_repository`). GitHub is read as the App through
+default daily), one repository per artifact of each completed reconciler run (the poller reads the workflow's runs from
+GitHub as the inventory App every `inventory.reconciler.pollInterval`, default 5 min, every 30 s while a Reconcile now is
+pending — nothing reaches the server from the workflow) and on demand (`refresh_repository`). GitHub is read as the App through
 GraphQL — repository metadata 20 a page (halved when GitHub cannot answer a page), default-branch history in aliased batches of 20 — and the engine's checks run
 in read mode per accepted declaration (`inventory.sweep.engineChecks`). `--sweep-once` runs one sweep and prints the
 summary (calls, GraphQL points, REST calls, duration); `inventory.sweep.graphqlBudgetFloor` stops a sweep cleanly when

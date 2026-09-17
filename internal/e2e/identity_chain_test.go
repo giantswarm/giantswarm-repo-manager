@@ -18,6 +18,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -67,12 +68,32 @@ type stack struct {
 	col     *collect.Collector
 	checker *fakeChecker
 	log     *slog.Logger
+	// offset moves the collectors' clock: advance lets a pending run's
+	// window run out without waiting.
+	offset atomic.Int64
 }
 
 // newCollector builds another collector over the same store and fakes, with
 // a GraphQL budget floor.
 func (st *stack) newCollector(floor int) *collect.Collector {
-	return collect.New(collect.Options{Org: org, EngineChecks: true, Concurrency: 2, BudgetFloor: floor}, st.app.Reader(), st.store, st.checker, st.log)
+	return collect.New(collect.Options{Org: org, EngineChecks: true, Concurrency: 2, BudgetFloor: floor, Now: st.now,
+		Reconciler: collect.ReconcilerOptions{Repository: org + "/github"}}, st.app.Reader(), st.store, st.checker, st.log)
+}
+
+// now is the collectors' clock.
+func (st *stack) now() time.Time { return time.Now().Add(time.Duration(st.offset.Load())) }
+
+// advance moves the collectors' clock forward by d.
+func (st *stack) advance(d time.Duration) { st.offset.Add(int64(d)) }
+
+// poll runs one reconciler poll.
+func (st *stack) poll(t *testing.T) *collect.ReconcilerPoll {
+	t.Helper()
+	p, err := st.col.PollReconciler(context.Background())
+	if err != nil {
+		t.Fatalf("poll: %v", err)
+	}
+	return p
 }
 
 func newStack(t *testing.T) *stack {

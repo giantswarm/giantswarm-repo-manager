@@ -106,15 +106,24 @@ inventory:
     # -- Stop a sweep cleanly when the GraphQL budget's remaining points fall
     # below this; 0 never stops.
     graphqlBudgetFloor: 0
+  reconciler:
+    # -- Read the reconciler workflow's completed runs from GitHub as the
+    # inventory App every interval (a Go duration) and store each run's
+    # `reconcile-<repository>` artifact as the repository's `setup.lastRun`;
+    # every 30 s while a Reconcile now (`reconcile_repository`) is pending.
+    # `"0"` turns the poller off. Nothing reaches the server from the
+    # workflow: the App needs Actions read on `teamFiles.repository`.
+    pollInterval: 5m
+    # -- The reconciler's workflow file in `teamFiles.repository`: the one
+    # `reconcile_repository` dispatches and the poller reads the runs of.
+    workflow: reconcile-repositories.yaml
   orphan:
     # -- Stale period of the orphan score in days (no commit by a person, no
     # Renovate activity within it).
     staleDays: 180
   internal:
     # -- Existing Secret with the bearer token of the internal endpoints under
-    # `token`: `POST /internal/refresh` (the reconciler workflow's trigger
-    # after a run, with the run as `lastRun`) and `/internal/sweep`. Empty
-    # disables them (404).
+    # `token`: `GET|POST /internal/sweep`. Empty disables them (404).
     existingSecret: ""
 
 teamFiles:

@@ -62,6 +62,10 @@ type Deps struct {
 	// TeamFilesRepository and TeamFilesRef are where the team files live
 	// (giantswarm/github at main; a fixture in tests).
 	TeamFilesRepository, TeamFilesRef string
+	// ReconcilerWorkflow is the reconciler's workflow file in that
+	// repository, the one reconcile_repository dispatches and the inventory
+	// reads the runs of; empty is teamfiles.ReconcilerWorkflow.
+	ReconcilerWorkflow string
 	// Review is klaus-gateway's team-review endpoint; nil leaves the asks
 	// undelivered and reported as such.
 	Review *review.Client
@@ -112,6 +116,14 @@ func (ts *Tools) MCPServer() *mcpserver.MCPServer {
 type tools struct {
 	d      Deps
 	probes probes
+}
+
+// reconcilerWorkflow is the reconciler's workflow file.
+func (d Deps) reconcilerWorkflow() string {
+	if d.ReconcilerWorkflow == "" {
+		return teamfiles.ReconcilerWorkflow
+	}
+	return d.ReconcilerWorkflow
 }
 
 // Info is get_info's result.

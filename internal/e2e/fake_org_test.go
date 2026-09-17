@@ -117,7 +117,7 @@ func (o *fakeOrg) handle(w http.ResponseWriter, r *http.Request) {
 	case contains(req.Query, "teamFiles:"):
 		data["organization"] = map[string]any{"teams": map[string]any{kPageInfo: map[string]any{kHasNextPage: false}, kNodes: []map[string]any{{kSlug: team}, {kSlug: teamPlaneteers}}}}
 		data[kGitHub] = map[string]any{
-			"teamFiles": map[string]any{"entries": []map[string]any{{kName: "team-bumblebee.yaml", kType: "blob", "object": map[string]any{kText: teamFile}}}},
+			"teamFiles": map[string]any{"entries": []map[string]any{{kName: "team-bumblebee.yaml", kType: "blob", kObject: map[string]any{kText: teamFile}}}},
 			"catalog":   map[string]any{kText: catalogFile},
 		}
 		data["mcb"] = map[string]any{"mapping": map[string]any{kText: mappingFile}}
@@ -166,7 +166,7 @@ func contains(s, sub string) bool {
 func (o *fakeOrg) node(name string) map[string]any {
 	base := func(archived bool) map[string]any {
 		return map[string]any{
-			kName: name, "url": "https://github.com/" + org + "/" + name, "description": "", "visibility": "PUBLIC",
+			kName: name, "url": "https://github.com/" + org + "/" + name, kDescription: "", "visibility": "PUBLIC",
 			"isArchived": archived, "isFork": false, "isTemplate": false, "isEmpty": false,
 			kCreatedAt: o.now.AddDate(-2, 0, 0).Format(time.RFC3339), "pushedAt": o.now.Format(time.RFC3339),
 			"primaryLanguage": map[string]any{kName: "Go"}, "repositoryTopics": map[string]any{kNodes: []any{}},

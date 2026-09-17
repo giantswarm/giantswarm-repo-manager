@@ -81,6 +81,9 @@ func newStack(t *testing.T) *stack {
 	ghs := newFakeGitHub(t, map[string]string{aliceToken: alice, carolToken: carol, daveToken: dave})
 	ghs.teams[alice] = []string{team}
 	ghs.teams[carol] = []string{teamOther}
+	// alice and carol are owners of the org, dave a member: the one the
+	// creation refuses.
+	ghs.roles[alice], ghs.roles[carol], ghs.roles[dave] = roleAdmin, roleAdmin, roleMember
 	apiURL := ghs.URL + "/api/v3"
 	gw := &fakeGateway{token: "sa-token"}
 	gws := httptest.NewServer(gw.handler())
@@ -118,7 +121,8 @@ func newStack(t *testing.T) *stack {
 	st.col = st.newCollector(0)
 	ts := tools.New(tools.Deps{Version: testVersion, GitHubAPIURL: apiURL, AuthorizationServer: server.DefaultAuthorizationServer, App: app, Inventory: store, Collector: st.col, Log: log,
 		TeamFilesRepository: org + "/github", TeamFilesRef: mainBranch,
-		Review: review.New(review.Config{BaseURL: gws.URL, TokenFile: tokenFile, Channels: map[string]string{teamPlaneteers: planeteersChannel}})})
+		Review:   review.New(review.Config{BaseURL: gws.URL, TokenFile: tokenFile, Channels: map[string]string{teamPlaneteers: planeteersChannel}}),
+		Scaffold: fakeScaffold{}})
 	st.col.OnReconciled(ts.Reconciled)
 	mcpSrv := ts.MCPServer()
 

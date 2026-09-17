@@ -248,6 +248,9 @@ type PullRequest struct {
 	Title  string `json:"title"`
 	// Author is the login the pull request was opened as.
 	Author string `json:"author,omitempty"`
+	// Existing says the pull request was open already for this change's
+	// branch and is reported, not opened again.
+	Existing bool `json:"existing,omitempty"`
 }
 
 // OpenPullRequest creates the branch off Ref with one commit carrying every
@@ -262,7 +265,7 @@ func (r Repo) OpenPullRequest(ctx context.Context, ch Change) (*PullRequest, err
 		return nil, fmt.Errorf("%s: read %s: %w", r.Slug(), r.Ref, err)
 	}
 	if _, resp, err := r.Client.Git.GetRef(ctx, r.Owner, r.Name, "heads/"+ch.Branch); err == nil {
-		return nil, fmt.Errorf("%s: branch %s exists already — a pull request for this change is probably open", r.Slug(), ch.Branch)
+		return r.openFor(ctx, ch.Branch)
 	} else if resp == nil || resp.StatusCode != http.StatusNotFound {
 		return nil, fmt.Errorf("%s: read branch %s: %w", r.Slug(), ch.Branch, err)
 	}
@@ -297,6 +300,23 @@ func (r Repo) OpenPullRequest(ctx context.Context, ch Change) (*PullRequest, err
 		return nil, fmt.Errorf("%s: open pull request: %w", r.Slug(), err)
 	}
 	return &PullRequest{Number: pr.GetNumber(), URL: pr.GetHTMLURL(), Branch: ch.Branch, Title: ch.Title, Author: pr.GetUser().GetLogin()}, nil
+}
+
+// openFor is the open pull request from branch — a change committed once
+// already, reported instead of opened again — or an error naming the branch
+// when none is open (the branch is left over; a person removes it).
+func (r Repo) openFor(ctx context.Context, branch string) (*PullRequest, error) {
+	prs, _, err := r.Client.PullRequests.List(ctx, r.Owner, r.Name, &github.PullRequestListOptions{
+		State: "open", Head: r.Owner + ":" + branch, Base: r.Ref, ListOptions: github.ListOptions{PerPage: 1},
+	})
+	if err != nil {
+		return nil, fmt.Errorf("%s: branch %s exists already; read its pull request: %w", r.Slug(), branch, err)
+	}
+	if len(prs) == 0 {
+		return nil, fmt.Errorf("%s: branch %s exists already without an open pull request — delete the branch and run again", r.Slug(), branch)
+	}
+	pr := prs[0]
+	return &PullRequest{Number: pr.GetNumber(), URL: pr.GetHTMLURL(), Branch: branch, Title: pr.GetTitle(), Author: pr.GetUser().GetLogin(), Existing: true}, nil
 }
 
 // ChangedTeamFiles lists the teams whose files a pull request touches.

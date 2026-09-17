@@ -21,6 +21,7 @@ metadata:
 spec:
   autoStart: {{ .Values.muster.mcpServer.autoStart }}
   type: streamable-http
+  timeout: {{ .Values.muster.mcpServer.timeout }}
   url: {{ include "giantswarm-repo-manager.serviceURL" . }}{{ .Values.mcp.path }}
   {{- with .Values.muster.mcpServer.description }}
   description: {{ . | quote }}

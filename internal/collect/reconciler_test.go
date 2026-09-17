@@ -12,6 +12,7 @@ import (
 // (GITHUB_RUN_ID and GITHUB_RUN_ATTEMPT reach the step as strings); a JSON
 // number decodes as well; anything else is refused naming the field.
 func TestDecodeArtifactRunNumbers(t *testing.T) {
+	const jsonNull = "null"
 	cases := []struct {
 		name, id, attempt string // raw JSON; "" leaves the key out
 		wantID            int64
@@ -21,7 +22,7 @@ func TestDecodeArtifactRunNumbers(t *testing.T) {
 		{name: "numbers", id: `123`, attempt: `2`, wantID: 123, wantAttempt: 2},
 		{name: "strings as the workflow writes them", id: `"123"`, attempt: `"2"`, wantID: 123, wantAttempt: 2},
 		{name: "absent"},
-		{name: "null", id: `null`, attempt: `null`},
+		{name: "JSON null", id: jsonNull, attempt: jsonNull},
 		{name: "non-numeric id", id: `"abc"`, attempt: `2`, wantErr: `workflowRun.id: "abc" is not a run number`},
 		{name: "non-numeric attempt", id: `123`, attempt: `"two"`, wantErr: `workflowRun.attempt: "two" is not a run number`},
 		{name: "fraction", id: `1.5`, attempt: `2`, wantErr: `workflowRun.id: 1.5 is not a run number`},

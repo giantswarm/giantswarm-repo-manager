@@ -13,7 +13,7 @@ version: 2.1
 jobs:
   scenario-test:
     docker:
-      - image: cimg/go:1.26
+      - image: cimg/go:1.27
       - image: valkey/valkey:8-alpine
         name: valkey
     resource_class: medium

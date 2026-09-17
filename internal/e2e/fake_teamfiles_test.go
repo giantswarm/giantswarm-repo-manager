@@ -142,7 +142,7 @@ func (f *fakeTeamFiles) register(mux *http.ServeMux, g *fakeGitHub) {
 			ghMessage(w, http.StatusNotFound, "Not Found")
 			return
 		}
-		writeJSON(w, http.StatusOK, map[string]any{kName: "github", "full_name": org + "/github", "private": true, "default_branch": mainBranch})
+		writeJSON(w, http.StatusOK, map[string]any{kName: "github", "full_name": org + "/github", kPrivate: true, "default_branch": mainBranch})
 	})
 	mux.HandleFunc("GET "+base+"/contents/{path...}", func(w http.ResponseWriter, r *http.Request) {
 		if f.deniedFor(r, g) {
@@ -261,7 +261,7 @@ func (f *fakeTeamFiles) register(mux *http.ServeMux, g *fakeGitHub) {
 			return
 		}
 		pr.Reviews = append(pr.Reviews, fakeReview{User: login, Event: req.Event, Body: req.Body})
-		writeJSON(w, http.StatusOK, map[string]any{kID: len(pr.Reviews), "state": "APPROVED", "html_url": fmt.Sprintf("https://github.com/%s/github/pull/%d#pullrequestreview-%d", org, pr.Number, len(pr.Reviews)), "user": map[string]any{kLogin: login}})
+		writeJSON(w, http.StatusOK, map[string]any{kID: len(pr.Reviews), kState: "APPROVED", "html_url": fmt.Sprintf("https://github.com/%s/github/pull/%d#pullrequestreview-%d", org, pr.Number, len(pr.Reviews)), "user": map[string]any{kLogin: login}})
 	})
 	mux.HandleFunc("POST "+base+"/actions/workflows/{file}/dispatches", func(w http.ResponseWriter, r *http.Request) {
 		body, _ := io.ReadAll(r.Body)

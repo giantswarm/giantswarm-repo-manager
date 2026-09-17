@@ -22,7 +22,7 @@ func TestTeamFileReadNamesTheCredential(t *testing.T) {
 	if tf := getInfo(t, asDave).TeamFiles; tf.Readable != tools.ReadableFalse || !strings.Contains(tf.Reason, "your authorization of the App "+teamfiles.WriteApp+" does not reach "+org+"/github") {
 		t.Errorf("get_info as dave: %+v", tf)
 	}
-	text, isErr := call(t, asDave, tools.ToolSetLifecycle, map[string]any{argDryRun: true, kRepository: repoPresent, argLifecycle: "archived"})
+	text, isErr := call(t, asDave, tools.ToolSetLifecycle, map[string]any{argDryRun: true, kRepository: repoPresent, argLifecycle: lifecycleArchived})
 	want := "reading " + org + "/github as " + dave + " failed (404): the repository is not reachable with this credential — your authorization of the App " + teamfiles.WriteApp + " does not reach the repository: the App must be installed on all repositories (an org owner's setting), or your own access does not include it"
 	if !isErr || !strings.Contains(text, want) {
 		t.Errorf("read as dave: isErr=%v\n%s\nwant: %s", isErr, text, want)

@@ -39,6 +39,7 @@ func TestCircleCIDerivation(t *testing.T) {
 	run := func(mode reconcile.Mode, verdict reconcile.Verdict, changes ...string) *inventory.LastRun {
 		return &inventory.LastRun{Result: reconcile.Result{Mode: mode, Steps: []reconcile.StepResult{{Step: reconcile.StepCircleCI, Verdict: verdict, Summary: "the step's summary", Changes: changes}}}}
 	}
+	const circleA, circleB = "ci/circleci: a", "ci/circleci: b"
 	yes, no := true, false
 	cases := []struct {
 		name string
@@ -47,32 +48,32 @@ func TestCircleCIDerivation(t *testing.T) {
 		want inventory.CircleCI
 	}{
 		{"no statuses, no run", head(false, "sonar"), nil,
-			inventory.CircleCI{Source: "statuses", Unknown: []string{"setupWorkflows"}}},
-		{"statuses: the worst state, CircleCI's contexts only, the newest time", head(false, "ci/circleci: b!", "ci/circleci: a", "sonar!"), nil,
-			inventory.CircleCI{Followed: true, Source: "statuses", Unknown: []string{"setupWorkflows"},
-				Head: &inventory.HeadStatus{State: "failure", Contexts: []string{"ci/circleci: a", "ci/circleci: b"}, At: now.Add(time.Minute)}}},
+			inventory.CircleCI{Source: inventory.CircleCISourceStatuses, Unknown: []string{inventory.CircleCIFactSetupWorkflows}}},
+		{"statuses: the worst state, CircleCI's contexts only, the newest time", head(false, "ci/circleci: b!", circleA, "sonar!"), nil,
+			inventory.CircleCI{Followed: true, Source: inventory.CircleCISourceStatuses, Unknown: []string{inventory.CircleCIFactSetupWorkflows},
+				Head: &inventory.HeadStatus{State: "failure", Contexts: []string{circleA, circleB}, At: now.Add(time.Minute)}}},
 		{"truncated without CircleCI: followed unknown", head(true, "sonar"), nil,
-			inventory.CircleCI{Source: "statuses", Unknown: []string{"setupWorkflows", "followed"}}},
+			inventory.CircleCI{Source: inventory.CircleCISourceStatuses, Unknown: []string{inventory.CircleCIFactSetupWorkflows, inventory.CircleCIFactFollowed}}},
 		{"run converged: followed, setup workflows on", head(false), run(reconcile.ModeCheck, reconcile.VerdictOK),
-			inventory.CircleCI{Followed: true, SetupWorkflows: &yes, Source: "statuses+artifact"}},
+			inventory.CircleCI{Followed: true, SetupWorkflows: &yes, Source: inventory.CircleCISourceBoth}},
 		{"check run: follow planned, settings unread", head(false), run(reconcile.ModeCheck, reconcile.VerdictDrift, "follow giantswarm/x", "enable setup workflows", "create a deploy key"),
-			inventory.CircleCI{Source: "statuses+artifact", Unknown: []string{"setupWorkflows"}}},
+			inventory.CircleCI{Source: inventory.CircleCISourceBoth, Unknown: []string{inventory.CircleCIFactSetupWorkflows}}},
 		{"check run: followed, setup workflows off", head(false), run(reconcile.ModeCheck, reconcile.VerdictDrift, "enable setup workflows"),
-			inventory.CircleCI{Followed: true, SetupWorkflows: &no, Source: "statuses+artifact"}},
+			inventory.CircleCI{Followed: true, SetupWorkflows: &no, Source: inventory.CircleCISourceBoth}},
 		{"check run: followed, only a key missing", head(false), run(reconcile.ModeCheck, reconcile.VerdictDrift, "create a deploy key"),
-			inventory.CircleCI{Followed: true, SetupWorkflows: &yes, Source: "statuses+artifact"}},
+			inventory.CircleCI{Followed: true, SetupWorkflows: &yes, Source: inventory.CircleCISourceBoth}},
 		{"repair run: everything holds after it", head(false), run(reconcile.ModeRepair, reconcile.VerdictRepaired, "follow giantswarm/x", "enable setup workflows"),
-			inventory.CircleCI{Followed: true, SetupWorkflows: &yes, Source: "statuses+artifact"}},
+			inventory.CircleCI{Followed: true, SetupWorkflows: &yes, Source: inventory.CircleCISourceBoth}},
 		{"failed step: the error, nothing known", head(false), run(reconcile.ModeRepair, reconcile.VerdictFailed),
-			inventory.CircleCI{Source: "statuses+artifact", Unknown: []string{"setupWorkflows"}, Error: "the reconciler's circleci step failed: the step's summary"}},
-		{"skipped step (no client in that run) counts as no run", head(false, "ci/circleci: a"), run(reconcile.ModeCheck, reconcile.VerdictSkipped),
-			inventory.CircleCI{Followed: true, Source: "statuses", Unknown: []string{"setupWorkflows"},
-				Head: &inventory.HeadStatus{State: "success", Contexts: []string{"ci/circleci: a"}, At: now}}},
-		{"statuses beat a check run that planned the follow", head(false, "ci/circleci: a"), run(reconcile.ModeCheck, reconcile.VerdictDrift, "follow giantswarm/x"),
-			inventory.CircleCI{Followed: true, Source: "statuses+artifact", Unknown: []string{"setupWorkflows"},
-				Head: &inventory.HeadStatus{State: "success", Contexts: []string{"ci/circleci: a"}, At: now}}},
+			inventory.CircleCI{Source: inventory.CircleCISourceBoth, Unknown: []string{inventory.CircleCIFactSetupWorkflows}, Error: "the reconciler's circleci step failed: the step's summary"}},
+		{"skipped step (no client in that run) counts as no run", head(false, circleA), run(reconcile.ModeCheck, reconcile.VerdictSkipped),
+			inventory.CircleCI{Followed: true, Source: inventory.CircleCISourceStatuses, Unknown: []string{inventory.CircleCIFactSetupWorkflows},
+				Head: &inventory.HeadStatus{State: "success", Contexts: []string{circleA}, At: now}}},
+		{"statuses beat a check run that planned the follow", head(false, circleA), run(reconcile.ModeCheck, reconcile.VerdictDrift, "follow giantswarm/x"),
+			inventory.CircleCI{Followed: true, Source: inventory.CircleCISourceBoth, Unknown: []string{inventory.CircleCIFactSetupWorkflows},
+				Head: &inventory.HeadStatus{State: "success", Contexts: []string{circleA}, At: now}}},
 		{"no default branch", &repoNode{}, nil,
-			inventory.CircleCI{Source: "statuses", Unknown: []string{"setupWorkflows"}}},
+			inventory.CircleCI{Source: inventory.CircleCISourceStatuses, Unknown: []string{inventory.CircleCIFactSetupWorkflows}}},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

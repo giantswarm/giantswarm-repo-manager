@@ -37,7 +37,15 @@ const (
 	kMessageHeadline = "messageHeadline"
 	mainBranch       = "main"
 	kUser            = "user"
-	renovateLogin    = "renovate"
+	kState           = "state"
+	kContext         = "context"
+	kTarget          = "target"
+	kHasNextPage     = "hasNextPage"
+	kPageInfo        = "pageInfo"
+	kPrivate         = "private"
+	// lifecycleArchived is set_lifecycle's archived value.
+	lifecycleArchived = "archived"
+	renovateLogin     = "renovate"
 )
 
 const (
@@ -107,7 +115,7 @@ func (o *fakeOrg) handle(w http.ResponseWriter, r *http.Request) {
 	var errs []map[string]any
 	switch {
 	case contains(req.Query, "teamFiles:"):
-		data["organization"] = map[string]any{"teams": map[string]any{"pageInfo": map[string]any{"hasNextPage": false}, kNodes: []map[string]any{{kSlug: team}, {kSlug: teamPlaneteers}}}}
+		data["organization"] = map[string]any{"teams": map[string]any{kPageInfo: map[string]any{kHasNextPage: false}, kNodes: []map[string]any{{kSlug: team}, {kSlug: teamPlaneteers}}}}
 		data[kGitHub] = map[string]any{
 			"teamFiles": map[string]any{"entries": []map[string]any{{kName: "team-bumblebee.yaml", kType: "blob", "object": map[string]any{kText: teamFile}}}},
 			"catalog":   map[string]any{kText: catalogFile},
@@ -115,7 +123,7 @@ func (o *fakeOrg) handle(w http.ResponseWriter, r *http.Request) {
 		data["mcb"] = map[string]any{"mapping": map[string]any{kText: mappingFile}}
 	case contains(req.Query, "repositories(first:"):
 		data["organization"] = map[string]any{"repositories": map[string]any{
-			kTotalCount: 4, "pageInfo": map[string]any{"hasNextPage": false},
+			kTotalCount: 4, kPageInfo: map[string]any{kHasNextPage: false},
 			kNodes: []map[string]any{o.node(repoPresent), o.node(repoLegacy), o.node(repoStray), o.node(repoArchived)},
 		}}
 	case contains(req.Query, "repository(owner: $org, name: $name)"):
@@ -124,11 +132,11 @@ func (o *fakeOrg) handle(w http.ResponseWriter, r *http.Request) {
 			// The history joins the head's status rollup the node carries.
 			target := map[string]any{"history": o.history(name)}
 			if ref, ok := n["defaultBranchRef"].(map[string]any); ok {
-				if t, ok := ref["target"].(map[string]any); ok {
+				if t, ok := ref[kTarget].(map[string]any); ok {
 					target["statusCheckRollup"] = t["statusCheckRollup"]
 				}
 			}
-			n["defaultBranchRef"] = map[string]any{kName: mainBranch, "target": target}
+			n["defaultBranchRef"] = map[string]any{kName: mainBranch, kTarget: target}
 			data["repository"] = n
 		} else {
 			data["repository"] = nil
@@ -137,7 +145,7 @@ func (o *fakeOrg) handle(w http.ResponseWriter, r *http.Request) {
 	default:
 		for _, m := range historyAlias.FindAllStringSubmatch(req.Query, -1) {
 			if n := o.node(m[2]); n != nil {
-				data["r"+m[1]] = map[string]any{kName: m[2], "defaultBranchRef": map[string]any{"target": map[string]any{"history": o.history(m[2])}}}
+				data["r"+m[1]] = map[string]any{kName: m[2], "defaultBranchRef": map[string]any{kTarget: map[string]any{"history": o.history(m[2])}}}
 			} else {
 				data["r"+m[1]] = nil
 			}
@@ -179,7 +187,7 @@ func (o *fakeOrg) node(name string) map[string]any {
 		n["codeowners"] = map[string]any{kText: "* @giantswarm/" + team + "\n"}
 		n["renovate0"] = map[string]any{kText: "{\n  // generated\n  \"extends\": [\"github>giantswarm/renovate-presets:default.json5\"],\n  packageRules: [{ enabled: false, matchPackageNames: [\"x\"] },],\n}\n"}
 		n["circleci"] = map[string]any{"id": "2"}
-		n["defaultBranchRef"] = map[string]any{kName: mainBranch, "target": map[string]any{"statusCheckRollup": o.rollup()}}
+		n["defaultBranchRef"] = map[string]any{kName: mainBranch, kTarget: map[string]any{"statusCheckRollup": o.rollup()}}
 		n["dockerfile"] = map[string]any{"id": "3"}
 		n["helm"] = map[string]any{"id": "4"}
 		return n
@@ -203,13 +211,13 @@ func (o *fakeOrg) node(name string) map[string]any {
 // statuses (one still pending) among a GitHub Actions check run and another
 // system's status.
 func (o *fakeOrg) rollup() map[string]any {
-	return map[string]any{"state": "PENDING", "contexts": map[string]any{
-		"pageInfo": map[string]any{"hasNextPage": false},
+	return map[string]any{kState: "PENDING", "contexts": map[string]any{
+		kPageInfo: map[string]any{kHasNextPage: false},
 		kNodes: []map[string]any{
 			{kName: "lint"}, // a CheckRun: no context
-			{"context": circleBuild, "state": "SUCCESS", kCreatedAt: o.now.Add(-2 * time.Hour).Format(time.RFC3339)},
-			{"context": circlePush, "state": "PENDING", kCreatedAt: o.now.Add(-time.Hour).Format(time.RFC3339)},
-			{"context": "sonar", "state": "FAILURE", kCreatedAt: o.now.Format(time.RFC3339)},
+			{kContext: circleBuild, kState: "SUCCESS", kCreatedAt: o.now.Add(-2 * time.Hour).Format(time.RFC3339)},
+			{kContext: circlePush, kState: "PENDING", kCreatedAt: o.now.Add(-time.Hour).Format(time.RFC3339)},
+			{kContext: "sonar", kState: "FAILURE", kCreatedAt: o.now.Format(time.RFC3339)},
 		}}}
 }
 

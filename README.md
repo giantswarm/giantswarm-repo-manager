@@ -52,7 +52,8 @@ change for the team, rendered from the artifact's `change` block and the declara
 new repo: bumblebee-repo (app, go)`, `alice added the existing repo … to team-bumblebee`, `alice
 transferred the repo … (app, go) from team-planeteers to team-bumblebee`, `alice archived the repo …`,
 `alice deprecated the repo …` — linking the pull request, plus one sentence per failed step or finding
-of that person's run with what to do, linking the run. A run nobody's change is behind — a Reconcile now,
+of that person's run with what to do, linking the run — bar a finding of kind `unchecked`, a check the
+reconciler's own token could not run, which is the platform's to fix and stays on the record. A run nobody's change is behind — a Reconcile now,
 the schedule, an artifact without a `change` block — posts nothing, findings and failures included: the
 reconciler doing its job is not news, and the nightly's findings would repeat every night; they stay on the
 record and in the run's summary per team. An edit a person made (`changed`) posts its failed steps and

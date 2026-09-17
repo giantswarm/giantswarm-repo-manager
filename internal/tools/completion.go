@@ -68,7 +68,9 @@ type Completion struct {
 // change block — yields nothing, findings and failures included: the
 // reconciler doing its job is not news, and the nightly's findings would
 // repeat every night; they stay on the record and in the run's summary per
-// team. A converged edit (`changed`) yields nothing either.
+// team. A converged edit (`changed`) yields nothing either. A finding of
+// kind `unchecked` — a check the reconciler's own token could not run — is
+// the platform's to fix, not the team's, and stays on the record too.
 func Completions(rec *inventory.Record) []Completion {
 	run := rec.Setup.LastRun
 	if !personMade(run.Change) {
@@ -83,6 +85,9 @@ func Completions(rec *inventory.Record) []Completion {
 			out = append(out, Completion{Text: failureSentence(rec.Name, st), Link: run.RunURL})
 		}
 		for _, f := range st.Findings {
+			if f.Kind == reconcile.FindingUnchecked {
+				continue
+			}
 			out = append(out, Completion{Text: findingSentence(rec.Name, f), Link: run.RunURL})
 		}
 	}

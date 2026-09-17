@@ -44,6 +44,8 @@ var (
 	failedStep  = reconcile.StepResult{Step: reconcile.StepCircleCI, Verdict: reconcile.VerdictFailed, Summary: "CircleCI answered 502"}
 	findingStep = reconcile.StepResult{Step: reconcile.StepMetadata, Verdict: reconcile.VerdictReported,
 		Findings: []reconcile.Finding{{Kind: testDefaultIcon, Message: "the repository has the default icon", Fix: "upload one under Settings"}}}
+	uncheckedStep = reconcile.StepResult{Step: reconcile.StepRenovate, Verdict: reconcile.VerdictReported,
+		Findings: []reconcile.Finding{{Kind: reconcile.FindingUnchecked, Message: "whether Renovate runs is out of this token's reach", Fix: "grant the App issues: read"}}}
 )
 
 // TestCompletionText: one sentence about the change for the kinds a person
@@ -78,6 +80,9 @@ func TestCompletionText(t *testing.T) {
 			want: "bumblebee-repo: the circleci step failed (CircleCI answered 502) — look at the run, fix the cause and reconcile again"},
 		{name: "created with a finding: two sentences", rec: record(change(inventory.ChangeCreated), okStep, findingStep),
 			want: "alice created a new repo: bumblebee-repo (app, go)\nbumblebee-repo: the repository has the default icon — upload one under Settings"},
+		{name: "created with an unchecked finding: the sentence alone, the token's reach is the platform's", rec: record(change(inventory.ChangeCreated), okStep, uncheckedStep),
+			want: "alice created a new repo: bumblebee-repo (app, go)"},
+		{name: "changed with an unchecked finding alone: silent", rec: record(change(inventory.ChangeChanged), okStep, uncheckedStep)},
 		{name: "failed step without a summary", rec: record(change(inventory.ChangeChanged), reconcile.StepResult{Step: reconcile.StepCatalog, Verdict: reconcile.VerdictFailed}),
 			want: "bumblebee-repo: the catalog step failed — look at the run, fix the cause and reconcile again"},
 		{name: "finding without a fix", rec: record(change(inventory.ChangeChanged), reconcile.StepResult{Step: reconcile.StepEntry, Verdict: reconcile.VerdictReported,

@@ -31,6 +31,9 @@ spec:
     type: oauth
     authorizationServer:
       issuer: {{ .issuer | quote }}
+      {{- with .expectedIssuer }}
+      expectedIssuer: {{ . | quote }}
+      {{- end }}
       authorizationEndpoint: {{ .authorizationEndpoint | quote }}
       tokenEndpoint: {{ .tokenEndpoint | quote }}
       clientCredentialsSecretRef:

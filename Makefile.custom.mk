@@ -16,6 +16,10 @@ docker-build: build-linux-amd64 ## Build a local dev image (TAG=giantswarm-repo-
 test-race: ## Run tests with the race detector.
 	go test -race ./...
 
+.PHONY: tools-doc
+tools-doc: ## Regenerate docs/tools.md from the registered tools (the test TestToolsDocIsCurrent keeps it current).
+	TOOLS_DOC_UPDATE=1 go test -count=1 -run TestToolsDocIsCurrent ./internal/tools
+
 .PHONY: test-e2e
 test-e2e: ## The identity-chain proofs against fakes (VALKEY_ADDR=host:port for a real store, else in-process).
 	go test -count=1 -v ./internal/e2e/...

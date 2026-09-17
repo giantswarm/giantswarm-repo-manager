@@ -237,10 +237,19 @@ func (o *fakeOrg) history(name string) map[string]any {
 
 // fakeChecker stands in for the engine: every accepted declaration converges
 // with a default-icon finding.
-type fakeChecker struct{ calls atomic.Int32 }
+// fakeChecker stands in for the engine's read-mode checks; a hold, when set,
+// blocks every check until it is closed — a sweep that stays running for as
+// long as a test needs it to.
+type fakeChecker struct {
+	calls atomic.Int32
+	hold  chan struct{}
+}
 
 func (c *fakeChecker) Check(_ context.Context, teamSlug string, entry reposetup.Entry) (*reconcile.Result, error) {
 	c.calls.Add(1)
+	if c.hold != nil {
+		<-c.hold
+	}
 	now := time.Now()
 	return &reconcile.Result{
 		Repository: org + "/" + entry.Name, Declared: org + "/" + entry.Name, Team: teamSlug, Mode: reconcile.ModeCheck, StartedAt: now, FinishedAt: now, Converged: true,

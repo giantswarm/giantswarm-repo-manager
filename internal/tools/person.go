@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"errors"
+	"fmt"
 	"sort"
 	"strings"
 	"sync"
@@ -83,6 +84,23 @@ func (p *person) member(team string) bool {
 		}
 	}
 	return false
+}
+
+// memberOfAny says whether the person is in one of the teams.
+func (p *person) memberOfAny(teams []string) bool {
+	for _, team := range teams {
+		if p.member(team) {
+			return true
+		}
+	}
+	return false
+}
+
+// notAMember is the refusal of a tool reserved for a team's members: who the
+// person is, which team was required, which teams they are in, and what is
+// therefore not theirs to do.
+func (p *person) notAMember(team, consequence string) error {
+	return fmt.Errorf("%w: %s is not a member of %s (your teams: %s), so %s", ErrNotAMember, p.login, team, strings.Join(p.teams, ", "), consequence)
 }
 
 // teamFiles is giantswarm/github (or the configured stand-in) as client.

@@ -15,11 +15,11 @@ backoff for `inventory.connectTimeout` (5m by default; `"0"` waits for ever)
 before it gives up and exits. Until the store answers, liveness passes and
 readiness fails with the reason (`/readyz` answers 503 `not ready: inventory
 unavailable: …`), so the Deployment shows the pod unready but never restarts
-it; the inventory tools and `/internal/*` answer `inventory unavailable`, the
-identity tools (`get_info`, `validate_repository` dry run) keep working. A
-Valkey lost at runtime reads the same way — readiness fails, the pod stays
-up — and the connection re-establishes itself on the next command once
-Valkey is back; the sweep schedule starts on a connected store.
+it; the inventory tools answer `inventory unavailable`, the identity tools
+(`get_info`, `validate_repository` dry run) keep working. A Valkey lost at
+runtime reads the same way — readiness fails, the pod stays up — and the
+connection re-establishes itself on the next command once Valkey is back; the
+sweep schedule starts on a connected store.
 
 Giant Swarm-specific: it manages the giantswarm org's repositories and ships as
 its own app, not as a component of the `agent-platform` meta chart.
@@ -51,10 +51,10 @@ its own app, not as a component of the `agent-platform` meta chart.
 | inventory.sweep.engineChecks | bool | `true` | Run the engine's set-up checks in read mode for every accepted declaration during a sweep (REST as the App, about ten calls per repository). A `refresh_repository` always runs them. |
 | inventory.sweep.concurrency | int | `4` | Parallel engine reads during a sweep. |
 | inventory.sweep.graphqlBudgetFloor | int | `0` | Stop a sweep cleanly when the GraphQL budget's remaining points fall below this; 0 never stops. |
+| inventory.sweep.teams | list | `["team-bumblebee","team-planeteers"]` | GitHub team slugs whose members may start a sweep on demand with the tool `sweep_inventory` (membership checked on GitHub as the caller): the teams that own the manager and the reconciler. Passed as `SWEEP_TEAMS`. |
 | inventory.reconciler.pollInterval | string | `"5m"` | Read the reconciler workflow's completed runs from GitHub as the inventory App every interval (a Go duration) and store each run's `reconcile-<repository>` artifact as the repository's `setup.lastRun`; every 30 s while a Reconcile now (`reconcile_repository`) is pending. `"0"` turns the poller off. Nothing reaches the server from the workflow: the App needs Actions read on `teamFiles.repository`. |
 | inventory.reconciler.workflow | string | `"reconcile-repositories.yaml"` | The reconciler's workflow file in `teamFiles.repository`: the one `reconcile_repository` dispatches and the poller reads the runs of. |
 | inventory.orphan.staleDays | int | `180` | Stale period of the orphan score in days (no commit by a person, no Renovate activity within it). |
-| inventory.internal.existingSecret | string | `""` | Existing Secret with the bearer token of the internal endpoints under `token`: `GET|POST /internal/sweep`. Empty disables them (404). |
 | teamFiles.repository | string | `"giantswarm/github"` | The repository that holds the team files (`repositories/<team>.yaml`, the desired state) and the policy files (`repository-setup/<team>.yaml`); every write is a pull request against it, opened as the caller. |
 | teamFiles.ref | string | `"main"` | The branch the files are read from and pull requests target. |
 | reviews.gatewayURL | string | `""` | klaus-gateway's base URL as reached from the pod (for example `http://klaus-gateway.agent-platform.svc:8080`): lifecycle and transfer asks go to `POST /reviews`, notices and completion messages to `POST /notices`, authenticated with this pod's projected ServiceAccount token for `audience`. Empty leaves the asks undelivered; the tools say so and approving on GitHub stays equivalent. |
@@ -68,8 +68,9 @@ its own app, not as a component of the `agent-platform` meta chart.
 | muster.mcpServer.autoStart | bool | `true` | Start the server connection when muster initializes. |
 | muster.mcpServer.description | string | `"Giant Swarm's repository set-up service — the giantswarm org's repositories, every write as the person"` | Human-readable description shown by muster. |
 | muster.mcpServer.labels | object | `{}` | Extra labels on the MCPServer CR. |
-| muster.mcpServer.auth | object | `{"authorizationServer":{"authorizationEndpoint":"https://github.com/login/oauth/authorize","clientCredentialsSecretRef":{"name":"giantswarm-repo-manager-oauth-client","namespace":""},"grantScope":"subject","issuer":"https://github.com/apps/giantswarm-repo-manager","tokenEndpoint":"https://github.com/login/oauth/access_token"}}` | How muster authenticates to this server; rendered only with `oauth.enabled`: `auth.type: oauth` with the GitHub App `giantswarm-repo-manager` pinned as the authorization server — the pattern of the `github` and `pro` servers on the platform. GitHub publishes no discovery document, so the endpoints are named; the App's client credentials come from a Secret; no `scopes` (the App's permissions are the App's). muster runs the consent once per person and puts their user token on every call. |
+| muster.mcpServer.auth | object | `{"authorizationServer":{"authorizationEndpoint":"https://github.com/login/oauth/authorize","clientCredentialsSecretRef":{"name":"giantswarm-repo-manager-oauth-client","namespace":""},"expectedIssuer":"https://github.com/login/oauth","grantScope":"subject","issuer":"https://github.com/apps/giantswarm-repo-manager","tokenEndpoint":"https://github.com/login/oauth/access_token"}}` | How muster authenticates to this server; rendered only with `oauth.enabled`: `auth.type: oauth` with the GitHub App `giantswarm-repo-manager` pinned as the authorization server — the pattern of the `github` and `pro` servers on the platform. GitHub publishes no discovery document, so the endpoints are named; the App's client credentials come from a Secret; no `scopes` (the App's permissions are the App's). muster runs the consent once per person and puts their user token on every call. |
 | muster.mcpServer.auth.authorizationServer.issuer | string | `"https://github.com/apps/giantswarm-repo-manager"` | The issuer identity the person's grant is filed under: the App's own, so the login App's GitHub grant stays separate. |
+| muster.mcpServer.auth.authorizationServer.expectedIssuer | string | `"https://github.com/login/oauth"` | The issuer the authorization server puts in the RFC 9207 `iss` parameter of its authorization response — GitHub's is `https://github.com/login/oauth` for every App, while `issuer` stays the App's own identity the grant is filed under (muster#1277). Empty omits the field. |
 | muster.mcpServer.auth.authorizationServer.authorizationEndpoint | string | `"https://github.com/login/oauth/authorize"` | GitHub's authorize endpoint. |
 | muster.mcpServer.auth.authorizationServer.tokenEndpoint | string | `"https://github.com/login/oauth/access_token"` | GitHub's token endpoint. |
 | muster.mcpServer.auth.authorizationServer.clientCredentialsSecretRef.name | string | `"giantswarm-repo-manager-oauth-client"` | Secret with the App's OAuth client under `client-id` and `client-secret`. |

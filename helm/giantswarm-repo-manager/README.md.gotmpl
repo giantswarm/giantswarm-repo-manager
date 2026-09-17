@@ -16,11 +16,11 @@ backoff for `inventory.connectTimeout` (5m by default; `"0"` waits for ever)
 before it gives up and exits. Until the store answers, liveness passes and
 readiness fails with the reason (`/readyz` answers 503 `not ready: inventory
 unavailable: …`), so the Deployment shows the pod unready but never restarts
-it; the inventory tools and `/internal/*` answer `inventory unavailable`, the
-identity tools (`get_info`, `validate_repository` dry run) keep working. A
-Valkey lost at runtime reads the same way — readiness fails, the pod stays
-up — and the connection re-establishes itself on the next command once
-Valkey is back; the sweep schedule starts on a connected store.
+it; the inventory tools answer `inventory unavailable`, the identity tools
+(`get_info`, `validate_repository` dry run) keep working. A Valkey lost at
+runtime reads the same way — readiness fails, the pod stays up — and the
+connection re-establishes itself on the next command once Valkey is back; the
+sweep schedule starts on a connected store.
 
 Giant Swarm-specific: it manages the giantswarm org's repositories and ships as
 its own app, not as a component of the `agent-platform` meta chart.

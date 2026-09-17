@@ -1,6 +1,6 @@
 # The tools
 
-Generated from the registered tools (`TOOLS_DOC_UPDATE=1 go test ./internal/tools -run TestToolsDocIsCurrent`); through muster every tool is `x_giantswarm-repo-manager_<name>`. Every write tool takes `dryRun` and `mode`; `commit` is the only write mode, `apply` is refused.
+Generated from the registered tools (`make tools-doc`); through muster every tool is `x_giantswarm-repo-manager_<name>`. Every write tool takes `dryRun` and `mode`; `commit` is the only write mode, `apply` is refused.
 
 | Tool | Kind |
 |---|---|
@@ -13,6 +13,7 @@ Generated from the registered tools (`TOOLS_DOC_UPDATE=1 go test ./internal/tool
 | `reconcile_repository` | write (dryRun, mode: commit) |
 | `refresh_repository` | cache annotation |
 | `set_lifecycle` | write (dryRun, mode: commit) |
+| `sweep_inventory` | cache annotation |
 | `transfer_repository` | write (dryRun, mode: commit) |
 | `update_repository` | write (dryRun, mode: commit) |
 | `validate_repository` | read-only |
@@ -338,6 +339,18 @@ WRITES (as you, with your own GitHub token through the App giantswarm-repo-manag
     "repository",
     "lifecycle"
   ],
+  "type": "object"
+}
+```
+
+## `sweep_inventory`
+
+Start the full inventory sweep over the org now — every repository's record rebuilt from GitHub and the team files the way the schedule does it — for a member of the teams that own this service (the server's sweep teams, checked on GitHub as you); a non-member is refused. The sweep runs in the background: the answer carries started (false while one already runs), running and the last sweep's summary; list_repositories shows the new one when it is done. Writes the inventory cache only, nothing on GitHub.
+
+```json
+{
+  "properties": {},
+  "required": [],
   "type": "object"
 }
 ```

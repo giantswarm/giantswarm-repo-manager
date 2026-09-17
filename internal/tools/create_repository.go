@@ -223,7 +223,7 @@ func (t *tools) dryRun(ctx context.Context, args map[string]any, p *person, perr
 			v.AuthorLogin = p.login
 			v.TeamsSource = None + ": no team of yours in the org is readable as you (the App giantswarm-repo-manager's Organization members: read)"
 		default:
-			v.AuthorLogin, v.AuthorTeams, v.TeamsSource = p.login, p.teams, "github"
+			v.AuthorLogin, v.AuthorTeams, v.TeamsSource = p.login, p.teams, teamsSourceGitHub
 			req.AuthorTeams = p.teams
 		}
 	}

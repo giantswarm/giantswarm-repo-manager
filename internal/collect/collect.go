@@ -30,8 +30,6 @@ import (
 type Options struct {
 	// Org is the GitHub organization.
 	Org string
-	// Stale is the orphan score's stale period.
-	Stale time.Duration
 	// EngineChecks runs the engine's read-mode checks for every accepted
 	// declaration during a sweep (REST, the read identity's budget); a refresh
 	// always runs them.
@@ -49,9 +47,6 @@ type Options struct {
 	Now func() time.Time
 }
 
-// DefaultStale is the default stale period: 180 days.
-const DefaultStale = 180 * 24 * time.Hour
-
 // DefaultPageSize is the repositories page a sweep starts with. The
 // prototype's 50 held for the active repositories; over the whole org GitHub
 // answered 50 with 502 and 25 with a truncated body (2026-09-16), 12 went
@@ -61,9 +56,6 @@ const DefaultPageSize = 20
 func (o *Options) defaults() {
 	if o.Org == "" {
 		o.Org = reposetup.DefaultOwner
-	}
-	if o.Stale <= 0 {
-		o.Stale = DefaultStale
 	}
 	if o.Concurrency <= 0 {
 		o.Concurrency = 4
@@ -200,7 +192,7 @@ func (c *Collector) Sweep(ctx context.Context) (*inventory.SweepSummary, error) 
 	}
 	kept := map[string]bool{}
 	for _, r := range records {
-		r.Finalize(c.opts.Stale, c.now())
+		r.Finalize()
 		r.RefreshedAt, r.Source = c.now(), inventory.SourceSweep
 		if err := c.store.Put(ctx, r); err != nil {
 			return nil, err
@@ -305,7 +297,7 @@ func (c *Collector) Refresh(ctx context.Context, repository string, run *invento
 	}
 	rec := c.build(name, node, src, old, run)
 	c.runChecks(ctx, []*inventory.Record{rec}, src, false)
-	rec.Finalize(c.opts.Stale, c.now())
+	rec.Finalize()
 	rec.RefreshedAt, rec.Source = c.now(), source
 	if err := c.store.Put(ctx, rec); err != nil {
 		return nil, err
@@ -402,11 +394,9 @@ func (c *Collector) parallel(records []*inventory.Record, fn func(*inventory.Rec
 	wg.Wait()
 }
 
-// build assembles a record from the GitHub node (nil: gone), the sources and
-// the previous record (decision and last reconciler run survive).
-// build assembles the record from the sources, the GraphQL node and the old
-// record (decision and set-up state survive); run is the reconciler's run a
-// refresh hands in, else the stored one counts for the CircleCI state.
+// build assembles the record from the sources, the GraphQL node (nil: gone)
+// and the old record (the set-up state survives); run is the reconciler's run
+// a refresh hands in, else the stored one counts for the CircleCI state.
 func (c *Collector) build(name string, node *repoNode, src *sources, old *inventory.Record, run *inventory.LastRun) *inventory.Record {
 	rec := &inventory.Record{Repository: c.opts.Org + "/" + name, Name: name}
 	if d := src.declarations[name]; d != nil {
@@ -421,7 +411,6 @@ func (c *Collector) build(name string, node *repoNode, src *sources, old *invent
 		rec.Mapping = inventory.Mapping{Present: true, Team: team}
 	}
 	if old != nil {
-		rec.Decision = old.Decision
 		rec.Setup = old.Setup
 	}
 	if run != nil {

@@ -6,7 +6,6 @@ Generated from the registered tools (`make tools-doc`); through muster every too
 |---|---|
 | `approve_change` | write (dryRun, mode: commit) |
 | `create_repository` | write (dryRun, mode: commit) |
-| `decide_repository` | cache annotation |
 | `get_info` | read-only |
 | `get_repository` | read-only |
 | `list_repositories` | read-only |
@@ -96,37 +95,6 @@ WRITES (as you, with your own GitHub token through the App giantswarm-repo-manag
 }
 ```
 
-## `decide_repository`
-
-Leave a decision note on a repository's inventory record as you (verdict keep, with text); it survives every refresh. An annotation of the inventory cache, not a change on GitHub — no dryRun or mode.
-
-```json
-{
-  "properties": {
-    "note": {
-      "description": "Why.",
-      "type": "string"
-    },
-    "repository": {
-      "description": "Repository name, with or without the org.",
-      "type": "string"
-    },
-    "verdict": {
-      "description": "The verdict: keep.",
-      "enum": [
-        "keep"
-      ],
-      "type": "string"
-    }
-  },
-  "required": [
-    "repository",
-    "verdict"
-  ],
-  "type": "object"
-}
-```
-
 ## `get_info`
 
 Read-only. Report the service version and how this call is authenticated: the caller (the GitHub login and id GET /user answered for the bearer muster put on the call — the person's own user token through the App giantswarm-repo-manager) and the authorization server pinned for it; whether your credential reaches the team files (teamFiles.readable); the identity of the unattended inventory reads (the read-only App giantswarm-repo-manager-inventory, or not configured) and the inventory store; where the inventory's CircleCI facts come from (commit statuses and the reconciler's run artifact — this server holds no CircleCI token); the engine (devctl reposetup package) and the write modes. Call first.
@@ -141,7 +109,7 @@ Read-only. Report the service version and how this call is authenticated: the ca
 
 ## `get_repository`
 
-Read-only. The full inventory record of one repository: declaration, GitHub reality, CircleCI, Renovate, catalog and mapping, set-up state (the engine's read-mode checks and the last reconciler run), orphan score with reasons, findings, decision and age.
+Read-only. The full inventory record of one repository: declaration, GitHub reality, CircleCI, Renovate, catalog and mapping, set-up state (the engine's read-mode checks and the last reconciler run), findings and age.
 
 ```json
 {
@@ -149,10 +117,6 @@ Read-only. The full inventory record of one repository: declaration, GitHub real
     "repository": {
       "description": "Repository name, with or without the org (giantswarm/muster or muster).",
       "type": "string"
-    },
-    "stalePeriodDays": {
-      "description": "Judge the orphan score against this stale period in days instead of the server's (the score is recomputed from the record's facts).",
-      "type": "number"
     }
   },
   "required": [
@@ -164,14 +128,14 @@ Read-only. The full inventory record of one repository: declaration, GitHub real
 
 ## `list_repositories`
 
-Read-only. The inventory of the org's repositories from the store: one row per repository with team, lifecycle, visibility, orphan score and reasons, finding kinds, set-up state and record age, sorted by orphan score, plus the last sweep's summary. Scope per caller: mine (the teams you belong to on GitHub, read as you), team (the team argument, or your teams), unassigned (on GitHub without a declaration), all. Filters as on the Repositories page: search, renovate, team including none, visibility, fork, lifecycle, inactiveDays, minOrphanScore, decision, finding. get_repository has the full record.
+Read-only. The inventory of the org's repositories from the store: one row per repository with team, lifecycle, visibility, archived (on GitHub), fork, Renovate state, finding kinds, set-up state and record age, sorted by repository name, plus the last sweep's summary. Scope per caller: mine (the teams you belong to on GitHub, read as you), team (the team argument, or your teams), unassigned (on GitHub without a declaration), all. Filters as on the Repositories page: search, team (in every scope: under mine one of your teams — another selects no rows and note says so; none under all: undeclared), renovate, visibility, fork, lifecycle, archived, inactiveDays, finding. get_repository has the full record.
 
 ```json
 {
   "properties": {
-    "decision": {
-      "description": "Only repositories with this decision (keep), or none.",
-      "type": "string"
+    "archived": {
+      "description": "Only repositories that are archived — declared archived or archived on GitHub (true) — or only those that are not (false). Independent of lifecycle.",
+      "type": "boolean"
     },
     "finding": {
       "description": "Only repositories with a finding of this kind (declared-but-gone, undeclared-on-github, entry-refused, gen-circleci-refused, default-icon, …).",
@@ -186,19 +150,15 @@ Read-only. The inventory of the org's repositories from the store: one row per r
       "type": "number"
     },
     "lifecycle": {
-      "description": "Only repositories declared with this lifecycle (deprecated, archived, …); none: no lifecycle set.",
+      "description": "Only repositories with this lifecycle: active (none declared, and not archived on GitHub), deprecated (declared), archived (declared archived, or archived on GitHub); another value is matched against the declared lifecycle.",
       "type": "string"
     },
     "limit": {
       "description": "Rows to return (default 100).",
       "type": "number"
     },
-    "minOrphanScore": {
-      "description": "Only repositories with at least this orphan score (0-100).",
-      "type": "number"
-    },
     "renovate": {
-      "description": "Renovate state: configured (a renovate.json5), missing, active (a Renovate PR or commit within the stale period), inactive.",
+      "description": "Renovate state: configured (a renovate.json5), missing, active (a Renovate pull request or commit within the server's Renovate activity period, default 180 days), inactive.",
       "enum": [
         "configured",
         "missing",
@@ -221,12 +181,8 @@ Read-only. The inventory of the org's repositories from the store: one row per r
       "description": "Only repositories whose name or description contains this text (case-insensitive).",
       "type": "string"
     },
-    "stalePeriodDays": {
-      "description": "Judge the orphan score against this stale period in days instead of the server's (the score is recomputed from the record's facts).",
-      "type": "number"
-    },
     "team": {
-      "description": "Only repositories declared by this team (slug: team-bumblebee); none: only undeclared repositories.",
+      "description": "Only repositories declared by this team (slug: team-bumblebee). Under all, none: only undeclared repositories; under mine: one of your teams (another selects no rows, and note says so); under unassigned: ignored.",
       "type": "string"
     },
     "undeclared": {

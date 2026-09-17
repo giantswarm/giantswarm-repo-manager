@@ -123,10 +123,11 @@ inventory:
     # -- The reconciler's workflow file in `teamFiles.repository`: the one
     # `reconcile_repository` dispatches and the poller reads the runs of.
     workflow: reconcile-repositories.yaml
-  orphan:
-    # -- Stale period of the orphan score in days (no commit by a person, no
-    # Renovate activity within it).
-    staleDays: 180
+  renovate:
+    # -- Days within which a Renovate pull request or commit counts as
+    # Renovate activity — `list_repositories`' Renovate state `active`, else
+    # `inactive`. Passed as `RENOVATE_ACTIVE_DAYS`.
+    activeDays: 180
 
 teamFiles:
   # -- The repository that holds the team files (`repositories/<team>.yaml`,
@@ -232,9 +233,12 @@ githubApp:
   # in read mode and the name check of a dry run run as its installation, on
   # its own rate budget. Its permissions, all read: Administration, Contents,
   # Pull requests, Issues, Commit statuses (the `ci/circleci:` contexts on the
-  # default branch head), Metadata, Organization members. 0 leaves the
-  # unattended reads unconfigured — nothing stands in for the App; the tools
-  # that need it say so.
+  # default branch head), Checks (the check runs on the default branch head:
+  # the engine's protection step reads them to learn which conditional checks
+  # exist — without it every repository carries the finding `unchecked`, the
+  # checks on main not readable with this token), Metadata, Organization
+  # members. 0 leaves the unattended reads unconfigured — nothing stands in
+  # for the App; the tools that need it say so.
   appID: 0
   # -- The inventory App's installation id on the org.
   installationID: 0

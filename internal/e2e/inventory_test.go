@@ -21,7 +21,7 @@ import (
 // sources in one query, repositories in one page, histories in one aliased
 // batch — leaves one record per repository (declared and present, declared
 // but gone, refused declaration, undeclared, archived), the seeded stranger
-// removed, with the findings, the set-up state and the orphan scores.
+// removed, with the findings and the set-up state.
 func TestSweepFillsOneRecordPerRepository(t *testing.T) {
 	st := newStack(t)
 	ctx := context.Background()
@@ -66,8 +66,8 @@ func TestSweepFillsOneRecordPerRepository(t *testing.T) {
 	if rl := present.Reality; rl.LastPersonCommit == nil || rl.LastPersonCommit.Author != alice || rl.BotCommits != 1 || rl.OpenPullRequests.People != 1 || rl.OpenPullRequests.Bots != 1 || rl.OpenPullRequests.Renovate != 1 || rl.LatestRelease == nil || !rl.Has.CircleCI || !rl.Has.Helm || len(rl.CodeownersTeams) != 1 || len(rl.UnknownCodeownersTeams) != 0 {
 		t.Errorf("present reality: %+v", rl)
 	}
-	if present.Orphan.Score != 0 || present.Source != inventory.SourceSweep || present.RefreshedAt.IsZero() {
-		t.Errorf("present orphan/source: %+v %s", present.Orphan, present.Source)
+	if present.Source != inventory.SourceSweep || present.RefreshedAt.IsZero() {
+		t.Errorf("present source: %s refreshed %s", present.Source, present.RefreshedAt)
 	}
 
 	gone := st.record(t, repoGone)
@@ -86,26 +86,23 @@ func TestSweepFillsOneRecordPerRepository(t *testing.T) {
 		t.Errorf("legacy circleci: %+v", ci)
 	}
 	stray := st.record(t, repoStray)
-	if stray.Declaration != nil || !hasKind(stray, inventory.FindingUndeclaredOnGitHub) || stray.Orphan.Score != 100 || stray.Renovate.Enabled || len(stray.Reality.UnknownCodeownersTeams) != 1 || len(stray.Reality.OpenPullRequests.Onboarding) != 1 {
-		t.Errorf("stray: %+v orphan %+v", stray.Findings, stray.Orphan)
-	}
-	for _, w := range []string{"no team file", "older than", "Renovate is not configured or disabled", "no release", "no CI", dissolvedTeam, "onboarding", "oldest open bot"} {
-		if !strings.Contains(strings.Join(stray.Orphan.Reasons, "\n"), w) {
-			t.Errorf("stray reason %q missing in %v", w, stray.Orphan.Reasons)
-		}
+	if stray.Declaration != nil || !hasKind(stray, inventory.FindingUndeclaredOnGitHub) || stray.Renovate.Enabled || strings.Join(stray.Reality.UnknownCodeownersTeams, ",") != dissolvedTeam || len(stray.Reality.OpenPullRequests.Onboarding) != 1 {
+		t.Errorf("stray: %+v reality %+v", stray.Findings, stray.Reality)
 	}
 	archived := st.record(t, repoArchived)
-	if !archived.Reality.IsArchived || archived.Orphan.Score != 0 || !hasKind(archived, inventory.FindingUndeclaredOnGitHub) {
-		t.Errorf("archived: %+v %+v", archived.Orphan, archived.Findings)
+	if !archived.Reality.IsArchived || !hasKind(archived, inventory.FindingUndeclaredOnGitHub) {
+		t.Errorf("archived: %+v", archived.Findings)
 	}
 	if _, err := st.store.Get(ctx, org+"/giantswarm-repo-manager"); !errors.Is(err, inventory.ErrNotFound) {
 		t.Errorf("the seeded stranger survived the sweep: %v", err)
 	}
 }
 
-// TestInventoryToolsAndReconcilerRefresh: the tools over the store as alice,
-// the on-demand refresh, the decision note, and the reconciler's run pulled
-// from GitHub and stored — decision and run survive the next refresh.
+// TestInventoryToolsAndReconcilerRefresh: the tools over the store as alice
+// (rows by name, the page's filters — team under mine, archived, lifecycle
+// counting GitHub's archived flag), the on-demand refresh, and the
+// reconciler's run pulled from GitHub and stored — the run survives the next
+// refresh.
 func TestInventoryToolsAndReconcilerRefresh(t *testing.T) {
 	st := newStack(t)
 	ctx := context.Background()
@@ -116,8 +113,14 @@ func TestInventoryToolsAndReconcilerRefresh(t *testing.T) {
 
 	var all tools.Listing
 	st.callJSON(t, c, tools.ToolListRepositories, nil, &all)
-	if all.Total != 5 || all.Shown != 5 || all.Sweep == nil || all.Sweep.Repositories != 5 || all.Repositories[0].Repository != org+"/"+repoStray || all.Repositories[0].Orphan.Score != 100 || all.Repositories[0].Age == "" {
-		t.Errorf("list: total %d shown %d first %+v", all.Total, all.Shown, all.Repositories[0])
+	// Rows come by name: archived-old, gone-service, legacy-app, present-service, stray-repo.
+	if all.Total != 5 || all.Shown != 5 || all.Sweep == nil || all.Sweep.Repositories != 5 || all.Repositories[0].Repository != org+"/"+repoArchived || !all.Repositories[0].Archived || all.Repositories[4].Repository != org+"/"+repoStray || all.Repositories[0].Age == "" {
+		t.Errorf("list: total %d shown %d rows %+v", all.Total, all.Shown, all.Repositories)
+	}
+	var raw map[string]any
+	st.callJSON(t, c, tools.ToolListRepositories, map[string]any{kLimit: 1}, &raw)
+	if rows, _ := raw["repositories"].([]any); len(rows) != 1 || rows[0].(map[string]any)["orphan"] != nil || rows[0].(map[string]any)["decision"] != nil {
+		t.Errorf("a row carries orphan or decision: %v", raw["repositories"])
 	}
 	var gone tools.Listing
 	st.callJSON(t, c, tools.ToolListRepositories, map[string]any{"finding": inventory.FindingDeclaredButGone}, &gone)
@@ -129,21 +132,46 @@ func TestInventoryToolsAndReconcilerRefresh(t *testing.T) {
 	if undeclared.Matched != 2 {
 		t.Errorf("list undeclared: %+v", undeclared.Repositories)
 	}
+	var byTeam tools.Listing
+	st.callJSON(t, c, tools.ToolListRepositories, map[string]any{argTeam: team, kLimit: 2}, &byTeam)
+	if byTeam.Matched != 3 || byTeam.Shown != 2 {
+		t.Errorf("list team: matched %d shown %d", byTeam.Matched, byTeam.Shown)
+	}
+	// team under mine: alice's own team narrows to it; a team she is not in
+	// selects no rows and the note says so — no error.
 	var mine tools.Listing
-	st.callJSON(t, c, tools.ToolListRepositories, map[string]any{argTeam: team, "limit": 2}, &mine)
-	if mine.Matched != 3 || mine.Shown != 2 {
-		t.Errorf("list team: matched %d shown %d", mine.Matched, mine.Shown)
+	st.callJSON(t, c, tools.ToolListRepositories, map[string]any{"scope": tools.ScopeMine, argTeam: team}, &mine)
+	if mine.Matched != 3 || strings.Join(mine.Teams, ",") != team || mine.Note != "" {
+		t.Errorf("mine narrowed to %s: matched %d teams %v note %q", team, mine.Matched, mine.Teams, mine.Note)
+	}
+	st.callJSON(t, c, tools.ToolListRepositories, map[string]any{"scope": tools.ScopeMine, argTeam: teamOther}, &mine)
+	if mine.Matched != 0 || len(mine.Repositories) != 0 || strings.Join(mine.Teams, ",") != team || !strings.Contains(mine.Note, teamOther+" is not one of your teams ("+team+")") {
+		t.Errorf("mine narrowed to %s: matched %d teams %v note %q", teamOther, mine.Matched, mine.Teams, mine.Note)
+	}
+	// archived: the flag on GitHub counts, declared or not; so does lifecycle
+	// archived. Nothing in the fixture declares a lifecycle: active is the rest.
+	var archived tools.Listing
+	st.callJSON(t, c, tools.ToolListRepositories, map[string]any{"archived": true}, &archived)
+	if archived.Matched != 1 || archived.Repositories[0].Repository != org+"/"+repoArchived {
+		t.Errorf("archived: %+v", archived.Repositories)
+	}
+	st.callJSON(t, c, tools.ToolListRepositories, map[string]any{"archived": false}, &archived)
+	if archived.Matched != 4 {
+		t.Errorf("not archived: %+v", archived.Repositories)
+	}
+	st.callJSON(t, c, tools.ToolListRepositories, map[string]any{argLifecycle: lifecycleArchived}, &archived)
+	if archived.Matched != 1 || archived.Repositories[0].Repository != org+"/"+repoArchived {
+		t.Errorf("lifecycle archived: %+v", archived.Repositories)
+	}
+	st.callJSON(t, c, tools.ToolListRepositories, map[string]any{argLifecycle: tools.LifecycleActive}, &archived)
+	if archived.Matched != 4 {
+		t.Errorf("lifecycle active: %+v", archived.Repositories)
 	}
 
-	var stray inventory.Record
-	st.callJSON(t, c, tools.ToolGetRepository, map[string]any{kRepository: repoStray, "stalePeriodDays": 3650}, &stray)
-	if stray.Orphan.Score >= 100 || stray.Orphan.StalePeriod != (3650*24*time.Hour).String() || stray.Age == "" {
-		t.Errorf("get with a ten-year stale period: %+v age %q", stray.Orphan, stray.Age)
-	}
-	for _, r := range stray.Orphan.Reasons {
-		if strings.Contains(r, "older than") {
-			t.Errorf("stale reason kept at ten years: %s", r)
-		}
+	var stray map[string]any
+	st.callJSON(t, c, tools.ToolGetRepository, map[string]any{kRepository: repoStray}, &stray)
+	if stray["repository"] != org+"/"+repoStray || stray["age"] == "" || stray["orphan"] != nil || stray["decision"] != nil {
+		t.Errorf("get_repository: %v", stray)
 	}
 
 	var refreshed inventory.Record
@@ -151,18 +179,10 @@ func TestInventoryToolsAndReconcilerRefresh(t *testing.T) {
 	if refreshed.Source != inventory.SourceRefresh || refreshed.Setup.Checks == nil || refreshed.Age == "" {
 		t.Errorf("refresh: source %q setup %+v", refreshed.Source, refreshed.Setup)
 	}
-	var decided inventory.Record
-	st.callJSON(t, c, tools.ToolDecideRepository, map[string]any{kRepository: repoPresent, "verdict": tools.DecisionKeep, "note": "the service is ours"}, &decided)
-	if decided.Decision == nil || decided.Decision.Verdict != tools.DecisionKeep || !strings.Contains(decided.Decision.By, alice) || decided.Decision.Note != "the service is ours" {
-		t.Errorf("decide: %+v", decided.Decision)
-	}
-	if text, isErr := call(t, c, tools.ToolDecideRepository, map[string]any{kRepository: repoPresent, "verdict": "drop"}); !isErr || !strings.Contains(text, "not defined") {
-		t.Errorf("decide drop: isError=%v %s", isErr, text)
-	}
 
 	// The reconciler's run: the poller reads its reconcile-<name> artifact
-	// from GitHub as the inventory App, the run lands in setup.lastRun, the
-	// decision survives; the blob is fetched without the App's token.
+	// from GitHub as the inventory App, the run lands in setup.lastRun; the
+	// blob is fetched without the App's token.
 	finished := time.Now().UTC().Truncate(time.Second)
 	run := st.ghs.actions.addRun(t, runStatusCompleted, finished.Add(-time.Minute), artifactReport{name: repoPresent, finishedAt: finished,
 		result: reconcile.Result{Repository: org + "/" + repoPresent, Mode: reconcile.ModeRepair, Converged: true,
@@ -180,13 +200,13 @@ func TestInventoryToolsAndReconcilerRefresh(t *testing.T) {
 		t.Errorf("circleci after the reconciler's run: %+v", ci)
 	}
 	if lr := rec.Setup.LastRun; lr == nil || lr.RunURL != runURL(run.ID) || lr.RunID != run.ID || lr.Attempt != 1 || !lr.Timestamp.Equal(finished) || lr.Result.Mode != reconcile.ModeRepair ||
-		rec.Source != inventory.SourceReconciler || rec.Decision == nil {
-		t.Errorf("reconciler refresh: setup %+v source %q decision %+v", rec.Setup, rec.Source, rec.Decision)
+		rec.Source != inventory.SourceReconciler {
+		t.Errorf("reconciler refresh: setup %+v source %q", rec.Setup, rec.Source)
 	}
 	var again inventory.Record
 	st.callJSON(t, c, tools.ToolRefreshRepository, map[string]any{kRepository: repoPresent}, &again)
-	if again.Setup.LastRun == nil || again.Setup.LastRun.RunURL != runURL(run.ID) || again.Decision == nil {
-		t.Errorf("run and decision did not survive the next refresh: %+v %+v", again.Setup.LastRun, again.Decision)
+	if again.Setup.LastRun == nil || again.Setup.LastRun.RunURL != runURL(run.ID) {
+		t.Errorf("the run did not survive the next refresh: %+v", again.Setup.LastRun)
 	}
 	// A second poll, and a fresh collector over the same store (a restart),
 	// read no artifact again: the cursor names the run attempt.

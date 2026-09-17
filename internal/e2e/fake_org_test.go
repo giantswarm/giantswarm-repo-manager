@@ -30,6 +30,7 @@ const (
 	kNodes           = "nodes"
 	kNumber          = "number"
 	kRepository      = "repository"
+	kLimit           = "limit"
 	kTotalCount      = "totalCount"
 	kText            = "text"
 	kTitle           = "title"

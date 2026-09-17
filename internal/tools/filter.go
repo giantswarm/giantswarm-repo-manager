@@ -7,6 +7,21 @@ import (
 	"time"
 
 	"github.com/giantswarm/giantswarm-repo-manager/internal/inventory"
+	"github.com/giantswarm/giantswarm-repo-manager/internal/teamfiles"
+)
+
+// Lifecycle filter values: the team-file schema's (deprecated, archived) and
+// active, the state of a repository without a declared lifecycle.
+const (
+	LifecycleActive     = "active"
+	LifecycleDeprecated = teamfiles.LifecycleDeprecated
+	LifecycleArchived   = teamfiles.LifecycleArchived
+)
+
+// Where a listing's teams came from.
+const (
+	teamsSourceGitHub   = "github"
+	teamsSourceArgument = "argument"
 )
 
 // listFilter is one list_repositories call's selection: the scope resolved
@@ -15,44 +30,49 @@ type listFilter struct {
 	scope       string
 	teams       []string // the teams a mine/team scope selects
 	teamsSource string
-	undeclared  bool
-	teamNone    bool
-	search      string
-	renovate    string
-	visibility  string
-	fork        *bool
-	lifecycle   string
-	inactive    time.Duration
-	minScore    float64
-	decision    string
-	finding     string
+	// none selects nothing — a team under mine the caller is not in; note
+	// says why.
+	none       bool
+	note       string
+	undeclared bool
+	teamNone   bool
+	search     string
+	renovate   string
+	visibility string
+	fork       *bool
+	lifecycle  string
+	archived   *bool
+	inactive   time.Duration
+	finding    string
 }
 
 func (t *tools) listFilter(ctx context.Context, args map[string]any) (*listFilter, error) {
-	f := &listFilter{minScore: number(args, argMinScore, 0)}
+	f := &listFilter{}
 	f.scope, _ = args[argScope].(string)
 	if f.scope == "" {
 		f.scope = ScopeAll
 	}
-	team, _ := args[argTeam].(string)
-	team = strings.TrimSpace(team)
+	team := stringArg(args, argTeam)
 	switch f.scope {
 	case ScopeAll:
 		if team == TeamNone {
 			f.teamNone = true
 		} else if team != "" {
-			f.teams, f.teamsSource = []string{team}, "argument"
+			f.teams, f.teamsSource = []string{team}, teamsSourceArgument
 		}
 	case ScopeUnassigned:
 		f.undeclared = true
 	case ScopeTeam:
 		if team != "" && team != TeamNone {
-			f.teams, f.teamsSource = []string{team}, "argument"
+			f.teams, f.teamsSource = []string{team}, teamsSourceArgument
 		} else {
 			f.teams, f.teamsSource = t.callerTeams(ctx)
 		}
 	case ScopeMine:
 		f.teams, f.teamsSource = t.callerTeams(ctx)
+		if team != "" && len(f.teams) > 0 {
+			f.narrowToOwn(team)
+		}
 	default:
 		return nil, fmt.Errorf("%s %q is not known: %s, %s, %s or %s", argScope, f.scope, ScopeMine, ScopeTeam, ScopeUnassigned, ScopeAll)
 	}
@@ -62,19 +82,33 @@ func (t *tools) listFilter(ctx context.Context, args map[string]any) (*listFilte
 	if u, _ := args[argUndeclared].(bool); u {
 		f.undeclared = true
 	}
-	f.search = strings.ToLower(strings.TrimSpace(stringArg(args, argSearch)))
+	f.search = strings.ToLower(stringArg(args, argSearch))
 	f.renovate = stringArg(args, argRenovate)
 	f.visibility = strings.ToLower(stringArg(args, argVisibility))
 	if v, ok := args[argFork].(bool); ok {
 		f.fork = &v
 	}
 	f.lifecycle = stringArg(args, argLifecycle)
+	if v, ok := args[argArchived].(bool); ok {
+		f.archived = &v
+	}
 	if d := number(args, argInactive, 0); d > 0 {
 		f.inactive = time.Duration(d*24) * time.Hour
 	}
-	f.decision = stringArg(args, argDecision)
 	f.finding = stringArg(args, argFinding)
 	return f, nil
+}
+
+// narrowToOwn narrows a mine scope to one of the caller's teams. A team the
+// caller is not in selects nothing, and the note says so — no error: the
+// page sends the team it shows.
+func (f *listFilter) narrowToOwn(team string) {
+	if containsFold(f.teams, team) {
+		f.teams, f.teamsSource = []string{team}, teamsSourceArgument
+		return
+	}
+	f.none = true
+	f.note = fmt.Sprintf("%s is not one of your teams (%s): no rows", team, strings.Join(f.teams, ", "))
 }
 
 func stringArg(args map[string]any, key string) string {
@@ -82,9 +116,12 @@ func stringArg(args map[string]any, key string) string {
 	return strings.TrimSpace(v)
 }
 
-// matches applies the selection to one record; stale is the caller's stale
-// period when given (else the record's).
-func (f *listFilter) matches(r *inventory.Record, stale time.Duration, now time.Time) bool {
+// matches applies the selection to one record; period is the Renovate
+// activity period.
+func (f *listFilter) matches(r *inventory.Record, period time.Duration, now time.Time) bool {
+	if f.none {
+		return false
+	}
 	if f.undeclared && (r.Declaration != nil || r.Reality == nil) {
 		return false
 	}
@@ -98,7 +135,7 @@ func (f *listFilter) matches(r *inventory.Record, stale time.Duration, now time.
 		(r.Reality == nil || !strings.Contains(strings.ToLower(r.Reality.Description), f.search)) {
 		return false
 	}
-	if f.renovate != "" && renovateState(r, stalePeriod(r, stale), now) != f.renovate && (f.renovate != RenovateConfigured || !r.Renovate.Configured) {
+	if f.renovate != "" && renovateState(r, period, now) != f.renovate && (f.renovate != RenovateConfigured || !r.Renovate.Configured) {
 		return false
 	}
 	if f.visibility != "" && (r.Reality == nil || strings.ToLower(r.Reality.Visibility) != f.visibility) {
@@ -107,26 +144,14 @@ func (f *listFilter) matches(r *inventory.Record, stale time.Duration, now time.
 	if f.fork != nil && (r.Reality == nil || r.Reality.IsFork != *f.fork) {
 		return false
 	}
-	if f.lifecycle != "" {
-		lc := ""
-		if r.Declaration != nil {
-			lc = r.Declaration.Lifecycle
-		}
-		if (f.lifecycle == None && lc != "") || (f.lifecycle != None && lc != f.lifecycle) {
-			return false
-		}
+	if f.lifecycle != "" && !matchesLifecycle(r, f.lifecycle) {
+		return false
+	}
+	if f.archived != nil && archived(r) != *f.archived {
+		return false
 	}
 	if f.inactive > 0 && r.Reality != nil && r.Reality.LastPersonCommit != nil && now.Sub(r.Reality.LastPersonCommit.Date) < f.inactive {
 		return false
-	}
-	if float64(r.Orphan.Score) < f.minScore {
-		return false
-	}
-	if f.decision != "" {
-		has := r.Decision != nil && r.Decision.Verdict == f.decision
-		if (f.decision == DecisionNone && r.Decision != nil) || (f.decision != DecisionNone && !has) {
-			return false
-		}
 	}
 	if f.finding != "" && !hasFinding(r, f.finding) {
 		return false
@@ -134,31 +159,47 @@ func (f *listFilter) matches(r *inventory.Record, stale time.Duration, now time.
 	return true
 }
 
+// matchesLifecycle: archived is declared archived or archived on GitHub;
+// active is no lifecycle declared (or active declared) and not archived on
+// GitHub; any other value is the declared lifecycle.
+func matchesLifecycle(r *inventory.Record, lifecycle string) bool {
+	declared := declaredLifecycle(r)
+	switch {
+	case strings.EqualFold(lifecycle, LifecycleArchived):
+		return archived(r)
+	case strings.EqualFold(lifecycle, LifecycleActive):
+		return (declared == "" || strings.EqualFold(declared, LifecycleActive)) && !archived(r)
+	default:
+		return strings.EqualFold(declared, lifecycle)
+	}
+}
+
+func declaredLifecycle(r *inventory.Record) string {
+	if r.Declaration == nil {
+		return ""
+	}
+	return r.Declaration.Lifecycle
+}
+
+// archived says the repository is archived: declared so, or so on GitHub.
+func archived(r *inventory.Record) bool {
+	return strings.EqualFold(declaredLifecycle(r), LifecycleArchived) || (r.Reality != nil && r.Reality.IsArchived)
+}
+
 // renovateState is the row's Renovate state: missing without a config,
-// active when Renovate opened a PR or committed within the stale period,
+// active when Renovate opened a pull request or committed within the period,
 // else inactive (configured but quiet).
-func renovateState(r *inventory.Record, stale string, now time.Time) string {
+func renovateState(r *inventory.Record, period time.Duration, now time.Time) string {
 	if !r.Renovate.Configured {
 		return RenovateMissing
 	}
-	period, err := time.ParseDuration(stale)
-	if err != nil || period <= 0 {
-		period = 180 * 24 * time.Hour
-	}
-	if r.Renovate.LastCommit != nil && now.Sub(*r.Renovate.LastCommit) < period {
+	if c := r.Renovate.LastCommit; c != nil && now.Sub(*c) < period {
 		return RenovateActive
 	}
 	if pr := r.Renovate.LastPullRequest; pr != nil && now.Sub(pr.CreatedAt) < period {
 		return RenovateActive
 	}
 	return RenovateInactive
-}
-
-func stalePeriod(r *inventory.Record, stale time.Duration) string {
-	if stale > 0 {
-		return stale.String()
-	}
-	return r.Orphan.StalePeriod
 }
 
 func containsFold(list []string, s string) bool {

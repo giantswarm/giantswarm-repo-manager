@@ -3,7 +3,7 @@
 giantswarm-repo-manager keeps one record per repository of the org in Valkey (key `repo:<owner>/<name>`), plus the last
 sweep's summary (`inventory:sweep`) and the reconciler poller's cursor (`inventory:reconciler`). The inventory is a cache: the team files in `giantswarm/github` stay the desired
 state, GitHub the reality; a lost store costs one sweep. The Go types are `internal/inventory/record.go`; the JSON below
-is what `get_repository`, `refresh_repository` and `decide_repository` return.
+is what `get_repository` and `refresh_repository` return.
 
 ## Refresh
 
@@ -13,8 +13,10 @@ is what `get_repository`, `refresh_repository` and `decide_repository` return.
 | Reconciler poll (`inventory.reconciler.pollInterval`, default `5m`; every 30 s while a Reconcile now is pending) | One repository per `reconcile-<name>` artifact of a completed reconciler run, read from GitHub as the inventory App; the run is stored as `setup.lastRun` | `reconciler` |
 | Tool `refresh_repository` | One repository on demand | `refresh` |
 
-Every read fills `age` (now minus `refreshedAt`). A refresh rebuilds the whole record except `decision` and
-`setup.lastRun`, which survive; a sweep with `engineChecks: false` also keeps the previous `setup.checks`.
+Every read fills `age` (now minus `refreshedAt`). A refresh rebuilds the whole record except `setup.lastRun`, which
+survives; a sweep with `engineChecks: false` also keeps the previous `setup.checks`. A record stored by an earlier
+version may carry fields this version does not have (an orphan score, a decision note); they are ignored on read and
+gone after the next refresh.
 
 ### The reconciler's runs
 
@@ -107,15 +109,9 @@ the row) carry the state the Repositories page shows.
     "pendingRun": {"dispatchedAt": "…", "by": "alice"},     // a Reconcile now waiting for its run's artifact
     "missingRun": {"dispatchedAt": "…", "by": "alice", "noticedAt": "…", "runsUrl": "…"}   // one that did not report in 15 min
   },
-  "orphan": {
-    "score": 0,                         // 0–100
-    "reasons": [],
-    "stalePeriod": "4320h0m0s"          // the period judged against; clients may rescore (stalePeriodDays)
-  },
   "findings": [
     {"kind": "default-icon", "message": "…", "fix": "…", "source": "engine"}
   ],
-  "decision": {"verdict": "keep", "note": "…", "by": "alice (alice@example.com)", "at": "…"},   // optional
   "refreshedAt": "…",
   "source": "sweep",                    // sweep | refresh | reconciler
   "age": "5m3s"                         // filled on read
@@ -132,15 +128,11 @@ within 15 minutes; the fix names the workflow's Actions page). The engine's kind
 `abs-prerequisite`, `default-icon`, `red-release`, `renovate-missing`, `archived-undeclared`, `pending-pull-request`,
 `unchecked`.
 
-### Orphan score
+### Renovate state
 
-A sum of weighted reasons, capped at 100, computed from the record's facts alone (so `list_repositories` and
-`get_repository` recompute it for another `stalePeriodDays`): no declaration 40; no commit by a person within the stale
-period (or none in the sampled history) 30; empty repository 20; CODEOWNERS naming a team the org does not have 15;
-Renovate not configured or disabled 10; Renovate silent (no Renovate pull request or commit within the stale period) 10;
-no release 10; no CI (neither `.circleci/config.yml` nor workflows) 10; an onboarding pull request open (`reposetup/*`,
-align-files, Renovate's) 10; the oldest open bot pull request older than the stale period 5. Archived and gone
-repositories are not scored (score 0, one reason saying so).
+`list_repositories` derives each row's `renovate` from the record when it is read: `missing` without a configuration,
+`active` when `renovate.lastPullRequest` or `renovate.lastCommit` is within the server's Renovate activity period
+(`inventory.renovate.activeDays`, default 180), else `inactive`. The record carries the facts, not the verdict.
 
 ## Sweep summary (`inventory:sweep`)
 

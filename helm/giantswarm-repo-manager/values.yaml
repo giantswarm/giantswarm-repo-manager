@@ -198,8 +198,9 @@ muster:
     # `giantswarm-repo-manager` pinned as the authorization server — the
     # pattern of the `github` and `pro` servers on the platform. GitHub
     # publishes no discovery document, so the endpoints are named; the App's
-    # client credentials come from a Secret; no `scopes` (the App's permissions
-    # are the App's). muster runs the consent once per person and puts their
+    # client credentials come from a Secret; no `scopes` for GitHub (the App's
+    # permissions are the App's), a `scopes` value for an authorization server
+    # that needs one. muster runs the consent once per person and puts their
     # user token on every call.
     auth:
       authorizationServer:
@@ -216,6 +217,13 @@ muster:
         authorizationEndpoint: https://github.com/login/oauth/authorize
         # -- GitHub's token endpoint.
         tokenEndpoint: https://github.com/login/oauth/access_token
+        # -- The OAuth `scope` parameter of the authorization request
+        # (space-separated), only for an authorization server that needs one —
+        # a Dex standing in for GitHub in a lab takes
+        # `openid profile email offline_access`. Leave empty for GitHub: a
+        # GitHub App's permissions are the App's, and the token endpoint takes
+        # no scope. Empty omits the field.
+        scopes: ""
         clientCredentialsSecretRef:
           # -- Secret with the App's OAuth client under `client-id` and
           # `client-secret`.

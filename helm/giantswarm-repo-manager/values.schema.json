@@ -218,7 +218,7 @@
                         },
                         "auth": {
                             "type": "object",
-                            "description": "How muster authenticates to this server; rendered only with `oauth.enabled`: `auth.type: oauth` with the GitHub App `giantswarm-repo-manager` pinned as the authorization server — the pattern of the `github` and `pro` servers on the platform. GitHub publishes no discovery document, so the endpoints are named; the App's client credentials come from a Secret; no `scopes` (the App's permissions are the App's). muster runs the consent once per person and puts their user token on every call.",
+                            "description": "How muster authenticates to this server; rendered only with `oauth.enabled`: `auth.type: oauth` with the GitHub App `giantswarm-repo-manager` pinned as the authorization server — the pattern of the `github` and `pro` servers on the platform. GitHub publishes no discovery document, so the endpoints are named; the App's client credentials come from a Secret; no `scopes` for GitHub (the App's permissions are the App's), a `scopes` value for an authorization server that needs one. muster runs the consent once per person and puts their user token on every call.",
                             "additionalProperties": false,
                             "properties": {
                                 "authorizationServer": {
@@ -254,6 +254,10 @@
                                         "issuer": {
                                             "type": "string",
                                             "description": "The issuer identity the person's grant is filed under: the App's own, so the login App's GitHub grant stays separate."
+                                        },
+                                        "scopes": {
+                                            "type": "string",
+                                            "description": "The OAuth `scope` parameter of the authorization request (space-separated), only for an authorization server that needs one — a Dex standing in for GitHub in a lab takes `openid profile email offline_access`. Leave empty for GitHub: a GitHub App's permissions are the App's, and the token endpoint takes no scope. Empty omits the field."
                                         },
                                         "tokenEndpoint": {
                                             "type": "string",

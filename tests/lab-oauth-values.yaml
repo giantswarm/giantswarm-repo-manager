@@ -1,0 +1,29 @@
+# The lab shape on top of tests/test-values.yaml: registered with muster in
+# oauth mode, pinned to a Dex standing in for GitHub as the authorization
+# server. Dex publishes its own issuer as the RFC 9207 `iss`, so no
+# `expectedIssuer`; it needs the OAuth scope parameter, so `scopes` is set —
+# the one value the GitHub pin (tests/oauth-values.yaml) leaves empty. The
+# pinned `issuer` keeps the GitHub shape `<authorization server>/apps/<app>`:
+# it is the identity the grant is filed under, and it must differ from the
+# issuer muster signs people in with, or the two grants share a key.
+#
+#   helm template giantswarm-repo-manager helm/giantswarm-repo-manager \
+#     -f tests/test-values.yaml -f tests/lab-oauth-values.yaml -s templates/mcpserver.yaml
+#
+# renders the MCPServer with `scopes` and without `expectedIssuer`.
+oauth:
+  enabled: true
+muster:
+  mcpServer:
+    enabled: true
+    auth:
+      authorizationServer:
+        issuer: https://dex.lab.example/apps/giantswarm-repo-manager
+        expectedIssuer: ""
+        authorizationEndpoint: https://dex.lab.example/auth
+        tokenEndpoint: https://dex.lab.example/token
+        scopes: openid profile email offline_access
+        clientCredentialsSecretRef:
+          name: giantswarm-repo-manager-oauth-client
+          namespace: ""
+        grantScope: subject

@@ -4,7 +4,9 @@ Registers this server with muster. Tools appear as x_<name>_<tool>. With
 oauth.enabled the CR pins the GitHub App giantswarm-repo-manager as the
 authorization server: muster runs the consent once per person, stores and
 refreshes their user token and puts it on every call as the bearer, which this
-server verifies with GET /user and acts with. Without OAuth muster connects
+server verifies with GET /user and acts with. The pin carries a scope
+parameter only when one is set: GitHub takes none, an authorization server
+that needs one (a Dex in a lab) gets it. Without OAuth muster connects
 anonymously and nothing acts as a person.
 */}}
 apiVersion: muster.giantswarm.io/v1alpha1
@@ -37,6 +39,9 @@ spec:
       {{- end }}
       authorizationEndpoint: {{ .authorizationEndpoint | quote }}
       tokenEndpoint: {{ .tokenEndpoint | quote }}
+      {{- with .scopes }}
+      scopes: {{ . | quote }}
+      {{- end }}
       clientCredentialsSecretRef:
         name: {{ .clientCredentialsSecretRef.name | quote }}
         namespace: {{ .clientCredentialsSecretRef.namespace | default $.Release.Namespace | quote }}

@@ -1,5 +1,7 @@
 // Package server assembles the single HTTP listener: the health endpoints the
-// chart probes and the MCP streamable-HTTP endpoint behind the bearer guard.
+// chart probes and the MCP streamable-HTTP endpoint behind the bearer guard —
+// nothing else: the server has no inbound path but muster's and no shared
+// secret.
 // Without OAuth there is no authentication and no caller: only a server
 // nothing but a trusted proxy can reach runs that way, and every tool then
 // reports an anonymous caller who nothing acts as.
@@ -23,16 +25,10 @@ type Config struct {
 	// OAuth, when set, makes the MCP endpoint require a GitHub user token as
 	// the bearer — behind muster the person's — verified with GET /user.
 	OAuth *OAuthConfig
-	// Internal, when set, serves /internal/ — the sweep control, authenticated
-	// by its own static token.
-	Internal http.Handler
 	// Ready, when set, is what /readyz asks: an error makes the probe fail
 	// (503 with the reason) while the process stays up and keeps serving.
 	Ready func(context.Context) error
 }
-
-// InternalPrefix is where Internal is mounted.
-const InternalPrefix = "/internal/"
 
 // Server is the assembled HTTP server.
 type Server struct {
@@ -67,9 +63,6 @@ func New(cfg Config, mcpSrv *mcpserver.MCPServer, log *slog.Logger) (*Server, er
 		s.guard = g
 	}
 	mux.Handle(cfg.MCPPath, s.protect(mcpserver.NewStreamableHTTPServer(mcpSrv, mcpserver.WithEndpointPath(cfg.MCPPath))))
-	if cfg.Internal != nil {
-		mux.Handle(InternalPrefix, cfg.Internal)
-	}
 
 	s.http = &http.Server{
 		Addr:              cfg.Addr,

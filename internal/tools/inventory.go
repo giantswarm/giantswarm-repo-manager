@@ -23,6 +23,7 @@ const (
 	ToolGetRepository     = "get_repository"
 	ToolRefreshRepository = "refresh_repository"
 	ToolDecideRepository  = "decide_repository"
+	ToolSweepInventory    = "sweep_inventory"
 )
 
 const (
@@ -113,6 +114,14 @@ func (t *tools) registerInventory(s *mcpserver.MCPServer) {
 		mcp.WithDestructiveHintAnnotation(false),
 		mcp.WithString(argRepository, mcp.Required(), mcp.Description("Repository name, with or without the org.")),
 	), t.refreshRepository)
+	s.AddTool(mcp.NewTool(ToolSweepInventory,
+		mcp.WithDescription("Start the full inventory sweep over the org now — every repository's record rebuilt from GitHub and the team files "+
+			"the way the schedule does it — for a member of the teams that own this service (the server's sweep teams, checked on GitHub as you); "+
+			"a non-member is refused. The sweep runs in the background: the answer carries started (false while one already runs), "+
+			"running and the last sweep's summary; list_repositories shows the new one when it is done. Writes the inventory cache only, nothing on GitHub."),
+		mcp.WithIdempotentHintAnnotation(true),
+		mcp.WithDestructiveHintAnnotation(false),
+	), t.sweepInventory)
 	s.AddTool(mcp.NewTool(ToolDecideRepository,
 		mcp.WithDescription("Leave a decision note on a repository's inventory record as you (verdict keep, with text); it survives every refresh. "+
 			"An annotation of the inventory cache, not a change on GitHub — no dryRun or mode."),
@@ -281,9 +290,13 @@ func (t *tools) getRepository(ctx context.Context, req mcp.CallToolRequest) (*mc
 	return result(rec.WithAge(now), nil)
 }
 
+// errNoCollector is refresh_repository's and sweep_inventory's answer without
+// a collector.
+var errNoCollector = errors.New("inventory collector not configured: it needs the store (VALKEY_ADDR) and the inventory App giantswarm-repo-manager-inventory (GITHUB_APP_ID, GITHUB_APP_INSTALLATION_ID, GITHUB_APP_PRIVATE_KEY_FILE)")
+
 func (t *tools) refreshRepository(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 	if t.d.Collector == nil {
-		return result(nil, errors.New("inventory collector not configured: it needs the store (VALKEY_ADDR) and the inventory App giantswarm-repo-manager-inventory (GITHUB_APP_ID, GITHUB_APP_INSTALLATION_ID, GITHUB_APP_PRIVATE_KEY_FILE)"))
+		return result(nil, errNoCollector)
 	}
 	key, err := t.repositoryKey(req.GetArguments())
 	if err != nil {
@@ -294,6 +307,49 @@ func (t *tools) refreshRepository(ctx context.Context, req mcp.CallToolRequest) 
 		return result(nil, err)
 	}
 	return result(rec.WithAge(time.Now()), nil)
+}
+
+// DefaultSweepTeams are the teams whose members may start a sweep when the
+// server is not told otherwise: the owners of the manager and the reconciler.
+const DefaultSweepTeams = "team-bumblebee,team-planeteers"
+
+// Sweep is sweep_inventory's result.
+type Sweep struct {
+	// Running says a sweep is under way — the one just started, or the one
+	// that was already running.
+	Running bool `json:"running"`
+	// Started is false when a sweep was already running: none was started.
+	Started bool `json:"started"`
+	// Last is the last completed sweep's summary; the running one replaces it
+	// when it is done.
+	Last *inventory.SweepSummary `json:"last,omitempty"`
+	// Login and Teams are the caller and the teams the membership was
+	// checked against.
+	Login string   `json:"login"`
+	Teams []string `json:"teams"`
+}
+
+func (t *tools) sweepInventory(ctx context.Context, _ mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	if t.d.Collector == nil {
+		return result(nil, errNoCollector)
+	}
+	if len(t.d.SweepTeams) == 0 {
+		return result(nil, errors.New("sweep_inventory is off: no team is configured to start a sweep (SWEEP_TEAMS)"))
+	}
+	p, err := t.person(ctx)
+	if err != nil {
+		return result(nil, err)
+	}
+	if !p.memberOfAny(t.d.SweepTeams) {
+		return result(nil, p.notAMember(strings.Join(t.d.SweepTeams, " or "), "the sweep is not yours to start"))
+	}
+	started := t.d.Collector.StartSweep()
+	last, err := t.d.Inventory.Sweep(ctx)
+	if err != nil {
+		return result(nil, err)
+	}
+	t.d.Log.Info("sweep requested", "started", started, "by", p.login)
+	return result(&Sweep{Running: true, Started: started, Last: last, Login: p.login, Teams: t.d.SweepTeams}, nil)
 }
 
 func (t *tools) decideRepository(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {

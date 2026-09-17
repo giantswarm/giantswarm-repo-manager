@@ -55,8 +55,6 @@ const (
 	// baseURL is where muster reaches the server: the resource of the
 	// protected-resource metadata (the listener is httptest's).
 	baseURL = "http://giantswarm-repo-manager.test:8080"
-	// internalToken authenticates the reconciler's trigger.
-	internalToken = "internal-secret" // #nosec G101 -- test fixture
 )
 
 type stack struct {
@@ -141,15 +139,14 @@ func newStack(t *testing.T) *stack {
 	st := &stack{ghs: ghs, gw: gw, app: app, store: store, checker: &fakeChecker{}, log: log}
 	st.col = st.newCollector(0)
 	ts := tools.New(tools.Deps{Version: testVersion, GitHubAPIURL: apiURL, AuthorizationServer: server.DefaultAuthorizationServer, App: app, Inventory: store, Collector: st.col, Log: log,
-		TeamFilesRepository: org + "/github", TeamFilesRef: mainBranch,
+		TeamFilesRepository: org + "/github", TeamFilesRef: mainBranch, SweepTeams: []string{team, teamPlaneteers},
 		Review:   review.New(review.Config{BaseURL: gws.URL, TokenFile: tokenFile, Channels: map[string]string{teamPlaneteers: planeteersChannel}}),
 		Scaffold: fakeScaffold{}})
 	st.col.OnReconciled(ts.Reconciled)
 	mcpSrv := ts.MCPServer()
 
 	s, err := server.New(server.Config{Addr: "127.0.0.1:0", MCPPath: "/mcp",
-		OAuth:    &server.OAuthConfig{BaseURL: baseURL, AuthorizationServer: server.DefaultAuthorizationServer, GitHubAPIURL: apiURL},
-		Internal: st.col.InternalHandler(internalToken)}, mcpSrv, log)
+		OAuth: &server.OAuthConfig{BaseURL: baseURL, AuthorizationServer: server.DefaultAuthorizationServer, GitHubAPIURL: apiURL}}, mcpSrv, log)
 	if err != nil {
 		t.Fatal(err)
 	}

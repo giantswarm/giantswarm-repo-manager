@@ -57,19 +57,14 @@ spec:
               value: {{ .Values.inventory.sweep.concurrency | int64 | quote }}
             - name: GRAPHQL_BUDGET_FLOOR
               value: {{ .Values.inventory.sweep.graphqlBudgetFloor | int64 | quote }}
+            - name: SWEEP_TEAMS
+              value: {{ join "," .Values.inventory.sweep.teams | quote }}
             - name: ORPHAN_STALE_DAYS
               value: {{ .Values.inventory.orphan.staleDays | int64 | quote }}
             - name: RECONCILER_POLL_INTERVAL
               value: {{ .Values.inventory.reconciler.pollInterval | quote }}
             - name: RECONCILER_WORKFLOW
               value: {{ .Values.inventory.reconciler.workflow | quote }}
-            {{- with .Values.inventory.internal.existingSecret }}
-            - name: INTERNAL_TOKEN
-              valueFrom:
-                secretKeyRef:
-                  name: {{ . }}
-                  key: token
-            {{- end }}
             {{- if .Values.oauth.enabled }}
             - name: OAUTH_ENABLED
               value: "true"

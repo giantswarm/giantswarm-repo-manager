@@ -1,7 +1,6 @@
 package e2e
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -105,9 +104,8 @@ func TestSweepFillsOneRecordPerRepository(t *testing.T) {
 }
 
 // TestInventoryToolsAndReconcilerRefresh: the tools over the store as alice,
-// the on-demand refresh, the decision note, and the reconciler's trigger on
-// the internal endpoint with its run stored — decision and run survive the
-// next refresh.
+// the on-demand refresh, the decision note, and the reconciler's run pulled
+// from GitHub and stored — decision and run survive the next refresh.
 func TestInventoryToolsAndReconcilerRefresh(t *testing.T) {
 	st := newStack(t)
 	ctx := context.Background()
@@ -210,17 +208,58 @@ func TestInventoryToolsAndReconcilerRefresh(t *testing.T) {
 	if lr := st.record(t, repoPresent).Setup.LastRun; lr == nil || lr.RunID != run.ID || lr.Attempt != 2 || st.ghs.actions.blobDownloads.Load() != 2 {
 		t.Errorf("re-run not stored: %+v downloads %d", lr, st.ghs.actions.blobDownloads.Load())
 	}
+}
 
-	if status, _ := st.internal(t, http.MethodGet, "/internal/sweep", "", nil); status != http.StatusUnauthorized {
-		t.Errorf("internal without a token: %d", status)
+// TestSweepInventoryForTheOwningTeams: sweep_inventory starts the sweep for a
+// member of a configured team; while it runs a second call says so and
+// carries the last summary; a non-member is refused in approve_change's
+// words; and the listener has no sweep control of its own — the tool behind
+// muster is the one way in.
+func TestSweepInventoryForTheOwningTeams(t *testing.T) {
+	st := newStack(t)
+	ctx := context.Background()
+	if _, err := st.col.Sweep(ctx); err != nil {
+		t.Fatal(err)
 	}
-	if status, _ := st.internal(t, http.MethodPost, "/internal/refresh", internalToken, map[string]any{kRepository: repoPresent}); status != http.StatusNotFound {
-		t.Errorf("the removed refresh endpoint answers %d, not 404", status)
+	// carol is in team-other: the sweep is not hers to start.
+	if text, isErr := call(t, st.as(t, carolToken), tools.ToolSweepInventory, nil); !isErr ||
+		!strings.Contains(text, carol+" is not a member of "+team+" or "+teamPlaneteers+" (your teams: "+teamOther+")") || !strings.Contains(text, "the sweep is not yours to start") {
+		t.Errorf("carol's sweep: error %v %s", isErr, text)
 	}
-	status, body := st.internal(t, http.MethodGet, "/internal/sweep", internalToken, nil)
-	var sw collect.SweepStatus
-	if err := json.Unmarshal(body, &sw); status != http.StatusOK || err != nil || sw.Last == nil || sw.Last.Repositories != 5 || sw.Running {
-		t.Errorf("internal sweep status: %d %s", status, body)
+	if st.col.Running() {
+		t.Fatal("a refused call started a sweep")
+	}
+	// The engine checks hold this sweep: the second call finds it running.
+	st.checker.hold = make(chan struct{})
+	c := st.as(t, aliceToken)
+	var first, second tools.Sweep
+	st.callJSON(t, c, tools.ToolSweepInventory, nil, &first)
+	if !first.Started || !first.Running || first.Last == nil || first.Last.Repositories != 5 || first.Login != alice || len(first.Teams) != 2 {
+		t.Errorf("alice's sweep: %+v", first)
+	}
+	st.callJSON(t, c, tools.ToolSweepInventory, nil, &second)
+	if second.Started || !second.Running || second.Last == nil || second.Last.Repositories != 5 {
+		t.Errorf("a second sweep while the first runs: %+v", second)
+	}
+	close(st.checker.hold)
+	for deadline := time.Now().Add(10 * time.Second); st.col.Running(); {
+		if time.Now().After(deadline) {
+			t.Fatal("the held sweep did not finish")
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	if st.checker.calls.Load() != 4 {
+		t.Errorf("engine checks after two sweeps: %d, want 4", st.checker.calls.Load())
+	}
+	// The former sweep control's path (spelled in two parts: a search of the
+	// tree for the prefix finds the changelog alone) has no handler at all.
+	resp, err := http.Get(st.srv.URL + "/" + "internal/sweep") // #nosec G107 -- the test server's URL
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = resp.Body.Close()
+	if resp.StatusCode != http.StatusNotFound {
+		t.Errorf("the former sweep control answers %d, not 404", resp.StatusCode)
 	}
 }
 
@@ -400,30 +439,4 @@ func (st *stack) callJSON(t *testing.T, c *client.Client, tool string, args map[
 	if err := json.Unmarshal([]byte(text), out); err != nil {
 		t.Fatalf("%s: %v\n%s", tool, err, text)
 	}
-}
-
-// internal calls an internal endpoint with the bearer token.
-func (st *stack) internal(t *testing.T, method, path, token string, body any) (int, []byte) {
-	t.Helper()
-	var buf bytes.Buffer
-	if body != nil {
-		if err := json.NewEncoder(&buf).Encode(body); err != nil {
-			t.Fatal(err)
-		}
-	}
-	req, err := http.NewRequest(method, st.srv.URL+path, &buf)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if token != "" {
-		req.Header.Set("Authorization", "Bearer "+token)
-	}
-	resp, err := http.DefaultClient.Do(req)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer func() { _ = resp.Body.Close() }()
-	var out bytes.Buffer
-	_, _ = out.ReadFrom(resp.Body)
-	return resp.StatusCode, out.Bytes()
 }

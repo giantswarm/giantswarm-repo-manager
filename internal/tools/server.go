@@ -57,8 +57,12 @@ type Deps struct {
 	App       *gh.App
 	Inventory *inventory.Store
 	// Collector fills the inventory; nil when the store or the inventory App
-	// is missing (refresh_repository then says so).
+	// is missing (refresh_repository and sweep_inventory then say so).
 	Collector *collect.Collector
+	// SweepTeams are the GitHub team slugs whose members may start a sweep
+	// with sweep_inventory: the teams that own the manager and the
+	// reconciler. Empty leaves the tool refusing everyone.
+	SweepTeams []string
 	// TeamFilesRepository and TeamFilesRef are where the team files live
 	// (giantswarm/github at main; a fixture in tests).
 	TeamFilesRepository, TeamFilesRef string

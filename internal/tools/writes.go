@@ -547,7 +547,8 @@ func (t *tools) approveChange() WriteTool {
 	}
 }
 
-// ErrNotAMember is approve_change's refusal.
+// ErrNotAMember is the refusal of approve_change and sweep_inventory: the
+// caller is not in the team the tool is reserved for.
 var ErrNotAMember = errors.New("not a member of the deciding team")
 
 func (t *tools) approve(ctx context.Context, args map[string]any, submit bool) (*Approval, error) {
@@ -565,8 +566,7 @@ func (t *tools) approve(ctx context.Context, args map[string]any, submit bool) (
 	}
 	a := &Approval{PullRequest: n, Team: team, Login: p.login, Teams: p.teams, Member: p.member(team)}
 	if !a.Member {
-		return nil, fmt.Errorf("%w: %s is not a member of %s (your teams: %s), so the review of %s#%d is not yours to give",
-			ErrNotAMember, p.login, team, strings.Join(p.teams, ", "), p.repo.Owner+"/"+p.repo.Name, n)
+		return nil, p.notAMember(team, fmt.Sprintf("the review of %s#%d is not yours to give", p.repo.Owner+"/"+p.repo.Name, n))
 	}
 	if !submit {
 		return a, nil

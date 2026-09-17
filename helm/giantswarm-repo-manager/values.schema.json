@@ -131,16 +131,6 @@
                     "type": "string",
                     "description": "How long the server waits for the store at start (a Go duration), retrying with backoff, before it gives up and exits; it serves meanwhile, liveness passing and readiness failing until the store answers, so a Valkey that starts after the manager — a volume binding late, a restart — costs no container restart within the window. `\"0\"` waits for ever."
                 },
-                "internal": {
-                    "type": "object",
-                    "additionalProperties": false,
-                    "properties": {
-                        "existingSecret": {
-                            "type": "string",
-                            "description": "Existing Secret with the bearer token of the internal endpoints under `token`: `GET|POST /internal/sweep`. Empty disables them (404)."
-                        }
-                    }
-                },
                 "org": {
                     "type": "string",
                     "description": "The GitHub organization the inventory covers."
@@ -188,6 +178,13 @@
                         "interval": {
                             "type": "string",
                             "description": "Full sweep over the org every interval (a Go duration); `\"0\"` turns the schedule off. The first sweep runs at start when the last one is older than the interval."
+                        },
+                        "teams": {
+                            "type": "array",
+                            "description": "GitHub team slugs whose members may start a sweep on demand with the tool `sweep_inventory` (membership checked on GitHub as the caller): the teams that own the manager and the reconciler. Passed as `SWEEP_TEAMS`.",
+                            "items": {
+                                "type": "string"
+                            }
                         }
                     }
                 },
@@ -245,6 +242,10 @@
                                                     "description": "Namespace of that Secret; empty is the release namespace."
                                                 }
                                             }
+                                        },
+                                        "expectedIssuer": {
+                                            "type": "string",
+                                            "description": "The issuer the authorization server puts in the RFC 9207 `iss` parameter of its authorization response — GitHub's is `https://github.com/login/oauth` for every App, while `issuer` stays the App's own identity the grant is filed under (muster#1277). Empty omits the field."
                                         },
                                         "grantScope": {
                                             "type": "string",

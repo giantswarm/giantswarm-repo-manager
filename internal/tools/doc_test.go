@@ -14,7 +14,7 @@ import (
 
 // TestToolsDocIsCurrent keeps docs/tools.md — the tool names, descriptions
 // and input schemas as muster exposes them — equal to the registered tools.
-// TOOLS_DOC_UPDATE=1 rewrites the file.
+// TOOLS_DOC_UPDATE=1 rewrites the file (`make tools-doc`).
 func TestToolsDocIsCurrent(t *testing.T) {
 	c := newTestClient(t, NewMCPServer(Deps{Version: testVersion}))
 	res, err := c.ListTools(context.Background(), mcp.ListToolsRequest{})
@@ -33,7 +33,7 @@ func TestToolsDocIsCurrent(t *testing.T) {
 		t.Fatalf("%v — run with TOOLS_DOC_UPDATE=1", err)
 	}
 	if string(got) != want {
-		t.Errorf("docs/tools.md is out of date: run `TOOLS_DOC_UPDATE=1 go test ./internal/tools -run TestToolsDocIsCurrent`")
+		t.Errorf("docs/tools.md is out of date: run `make tools-doc`")
 	}
 }
 
@@ -41,7 +41,7 @@ func renderToolsDoc(ts []mcp.Tool) string {
 	sort.Slice(ts, func(i, j int) bool { return ts[i].Name < ts[j].Name })
 	var b strings.Builder
 	b.WriteString("# The tools\n\n")
-	b.WriteString("Generated from the registered tools (`TOOLS_DOC_UPDATE=1 go test ./internal/tools -run TestToolsDocIsCurrent`); ")
+	b.WriteString("Generated from the registered tools (`make tools-doc`); ")
 	b.WriteString("through muster every tool is `x_" + ToolPrefix + "_<name>`. Every write tool takes `dryRun` and `mode`; `commit` is the only write mode, `apply` is refused.\n\n")
 	b.WriteString("| Tool | Kind |\n|---|---|\n")
 	writes := map[string]bool{}

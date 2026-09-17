@@ -39,11 +39,11 @@ import (
 type options struct {
 	listen, mcpPath string
 
-	valkeyAddr, org, internalToken string
-	sweepInterval, connectTimeout  time.Duration
-	sweepEngineChecks, sweepOnce   bool
-	sweepConcurrency, staleDays    int
-	graphqlBudgetFloor             int
+	valkeyAddr, org, sweepTeams   string
+	sweepInterval, connectTimeout time.Duration
+	sweepEngineChecks, sweepOnce  bool
+	sweepConcurrency, staleDays   int
+	graphqlBudgetFloor            int
 
 	githubAPIURL, githubAppPrivateKeyFile string
 	githubAppID, githubAppInstallationID  int64
@@ -69,11 +69,11 @@ func parseFlags(args []string) (*options, error) {
 	f.BoolVar(&o.sweepEngineChecks, "sweep-engine-checks", envBoolDefault("SWEEP_ENGINE_CHECKS", true), "Run the engine's set-up checks in read mode for every declared repository during a sweep (SWEEP_ENGINE_CHECKS)")
 	f.IntVar(&o.sweepConcurrency, "sweep-concurrency", int(envInt64Default("SWEEP_CONCURRENCY", 4)), "Parallel engine reads during a sweep (SWEEP_CONCURRENCY)")
 	f.IntVar(&o.staleDays, "stale-days", int(envInt64Default("ORPHAN_STALE_DAYS", 180)), "Stale period of the orphan score in days (ORPHAN_STALE_DAYS)")
+	f.StringVar(&o.sweepTeams, "sweep-teams", envOr("SWEEP_TEAMS", tools.DefaultSweepTeams), "Comma-separated GitHub team slugs whose members may start a sweep with sweep_inventory — the teams that own the manager and the reconciler (SWEEP_TEAMS)")
 	f.IntVar(&o.graphqlBudgetFloor, "graphql-budget-floor", int(envInt64Default("GRAPHQL_BUDGET_FLOOR", 0)), "Stop a sweep cleanly when the GraphQL budget's remaining points fall below this; 0 never stops (GRAPHQL_BUDGET_FLOOR)")
 	f.BoolVar(&o.sweepOnce, "sweep-once", envBool("SWEEP_ONCE"), "Run one full sweep, print its summary as JSON and exit (SWEEP_ONCE)")
 	f.DurationVar(&o.reconcilerPollInterval, "reconciler-poll-interval", envDuration("RECONCILER_POLL_INTERVAL", collect.DefaultReconcilerPoll), "Read the reconciler workflow's completed runs from GitHub every interval and store their reconcile-<repository> artifacts as the repositories' setup.lastRun; every 30 s while a Reconcile now is pending; 0 turns the poller off (RECONCILER_POLL_INTERVAL)")
 	f.StringVar(&o.reconcilerWorkflow, "reconciler-workflow", envOr("RECONCILER_WORKFLOW", teamfiles.ReconcilerWorkflow), "The reconciler's workflow file in the team files repository: the one reconcile_repository dispatches and the poller reads the runs of (RECONCILER_WORKFLOW)")
-	f.StringVar(&o.internalToken, "internal-token", envSecret("INTERNAL_TOKEN"), "Bearer token of the internal endpoints (/internal/sweep); empty disables them (INTERNAL_TOKEN)")
 	f.StringVar(&o.githubAPIURL, "github-api-url", envOr("GITHUB_API_URL", ""), "GitHub API base URL; empty is api.github.com (GITHUB_API_URL)")
 	f.Int64Var(&o.githubAppID, "github-app-id", envInt64("GITHUB_APP_ID"), "Id of the read-only GitHub App giantswarm-repo-manager-inventory, the identity of the unattended reads (GITHUB_APP_ID)")
 	f.Int64Var(&o.githubAppInstallationID, "github-app-installation-id", envInt64("GITHUB_APP_INSTALLATION_ID"), "The inventory App's installation id on the org (GITHUB_APP_INSTALLATION_ID)")
@@ -108,7 +108,7 @@ func main() {
 // run wires the components and serves until ctx is done.
 func run(ctx context.Context, o *options, log *slog.Logger) error {
 	deps := tools.Deps{Version: version(), GitHubAPIURL: o.githubAPIURL, Log: log,
-		TeamFilesRepository: o.teamFilesRepository, TeamFilesRef: o.teamFilesRef, ReconcilerWorkflow: o.reconcilerWorkflow,
+		TeamFilesRepository: o.teamFilesRepository, TeamFilesRef: o.teamFilesRef, ReconcilerWorkflow: o.reconcilerWorkflow, SweepTeams: splitList(o.sweepTeams),
 		Review: review.New(review.Config{BaseURL: o.reviewsURL, TokenFile: o.reviewsTokenFile, Channels: channelMap(o.reviewsChannels)})}
 
 	var reader *gh.Reader
@@ -159,7 +159,6 @@ func run(ctx context.Context, o *options, log *slog.Logger) error {
 	}
 	ts := tools.New(deps)
 	if deps.Collector != nil {
-		cfg.Internal = deps.Collector.InternalHandler(o.internalToken)
 		deps.Collector.OnReconciled(ts.Reconciled)
 	}
 	srv, err := server.New(cfg, ts.MCPServer(), log)
@@ -195,7 +194,7 @@ func run(ctx context.Context, o *options, log *slog.Logger) error {
 		"oauth", o.oauthEnabled, "authorizationServer", deps.AuthorizationServer, "githubApp", deps.App != nil, "reads", readsAs,
 		"inventory", o.valkeyAddr, "inventoryConnectTimeout", o.connectTimeout, "collector", deps.Collector != nil, "sweepInterval", o.sweepInterval,
 		"reconcilerPollInterval", o.reconcilerPollInterval, "reconcilerWorkflow", o.reconcilerWorkflow,
-		"engineChecks", o.sweepEngineChecks, "internalEndpoints", deps.Collector != nil && o.internalToken != "",
+		"engineChecks", o.sweepEngineChecks, "sweepTeams", o.sweepTeams,
 		"teamFiles", o.teamFilesRepository+"@"+o.teamFilesRef, "reviews", o.reviewsURL)
 	err = srv.Run(runCtx)
 	if cause := context.Cause(runCtx); cause != nil && !errors.Is(cause, context.Canceled) {
@@ -254,13 +253,6 @@ func envOr(key, def string) string {
 		return v
 	}
 	return def
-}
-
-// envSecret reads a secret from the environment with surrounding whitespace
-// and quotes trimmed: a Secret created from a file carries the file's
-// trailing newline, and a token copied from a YAML file may carry its quotes.
-func envSecret(key string) string {
-	return strings.Trim(strings.TrimSpace(os.Getenv(key)), `"'`)
 }
 
 func envBool(key string) bool {

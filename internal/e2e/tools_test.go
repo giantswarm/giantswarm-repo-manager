@@ -122,7 +122,7 @@ func assertNoCreationWrites(t *testing.T, st *stack) {
 func TestCreateCommitCreatesScaffoldsThenOpensThePullRequestAsThePerson(t *testing.T) {
 	st := newStack(t)
 	var out tools.Created
-	st.callJSON(t, st.as(t, aliceToken), tools.ToolCreateRepository, map[string]any{argMode: modeCommit, argTeam: team, argEntry: newEntry, "reason": "the shiny thing"}, &out)
+	st.callJSON(t, st.as(t, aliceToken), tools.ToolCreateRepository, map[string]any{argMode: modeCommit, argTeam: team, argEntry: newEntry, argReason: "the shiny thing"}, &out)
 
 	repo := st.ghs.repos.get(shinyService)
 	if repo == nil || !repo.admins[alice] {
@@ -156,14 +156,20 @@ func TestCreateCommitCreatesScaffoldsThenOpensThePullRequestAsThePerson(t *testi
 }
 
 // TestCreateDryRunPlansTheThreeWrites: the dry run names the create and
-// scaffold steps the engine would run as alice and the pull request, and
-// writes nothing; validate_repository carries the same plan.
+// scaffold steps the engine would run as alice and the pull request with
+// the reason in its body, and writes nothing; validate_repository takes the
+// same arguments and carries the same plan, without a reason as before.
 func TestCreateDryRunPlansTheThreeWrites(t *testing.T) {
 	st := newStack(t)
 	c := st.as(t, aliceToken)
 	for _, tool := range []string{tools.ToolCreateRepository, tools.ToolValidateRepository} {
+		var plain tools.Validation
+		st.callJSON(t, c, tool, map[string]any{argDryRun: true, argTeam: team, argEntry: newEntry}, &plain)
+		if plain.Creation == nil || plain.Creation.PullRequest == nil || strings.Contains(plain.Creation.PullRequest.Body, "Reason:") {
+			t.Errorf("%s: without a reason: %+v", tool, plain.Creation)
+		}
 		var v tools.Validation
-		st.callJSON(t, c, tool, map[string]any{argDryRun: true, argTeam: team, argEntry: newEntry}, &v)
+		st.callJSON(t, c, tool, map[string]any{argDryRun: true, argTeam: team, argEntry: newEntry, argReason: "the shiny thing"}, &v)
 		if !v.Accepted || v.Creation == nil || v.Creation.Refusal != "" || len(v.Creation.Repositories) != 1 || v.Creation.PullRequest == nil {
 			t.Fatalf("%s: creation plan: %+v", tool, v.Creation)
 		}
@@ -172,7 +178,7 @@ func TestCreateDryRunPlansTheThreeWrites(t *testing.T) {
 			steps[1].Step != reconcile.StepScaffold || steps[1].Verdict != reconcile.VerdictDrift || len(steps[1].Changes) != 1 || !strings.Contains(steps[1].Changes[0], "push it as the first commit") {
 			t.Errorf("%s: steps: %+v", tool, steps)
 		}
-		if pr := v.Creation.PullRequest; pr.Repository != org+"/github" || pr.Branch != "reposetup/create-shiny-service" || pr.As != alice || len(pr.Files) != 1 {
+		if pr := v.Creation.PullRequest; pr.Repository != org+"/github" || pr.Branch != "reposetup/create-shiny-service" || pr.As != alice || len(pr.Files) != 1 || !strings.Contains(pr.Body, "\n\nReason: the shiny thing\n\n") {
 			t.Errorf("%s: pull request plan: %+v", tool, pr)
 		}
 	}
@@ -302,7 +308,7 @@ func TestSetLifecycleArchivedAndApproveChange(t *testing.T) {
 	st := newStack(t)
 	c := st.as(t, aliceToken)
 	var out tools.Committed
-	st.callJSON(t, c, tools.ToolSetLifecycle, map[string]any{argMode: modeCommit, kRepository: repoPresent, argLifecycle: lifecycleArchived, "reason": "superseded"}, &out)
+	st.callJSON(t, c, tools.ToolSetLifecycle, map[string]any{argMode: modeCommit, kRepository: repoPresent, argLifecycle: lifecycleArchived, argReason: "superseded"}, &out)
 	pr := st.ghs.files.pullRequests()[0]
 	file := string(pr.Files["repositories/"+team+".yaml"])
 	if !strings.Contains(file, "lifecycle: archived") || !strings.Contains(file, "- name: "+repoLegacy) || !strings.Contains(pr.Title, "archive "+repoPresent) {

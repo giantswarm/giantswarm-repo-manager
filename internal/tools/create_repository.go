@@ -104,20 +104,32 @@ type CreatedRepository struct {
 	Steps          []reconcile.StepResult `json:"steps"`
 }
 
-func (t *tools) registerValidate(s *mcpserver.MCPServer) {
-	s.AddTool(mcp.NewTool(ToolValidateRepository,
-		mcp.WithDescription("Read-only. The dry run of creating one or more new repositories for a team, exactly what create_repository would do: each entry "+
-			"rendered with the schema's defaults, the implied template (giantswarm/template for Go, template-app for a chart, "+
-			"the minimal scaffold otherwise) and its options, whether the name is free on GitHub, and the refusals of the creation rules as data "+
-			"(entries[].problems, and as the engine's findings entry-refused / gen-circleci-refused). Plus the guard notices a person sees before any pull request exists: team-review when the author is outside the "+
-			"owning team and team-planeteers, batch-review above three entries, names-unchecked without the App. And the creation as you (creation): the create and scaffold steps the engine "+
-			"would run with your token and the pull request that follows — or the refusal when you are not an owner of the org (the org lets only owners create repositories). Writes nothing. "+
-			"Use it before create_repository; for an existing repository's state use get_repository."),
-		mcp.WithReadOnlyHintAnnotation(true),
+// creationArguments are the arguments create_repository and its dry run
+// validate_repository declare, one list for both: a client checks a call
+// against the tool's schema and refuses an argument it does not declare, and
+// it runs the dry run with exactly the arguments it commits.
+func creationArguments() []mcp.ToolOption {
+	return []mcp.ToolOption{
 		mcp.WithString(argTeam, mcp.Required(), mcp.Description("The owning team's file, as its GitHub team slug: team-bumblebee, team-planeteers, …")),
 		mcp.WithObject(argEntry, mcp.Description("One declaration as it goes into the team file: name, componentType, gen: {language, flavours}, description, visibility and the other fields of the repositories schema."), mcp.AdditionalProperties(true)),
 		mcp.WithArray(argEntries, mcp.Description("Several declarations at once (a batch above three entries gets a person's review)."), mcp.Items(map[string]any{"type": "object", "additionalProperties": true})),
-	), func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		mcp.WithString(argReason, mcp.Description("Why, for the pull request body: the dry run plans it, create_repository writes it.")),
+	}
+}
+
+func (t *tools) registerValidate(s *mcpserver.MCPServer) {
+	opts := append([]mcp.ToolOption{
+		mcp.WithDescription("Read-only. The dry run of creating one or more new repositories for a team, exactly what create_repository would do: each entry " +
+			"rendered with the schema's defaults, the implied template (giantswarm/template for Go, template-app for a chart, " +
+			"the minimal scaffold otherwise) and its options, whether the name is free on GitHub, and the refusals of the creation rules as data " +
+			"(entries[].problems, and as the engine's findings entry-refused / gen-circleci-refused). Plus the guard notices a person sees before any pull request exists: team-review when the author is outside the " +
+			"owning team and team-planeteers, batch-review above three entries, names-unchecked without the App. And the creation as you (creation): the create and scaffold steps the engine " +
+			"would run with your token and the pull request that follows, its body carrying your reason — or the refusal when you are not an owner of the org (the org lets only owners create repositories). Writes nothing. " +
+			"Takes the same arguments as create_repository (team, entry or entries, reason), so you run it with exactly the arguments you commit. " +
+			"Use it before create_repository; for an existing repository's state use get_repository."),
+		mcp.WithReadOnlyHintAnnotation(true),
+	}, creationArguments()...)
+	s.AddTool(mcp.NewTool(ToolValidateRepository, opts...), func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 		return result(t.validate(ctx, req.GetArguments()))
 	})
 }
@@ -140,14 +152,9 @@ func (t *tools) createRepository() WriteTool {
 			"means the validation could not run. mode commit refuses before any write — the engine's refusals, a taken name, a missing owner role — and resumes a creation " +
 			"interrupted by a failure: a repository you administer is not created again, a scaffold on the default branch not pushed again, an open pull request for the " +
 			"branch is reported. The pull request is machine-approved when you are in the team (or team-planeteers) and at most three entries are added, else your team reviews it.",
-		Options: []mcp.ToolOption{
-			mcp.WithString(argTeam, mcp.Required(), mcp.Description("The owning team's file, as its GitHub team slug: team-bumblebee, team-planeteers, …")),
-			mcp.WithObject(argEntry, mcp.Description("The declaration as it goes into the team file: name, componentType, gen: {language, flavours}, and the other fields of the repositories schema."), mcp.AdditionalProperties(true)),
-			mcp.WithArray(argEntries, mcp.Description("Several declarations at once."), mcp.Items(map[string]any{"type": "object", "additionalProperties": true})),
-			mcp.WithString(argReason, mcp.Description("Why, for the pull request body.")),
-		},
-		DryRun: func(ctx context.Context, args map[string]any) (any, error) { return t.validate(ctx, args) },
-		Commit: t.commitCreate,
+		Options: creationArguments(),
+		DryRun:  func(ctx context.Context, args map[string]any) (any, error) { return t.validate(ctx, args) },
+		Commit:  t.commitCreate,
 	}
 }
 

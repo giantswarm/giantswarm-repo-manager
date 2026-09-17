@@ -116,6 +116,40 @@ func TestWriteToolsDeclareTheFrameworkArguments(t *testing.T) {
 	}
 }
 
+// TestValidateRepositoryTakesCreateRepositoryArguments: the dry run declares
+// every argument of create_repository but the framework's two, reason among
+// them — a client checks a call against the schema and refuses an argument
+// the schema lacks, and it runs the dry run with the arguments it commits.
+func TestValidateRepositoryTakesCreateRepositoryArguments(t *testing.T) {
+	c := newTestClient(t, NewMCPServer(Deps{Version: testVersion}))
+	res, err := c.ListTools(context.Background(), mcp.ListToolsRequest{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	schemas := map[string]mcp.ToolInputSchema{}
+	for _, tool := range res.Tools {
+		schemas[tool.Name] = tool.InputSchema
+	}
+	validate, create := schemas[ToolValidateRepository], schemas[ToolCreateRepository]
+	if _, ok := validate.Properties[argReason]; !ok {
+		t.Errorf("%s: no %s argument", ToolValidateRepository, argReason)
+	}
+	want := map[string]any{}
+	for name, p := range create.Properties {
+		if name != ArgDryRun && name != ArgMode {
+			want[name] = p
+		}
+	}
+	got, _ := json.Marshal(validate.Properties)
+	exp, _ := json.Marshal(want)
+	if string(got) != string(exp) {
+		t.Errorf("%s arguments differ from %s's:\n%s\n%s", ToolValidateRepository, ToolCreateRepository, got, exp)
+	}
+	if gotReq, expReq := strings.Join(validate.Required, ","), strings.Join(create.Required, ","); gotReq != expReq {
+		t.Errorf("%s required %s, %s requires %s", ToolValidateRepository, gotReq, ToolCreateRepository, expReq)
+	}
+}
+
 // TestCreateRepositoryDryRunIsTheEngineValidation: the dry run returns the
 // engine's Result — the rendered entry with defaults, the template, accepted.
 func TestCreateRepositoryDryRunIsTheEngineValidation(t *testing.T) {

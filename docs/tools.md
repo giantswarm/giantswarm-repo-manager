@@ -60,7 +60,7 @@ WRITES (as you, with your own GitHub token through the App giantswarm-repo-manag
       "type": "boolean"
     },
     "entries": {
-      "description": "Several declarations at once.",
+      "description": "Several declarations at once (a batch above three entries gets a person's review).",
       "items": {
         "additionalProperties": true,
         "type": "object"
@@ -69,7 +69,7 @@ WRITES (as you, with your own GitHub token through the App giantswarm-repo-manag
     },
     "entry": {
       "additionalProperties": true,
-      "description": "The declaration as it goes into the team file: name, componentType, gen: {language, flavours}, and the other fields of the repositories schema.",
+      "description": "One declaration as it goes into the team file: name, componentType, gen: {language, flavours}, description, visibility and the other fields of the repositories schema.",
       "properties": {},
       "type": "object"
     },
@@ -81,7 +81,7 @@ WRITES (as you, with your own GitHub token through the App giantswarm-repo-manag
       "type": "string"
     },
     "reason": {
-      "description": "Why, for the pull request body.",
+      "description": "Why, for the pull request body: the dry run plans it, create_repository writes it.",
       "type": "string"
     },
     "team": {
@@ -437,7 +437,7 @@ WRITES (as you, with your own GitHub token through the App giantswarm-repo-manag
 
 ## `validate_repository`
 
-Read-only. The dry run of creating one or more new repositories for a team, exactly what create_repository would do: each entry rendered with the schema's defaults, the implied template (giantswarm/template for Go, template-app for a chart, the minimal scaffold otherwise) and its options, whether the name is free on GitHub, and the refusals of the creation rules as data (entries[].problems, and as the engine's findings entry-refused / gen-circleci-refused). Plus the guard notices a person sees before any pull request exists: team-review when the author is outside the owning team and team-planeteers, batch-review above three entries, names-unchecked without the App. And the creation as you (creation): the create and scaffold steps the engine would run with your token and the pull request that follows — or the refusal when you are not an owner of the org (the org lets only owners create repositories). Writes nothing. Use it before create_repository; for an existing repository's state use get_repository.
+Read-only. The dry run of creating one or more new repositories for a team, exactly what create_repository would do: each entry rendered with the schema's defaults, the implied template (giantswarm/template for Go, template-app for a chart, the minimal scaffold otherwise) and its options, whether the name is free on GitHub, and the refusals of the creation rules as data (entries[].problems, and as the engine's findings entry-refused / gen-circleci-refused). Plus the guard notices a person sees before any pull request exists: team-review when the author is outside the owning team and team-planeteers, batch-review above three entries, names-unchecked without the App. And the creation as you (creation): the create and scaffold steps the engine would run with your token and the pull request that follows, its body carrying your reason — or the refusal when you are not an owner of the org (the org lets only owners create repositories). Writes nothing. Takes the same arguments as create_repository (team, entry or entries, reason), so you run it with exactly the arguments you commit. Use it before create_repository; for an existing repository's state use get_repository.
 
 ```json
 {
@@ -455,6 +455,10 @@ Read-only. The dry run of creating one or more new repositories for a team, exac
       "description": "One declaration as it goes into the team file: name, componentType, gen: {language, flavours}, description, visibility and the other fields of the repositories schema.",
       "properties": {},
       "type": "object"
+    },
+    "reason": {
+      "description": "Why, for the pull request body: the dry run plans it, create_repository writes it.",
+      "type": "string"
     },
     "team": {
       "description": "The owning team's file, as its GitHub team slug: team-bumblebee, team-planeteers, …",

@@ -756,8 +756,18 @@ func (t *tools) dispatch(ctx context.Context, args map[string]any, run bool) (*D
 	// before confirming.
 	if team, _ := inputs[argTeam].(string); team != "" {
 		d.Team = team
-	} else if rec != nil && rec.Declaration != nil {
-		d.Team = rec.Declaration.Team
+	} else {
+		// The declaring team, from the team files on main (the inventory's
+		// record is the hint that saves reading every file).
+		hint := ""
+		if rec != nil && rec.Declaration != nil {
+			hint = rec.Declaration.Team
+		}
+		if tf, err := p.repo.FindEntry(ctx, name, hint); err == nil {
+			d.Team = tf.Team
+		} else if !errors.Is(err, teamfiles.ErrEntryNotFound) {
+			return nil, fmt.Errorf("reading the team files for %s: %w", name, err)
+		}
 	}
 	if d.Team != "" {
 		if pol, err := p.repo.Policy(ctx, d.Team); err == nil {

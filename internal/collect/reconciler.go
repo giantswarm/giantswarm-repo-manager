@@ -10,6 +10,7 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 
@@ -329,15 +330,62 @@ func (c *Collector) consumeArtifact(ctx context.Context, run *github.WorkflowRun
 // and when it finished.
 type artifactReport struct {
 	Result      reconcile.Result `json:"-"`
-	WorkflowRun struct {
-		ID      int64  `json:"id"`
-		URL     string `json:"url"`
-		Attempt int    `json:"attempt"`
-		Event   string `json:"event"`
-		Trigger string `json:"trigger"`
-		Devctl  string `json:"devctl"`
-	} `json:"workflowRun"`
-	FinishedAt time.Time `json:"finishedAt"`
+	WorkflowRun artifactRun      `json:"workflowRun"`
+	FinishedAt  time.Time        `json:"finishedAt"`
+}
+
+// artifactRun is the run in an artifact. Its id and attempt are a JSON
+// number or a numeric string: the reconciler workflow writes both from
+// GITHUB_RUN_ID and GITHUB_RUN_ATTEMPT, which GitHub Actions hands to the
+// step as strings.
+type artifactRun struct {
+	ID      int64
+	URL     string
+	Attempt int
+	Event   string
+	Trigger string
+	Devctl  string
+}
+
+func (r *artifactRun) UnmarshalJSON(b []byte) error {
+	var raw struct {
+		ID      json.RawMessage `json:"id"`
+		URL     string          `json:"url"`
+		Attempt json.RawMessage `json:"attempt"`
+		Event   string          `json:"event"`
+		Trigger string          `json:"trigger"`
+		Devctl  string          `json:"devctl"`
+	}
+	if err := json.Unmarshal(b, &raw); err != nil {
+		return err
+	}
+	id, err := runNumber(raw.ID, "workflowRun.id")
+	if err != nil {
+		return err
+	}
+	attempt, err := runNumber(raw.Attempt, "workflowRun.attempt")
+	if err != nil {
+		return err
+	}
+	*r = artifactRun{ID: id, URL: raw.URL, Attempt: int(attempt), Event: raw.Event, Trigger: raw.Trigger, Devctl: raw.Devctl}
+	return nil
+}
+
+// runNumber reads a run id or attempt: a JSON number, a numeric string, or
+// nothing; anything else is refused naming the field.
+func runNumber(raw json.RawMessage, field string) (int64, error) {
+	s := string(raw)
+	if s == "" || s == "null" {
+		return 0, nil
+	}
+	if unquoted, err := strconv.Unquote(s); err == nil {
+		s = unquoted
+	}
+	n, err := strconv.ParseInt(s, 10, 64)
+	if err != nil {
+		return 0, fmt.Errorf("%s: %s is not a run number", field, raw)
+	}
+	return n, nil
 }
 
 // downloadArtifact reads one artifact: the API answers the download with a

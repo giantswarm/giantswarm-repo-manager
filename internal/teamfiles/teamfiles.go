@@ -2,7 +2,7 @@
 // files (repositories/<team>.yaml, the desired state), the per-team policy
 // files (repository-setup/<team>.yaml: Slack channel, repair opt-in), and the
 // one way a change lands — a branch and a pull request, opened with the
-// GitHub client the caller passes in (the person's grant for every write, the
+// GitHub client the caller passes in (the person's token for every write, the
 // App for unattended reads). Nothing here decides who the client is.
 package teamfiles
 

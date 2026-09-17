@@ -96,7 +96,7 @@ type Delivery struct {
 }
 
 // planner renders a write's plan with the repository read as whom the call
-// can be: the person when their grant is available (the pull request's
+// can be: the person when the call carries their token (the pull request's
 // author), else the App for a dry run.
 type planner struct {
 	repo   teamfiles.Repo
@@ -668,7 +668,7 @@ func (t *tools) dispatch(ctx context.Context, args map[string]any, run bool) (*D
 		return d, nil
 	}
 	if err := p.repo.Dispatch(ctx, teamfiles.ReconcilerWorkflow, inputs); err != nil {
-		return nil, fmt.Errorf("%w (the dispatch runs as you: your grant needs Actions write on %s/%s; the App holds no Actions permission, giantswarm/giantswarm#37812)", err, p.repo.Owner, p.repo.Name)
+		return nil, fmt.Errorf("%w (the dispatch runs as you: it needs Actions write on %s/%s for you through the App giantswarm-repo-manager)", err, p.repo.Owner, p.repo.Name)
 	}
 	d.Dispatched = true
 	t.d.Log.Info("reconciler dispatched", "repository", name, "as", p.login)

@@ -1,0 +1,182 @@
+name: "giantswarm-repo-manager-oauth-mode"
+category: "behavioral"
+concept: "mcpserver"
+description: |
+  The muster half of giantswarm-repo-manager's authentication, in muster's own
+  harness with a mocked GitHub: the manager registered the way the chart
+  registers it — an OAuth-protected MCP server pinned to a GitHub App as its
+  authorization server (spec.auth.authorizationServer: the App's issuer
+  identity, GitHub's endpoints, a pre-registered client, grantScope subject;
+  GitHub publishes no discovery document and the backend answers a bare 401).
+
+    - a person connects once (the consent at GitHub); from then on muster puts
+      the person's user token on every call — the backend echoes the bearer it
+      received;
+    - a second session of the same person adopts the grant without a sign-in
+      of its own (grantScope subject: the Repo Manager agent's session and the
+      Slack click carry the same token as the portal);
+    - a person without a grant is not authenticated, and core_auth_login
+      answers them the sign-in URL.
+
+  The server half — the bearer verified with GET /user, no bearer a bare 401,
+  the caller in get_info, every GitHub call as the person — runs against a
+  fake GitHub in internal/e2e (go test), in the same CI job.
+tags: ["oauth", "authorization-server", "pin", "subject-grant", "github", "giantswarm-repo-manager"]
+timeout: "3m"
+
+pre_configuration:
+  mock_oauth_servers:
+    # muster's own identity provider: the sessions of alice and bob.
+    - name: "platform-idp"
+      scopes: ["openid", "profile", "email"]
+      auto_approve: true
+      pkce_required: false
+      token_lifetime: "1h"
+      client_id: "platform-client"
+      client_secret: "platform-secret"
+      use_as_muster_oauth_server: true
+
+    # GitHub as the App giantswarm-repo-manager: no discovery document, a
+    # pre-registered client, user tokens filed under the person.
+    - name: "github-app"
+      profile: "github"
+      auto_approve: true
+      pkce_required: false
+      token_lifetime: "1h"
+      client_id: "giantswarm-repo-manager"
+      client_secret: "app-client-secret"
+
+  mcp_servers:
+    # The manager, registered as the chart's MCPServer registers it.
+    - name: "giantswarm-repo-manager"
+      config:
+        type: "streamable-http"
+        oauth:
+          required: true
+          mock_oauth_server_ref: "github-app"
+          pin_authorization_server: true
+          grant_scope: "subject"
+        tools:
+          - name: "get_info"
+            description: "Echoes the bearer the manager received"
+            echo_token: true
+            responses:
+              - response:
+                  auth:
+                    mode: "bearer"
+
+steps:
+  - id: registered
+    description: "The manager is registered and waits for a person's authorization"
+    tool: "core_mcpserver_list"
+    args: {}
+    expected:
+      success: true
+      wait_for_state: "30s"
+      contains: ["giantswarm-repo-manager"]
+
+  # Two sessions of alice (the portal and, say, the agent) and one of bob.
+  - id: login-alice-portal
+    tool: "test_muster_auth_login"
+    args:
+      subject: "alice"
+    expected:
+      success: true
+  - id: create-alice-portal
+    tool: "test_create_user"
+    args:
+      name: "alice-portal"
+    expected:
+      success: true
+
+  - id: login-alice-agent
+    tool: "test_muster_auth_login"
+    args:
+      subject: "alice"
+    expected:
+      success: true
+  - id: create-alice-agent
+    tool: "test_create_user"
+    args:
+      name: "alice-agent"
+    expected:
+      success: true
+
+  - id: login-bob
+    tool: "test_muster_auth_login"
+    args:
+      subject: "bob"
+    expected:
+      success: true
+  - id: create-bob
+    tool: "test_create_user"
+    args:
+      name: "bob"
+    expected:
+      success: true
+
+  - id: alice-before-consent
+    as_user: "alice-portal"
+    description: "Before alice authorizes the App her call is not authenticated"
+    tool: "x_giantswarm-repo-manager_get_info"
+    args: {}
+    expected:
+      success: false
+
+  - id: sign-in-goes-to-the-app
+    as_user: "alice-portal"
+    description: "The sign-in muster offers goes to the pinned authorization server, the App"
+    tool: "test_resolve_auth_redirect"
+    args:
+      server: "giantswarm-repo-manager"
+    expected:
+      success: true
+      json_path:
+        authorization_server: "github-app"
+
+  - id: alice-consents
+    as_user: "alice-portal"
+    description: "alice authorizes the App once; the grant is filed under her"
+    tool: "test_simulate_oauth_callback"
+    args:
+      server: "giantswarm-repo-manager"
+    expected:
+      success: true
+      contains: ["success"]
+
+  - id: alice-call-carries-her-token
+    as_user: "alice-portal"
+    description: "muster puts alice's user token on the call; the manager receives it as the bearer"
+    tool: "x_giantswarm-repo-manager_get_info"
+    args: {}
+    expected:
+      success: true
+      contains: ["received_token", "bearer"]
+
+  - id: alice-agent-adopts-the-grant
+    as_user: "alice-agent"
+    description: "Another session of alice carries the same grant without a sign-in of its own"
+    tool: "x_giantswarm-repo-manager_get_info"
+    args: {}
+    expected:
+      success: true
+      contains: ["received_token", "bearer"]
+
+  - id: bob-is-not-authenticated
+    as_user: "bob"
+    description: "A person who never authorized the App is not authenticated"
+    tool: "x_giantswarm-repo-manager_get_info"
+    args: {}
+    expected:
+      success: false
+      error_contains: ["not authenticated"]
+
+  - id: bob-gets-the-sign-in
+    as_user: "bob"
+    description: "core_auth_login answers bob the sign-in URL for the App"
+    tool: "core_auth_login"
+    args:
+      server: "giantswarm-repo-manager"
+    expected:
+      success: true
+      contains: ["Please sign in", "http"]

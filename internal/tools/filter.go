@@ -57,7 +57,7 @@ func (t *tools) listFilter(ctx context.Context, args map[string]any) (*listFilte
 		return nil, fmt.Errorf("%s %q is not known: %s, %s, %s or %s", argScope, f.scope, ScopeMine, ScopeTeam, ScopeUnassigned, ScopeAll)
 	}
 	if (f.scope == ScopeMine || f.scope == ScopeTeam) && len(f.teams) == 0 {
-		return nil, fmt.Errorf("scope %s: no team known for you (%s) — pass team, or connect GitHub in muster so your teams can be read", f.scope, f.teamsSource)
+		return nil, fmt.Errorf("scope %s: no team known for you (%s) — pass team, or check that your teams in the org are readable as you (the App giantswarm-repo-manager's Organization members: read)", f.scope, f.teamsSource)
 	}
 	if u, _ := args[argUndeclared].(bool); u {
 		f.undeclared = true

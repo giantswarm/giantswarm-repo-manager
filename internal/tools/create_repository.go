@@ -100,7 +100,7 @@ func entriesArg(args map[string]any) ([]any, error) {
 }
 
 // validate runs the engine's dry run for the entries, with the author's
-// GitHub teams when their grant allows reading them.
+// GitHub teams when they can be read as the author.
 func (t *tools) validate(ctx context.Context, args map[string]any) (*Validation, error) {
 	team, _ := args[argTeam].(string)
 	team = strings.TrimSpace(team)
@@ -126,7 +126,7 @@ func (t *tools) validate(ctx context.Context, args map[string]any) (*Validation,
 			v.TeamsSource = None + ": " + err.Error()
 		case len(p.teams) == 0:
 			v.AuthorLogin = p.login
-			v.TeamsSource = None + ": your grant lists no teams (read:org)"
+			v.TeamsSource = None + ": no team of yours in the org is readable as you (the App giantswarm-repo-manager's Organization members: read)"
 		default:
 			v.AuthorLogin, v.AuthorTeams, v.TeamsSource = p.login, p.teams, "github"
 			req.AuthorTeams = p.teams

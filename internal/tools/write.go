@@ -54,7 +54,7 @@ type WriteTool struct {
 // registerWrite adds wt to s with the framework's arguments and guard.
 func registerWrite(s *mcpserver.MCPServer, wt WriteTool) {
 	opts := []mcp.ToolOption{
-		mcp.WithDescription("WRITES (as you, through your GitHub grant). " + wt.Description +
+		mcp.WithDescription("WRITES (as you, with your own GitHub token through the App giantswarm-repo-manager). " + wt.Description +
 			" Every write takes dryRun and mode: dryRun: true returns the rendered change and writes nothing; " +
 			`mode: "commit" opens the team-file pull request as you. mode: "apply" is refused for every write tool ` +
 			"(a repository without its declaration is drift), and mode is required unless dryRun is true."),

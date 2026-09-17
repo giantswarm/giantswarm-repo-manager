@@ -27,7 +27,7 @@ exposes it, with the repository lifecycle, as MCP tools with the prefix `giantsw
 | `transfer_repository` | the entry moved between two team files in one pull request naming the giving and the receiving team; the ask to the receiving team's channel, a notice to the giving team's |
 | `set_lifecycle` | `deprecated` or `archived` set on the entry; the ask to the owning team's channel |
 | `approve_change` | the caller's GitHub team membership checked (the team named in the pull request), then the approving review submitted as the caller — what the Slack ask's Approve button calls as the clicking member |
-| `reconcile_repository` | the reconciler workflow (`reconcile-repositories.yaml` in giantswarm/github) dispatched for one repository as the caller; the record shows `setup.pendingRun` until the inventory has read the run's artifact as `setup.lastRun` (with the run's `change` block); the team's standup channel gets one sentence per failed step or finding with the fix, and nothing when there is nothing to fix |
+| `reconcile_repository` | the reconciler workflow (`reconcile-repositories.yaml` in giantswarm/github) dispatched for one repository as the caller; the record shows `setup.pendingRun` until the inventory has read the run's artifact as `setup.lastRun` (with the run's `change` block); the team's standup channel hears nothing about it -- a Reconcile now is the caller's, and its failed steps and findings are on the record and in the run |
 
 Every tool's description and input schema, as muster exposes them: [`docs/tools.md`](docs/tools.md).
 
@@ -52,9 +52,11 @@ change for the team, rendered from the artifact's `change` block and the declara
 new repo: bumblebee-repo (app, go)`, `alice added the existing repo … to team-bumblebee`, `alice
 transferred the repo … (app, go) from team-planeteers to team-bumblebee`, `alice archived the repo …`,
 `alice deprecated the repo …` — linking the pull request, plus one sentence per failed step or finding
-with what to do, linking the run. A run that converged without a change a person made and without
-findings (an edit the reconciler applied, a Reconcile now, the schedule) posts nothing: the reconciler
-doing its job is not news. Both channels come from the team's policy file (`repository-setup/<team>.yaml`);
+of that person's run with what to do, linking the run. A run nobody's change is behind — a Reconcile now,
+the schedule, an artifact without a `change` block — posts nothing, findings and failures included: the
+reconciler doing its job is not news, and the nightly's findings would repeat every night; they stay on the
+record and in the run's summary per team. An edit a person made (`changed`) posts its failed steps and
+findings alone. Both channels come from the team's policy file (`repository-setup/<team>.yaml`);
 a file without either is refused, nothing stands in. A channel name is mapped to its Slack ID through
 `reviews.channels` (the gateway takes IDs). Authentication is this pod's projected ServiceAccount token
 (audience `klaus-gateway`). An undelivered ask is reported in the result; approving on GitHub is equivalent.

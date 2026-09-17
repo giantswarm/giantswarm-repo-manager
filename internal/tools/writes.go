@@ -649,10 +649,11 @@ func (t *tools) reconcileRepository() WriteTool {
 		Description: "Run the reconciler for one repository now (Reconcile now): dispatches the reconcile-repositories workflow in giantswarm/github " +
 			"as you, which runs the engine's set-up steps for that repository — settings, permissions, protection, CircleCI, Renovate check, CODEOWNERS, " +
 			"metadata, lifecycle, catalog, release. The record shows setup.pendingRun until the inventory has read the run's artifact (within " +
-			"seconds of the run completing) as setup.lastRun, with the run's change block (kind, by, pullRequest). The team's standup channel " +
-			"gets one sentence per failed step or finding with the fix; a run with nothing to fix posts nothing (the sentence about who created, " +
-			"added, transferred, archived or deprecated a repository follows the merged pull request, not a dispatch). A run that does not report " +
-			"within 15 minutes leaves the finding reconcile-run-missing. Nothing is written to the team files. Here mode commit means: dispatch.",
+			"seconds of the run completing) as setup.lastRun, with the run's change block (kind, by, pullRequest) — its failed steps and findings " +
+			"are on the record and in the run. The team's standup channel hears nothing about a dispatch: the sentences about who created, added, " +
+			"transferred, archived or deprecated a repository, and the failed steps and findings of that run, follow a merged pull request only. " +
+			"A run that does not report within 15 minutes leaves the finding reconcile-run-missing. Nothing is written to the team files. Here mode " +
+			"commit means: dispatch.",
 		Options: []mcp.ToolOption{
 			mcp.WithString(argRepository, mcp.Required(), mcp.Description("Repository name, with or without the org.")),
 			mcp.WithString(argTeam, mcp.Description("Team slug; required for a repository without an entry (it is then reconciled from the team alone), optional otherwise.")),
@@ -677,7 +678,7 @@ func (t *tools) dispatch(ctx context.Context, args map[string]any, run bool) (*D
 	}
 	workflow := t.d.reconcilerWorkflow()
 	d := &Dispatch{Workflow: workflow, Inputs: inputs,
-		Then: "the inventory reads the run's reconcile-" + name + " artifact from GitHub within seconds of the run completing: get_repository shows setup.pendingRun until then, setup.lastRun after; the team's standup channel gets one sentence per failed step or finding, nothing when there is nothing to fix"}
+		Then: "the inventory reads the run's reconcile-" + name + " artifact from GitHub within seconds of the run completing: get_repository shows setup.pendingRun until then, setup.lastRun after, with its failed steps and findings; the team's standup channel hears nothing about a dispatch"}
 	var rec *inventory.Record
 	if t.d.Inventory != nil {
 		key, _ := t.repositoryKey(args)

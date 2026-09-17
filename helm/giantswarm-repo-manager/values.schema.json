@@ -80,7 +80,7 @@
                 },
                 "appID": {
                     "type": "integer",
-                    "description": "Id of the read-only GitHub App `giantswarm-repo-manager-inventory`, the one identity of the unattended reads: the org sweep, the engine's checks in read mode and the name check of a dry run run as its installation, on its own rate budget. Its permissions, all read: Administration, Contents, Pull requests, Issues, Commit statuses (the `ci/circleci:` contexts on the default branch head), Metadata, Organization members. 0 leaves the unattended reads unconfigured — nothing stands in for the App; the tools that need it say so."
+                    "description": "Id of the read-only GitHub App `giantswarm-repo-manager-inventory`, the one identity of the unattended reads: the org sweep, the engine's checks in read mode and the name check of a dry run run as its installation, on its own rate budget. Its permissions, all read: Administration, Contents, Pull requests, Issues, Commit statuses (the `ci/circleci:` contexts on the default branch head), Checks (the check runs on the default branch head: the engine's protection step reads them to learn which conditional checks exist — without it every repository carries the finding `unchecked`, the checks on main not readable with this token), Metadata, Organization members. 0 leaves the unattended reads unconfigured — nothing stands in for the App; the tools that need it say so."
                 },
                 "existingSecret": {
                     "type": "string",
@@ -135,16 +135,6 @@
                     "type": "string",
                     "description": "The GitHub organization the inventory covers."
                 },
-                "orphan": {
-                    "type": "object",
-                    "additionalProperties": false,
-                    "properties": {
-                        "staleDays": {
-                            "type": "integer",
-                            "description": "Stale period of the orphan score in days (no commit by a person, no Renovate activity within it)."
-                        }
-                    }
-                },
                 "reconciler": {
                     "type": "object",
                     "additionalProperties": false,
@@ -156,6 +146,16 @@
                         "workflow": {
                             "type": "string",
                             "description": "The reconciler's workflow file in `teamFiles.repository`: the one `reconcile_repository` dispatches and the poller reads the runs of."
+                        }
+                    }
+                },
+                "renovate": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "properties": {
+                        "activeDays": {
+                            "type": "integer",
+                            "description": "Days within which a Renovate pull request or commit counts as Renovate activity — `list_repositories`' Renovate state `active`, else `inactive`. Passed as `RENOVATE_ACTIVE_DAYS`."
                         }
                     }
                 },

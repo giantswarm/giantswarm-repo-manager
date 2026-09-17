@@ -15,10 +15,11 @@ const (
 )
 
 // Record is one repository of the org as the inventory knows it (D8): the
-// declaration from the team files, the reality from GitHub, the set-up state,
-// the orphan score with its reasons and the findings nobody repairs. The
-// shape is documented in docs/inventory-record.md; the reconciler's per-
-// repository artifact matches LastRun.
+// declaration from the team files, the reality from GitHub, the set-up state
+// and the findings nobody repairs. The shape is documented in
+// docs/inventory-record.md; the reconciler's per-repository artifact matches
+// LastRun. A stored record may carry fields of an earlier shape (an orphan
+// score, a decision note); they are ignored on read.
 type Record struct {
 	// Repository is owner/name; the key of the record.
 	Repository string `json:"repository"`
@@ -34,10 +35,7 @@ type Record struct {
 	Catalog  Catalog   `json:"catalog"`
 	Mapping  Mapping   `json:"mapping"`
 	Setup    Setup     `json:"setup"`
-	Orphan   Orphan    `json:"orphan"`
 	Findings []Finding `json:"findings"`
-	// Decision is the note a person left; it survives every refresh.
-	Decision *Decision `json:"decision,omitempty"`
 	// RefreshedAt is when the record was last written, Source by what.
 	RefreshedAt time.Time `json:"refreshedAt"`
 	Source      string    `json:"source"`
@@ -273,15 +271,6 @@ type MissingRun struct {
 	RunsURL string `json:"runsUrl"`
 }
 
-// Orphan is the orphan score with its reasons.
-type Orphan struct {
-	// Score is 0 to 100; 0 means nothing points at an orphan.
-	Score   int      `json:"score"`
-	Reasons []string `json:"reasons"`
-	// StalePeriod is the period the reasons were judged against.
-	StalePeriod string `json:"stalePeriod"`
-}
-
 // Finding is something the inventory shows rather than anyone repairs.
 type Finding struct {
 	Kind    string `json:"kind"`
@@ -299,15 +288,6 @@ const (
 	FindingSourceInventory     = "inventory"
 	FindingSourceEngine        = "engine"
 )
-
-// Decision is the note a person left on a repository.
-type Decision struct {
-	// Verdict is keep; other verdicts are not defined yet.
-	Verdict string    `json:"verdict"`
-	Note    string    `json:"note,omitempty"`
-	By      string    `json:"by"`
-	At      time.Time `json:"at"`
-}
 
 // SweepSummary is the outcome of the last full sweep.
 type SweepSummary struct {
@@ -336,11 +316,10 @@ type Budget struct {
 	ResetAt   *time.Time `json:"resetAt,omitempty"`
 }
 
-// Finalize computes the derived fields — findings and the orphan score — from
-// the record's facts. It is idempotent.
-func (r *Record) Finalize(stale time.Duration, now time.Time) {
+// Finalize computes the derived field — the findings — from the record's
+// facts. It is idempotent.
+func (r *Record) Finalize() {
 	r.Findings = r.findings()
-	r.Orphan = Score(r, stale, now)
 }
 
 // WithAge returns the record with Age filled for now.
@@ -376,7 +355,7 @@ func (r *Record) findings() []Finding {
 
 // Dispatched marks a Reconcile now by login at now: setup.pendingRun, until
 // the run's artifact or the pending window's end; an earlier missing run is
-// forgotten. The findings follow, the orphan score does not depend on it.
+// forgotten. The findings follow.
 func (r *Record) Dispatched(now time.Time, by string) {
 	r.Setup.PendingRun = &PendingRun{DispatchedAt: now, By: by}
 	r.Setup.MissingRun = nil
@@ -392,85 +371,4 @@ func (r *Record) RunMissing(now time.Time, runsURL string) {
 	r.Setup.MissingRun = &MissingRun{PendingRun: *r.Setup.PendingRun, NoticedAt: now, RunsURL: runsURL}
 	r.Setup.PendingRun = nil
 	r.Findings = r.findings()
-}
-
-// Weights of the orphan reasons.
-const (
-	weightUndeclared    = 40
-	weightStaleCommits  = 30
-	weightEmpty         = 20
-	weightDissolvedTeam = 15
-	weightNoRenovate    = 10
-	weightRenovateQuiet = 10
-	weightNoRelease     = 10
-	weightNoCI          = 10
-	weightOnboardingPR  = 10
-	weightOldBotPRs     = 5
-)
-
-// Score judges a record against the stale period; it depends on nothing but
-// the record's facts, so a client may recompute it with another period.
-func Score(r *Record, stale time.Duration, now time.Time) Orphan {
-	o := Orphan{StalePeriod: stale.String(), Reasons: []string{}}
-	if r.Reality == nil {
-		o.Reasons = append(o.Reasons, "gone from GitHub: not scored, see the findings")
-		return o
-	}
-	if r.Reality.IsArchived {
-		o.Reasons = append(o.Reasons, "archived: not scored")
-		return o
-	}
-	add := func(w int, reason string) {
-		o.Score += w
-		o.Reasons = append(o.Reasons, reason)
-	}
-	if r.Declaration == nil {
-		add(weightUndeclared, "no team file declares the repository")
-	}
-	rl := r.Reality
-	if rl.IsEmpty {
-		add(weightEmpty, "the repository is empty")
-	} else {
-		switch {
-		case rl.LastPersonCommit == nil:
-			add(weightStaleCommits, fmt.Sprintf("no commit by a person in the last %d commits", rl.HistorySampled))
-		case now.Sub(rl.LastPersonCommit.Date) > stale:
-			add(weightStaleCommits, fmt.Sprintf("last commit by a person on %s, older than %s", rl.LastPersonCommit.Date.Format("2006-01-02"), stale))
-		}
-		switch {
-		case !r.Renovate.Configured || !r.Renovate.Enabled:
-			add(weightNoRenovate, "Renovate is not configured or disabled")
-		case renovateQuiet(r, stale, now):
-			add(weightRenovateQuiet, fmt.Sprintf("Renovate is silent: no Renovate pull request or commit within %s", stale))
-		}
-		if rl.LatestRelease == nil {
-			add(weightNoRelease, "no release")
-		}
-		if !rl.Has.CircleCI && !rl.Has.Workflows {
-			add(weightNoCI, "no CI: neither .circleci/config.yml nor GitHub workflows")
-		}
-	}
-	if len(rl.UnknownCodeownersTeams) > 0 {
-		add(weightDissolvedTeam, fmt.Sprintf("CODEOWNERS names a team the org does not have: %v", rl.UnknownCodeownersTeams))
-	}
-	if len(rl.OpenPullRequests.Onboarding) > 0 {
-		add(weightOnboardingPR, fmt.Sprintf("%d onboarding pull request(s) open", len(rl.OpenPullRequests.Onboarding)))
-	}
-	if t := rl.OpenPullRequests.OldestBotAt; t != nil && now.Sub(*t) > stale {
-		add(weightOldBotPRs, fmt.Sprintf("the oldest open bot pull request is from %s", t.Format("2006-01-02")))
-	}
-	if o.Score > 100 {
-		o.Score = 100
-	}
-	return o
-}
-
-func renovateQuiet(r *Record, stale time.Duration, now time.Time) bool {
-	if pr := r.Renovate.LastPullRequest; pr != nil && now.Sub(pr.CreatedAt) <= stale {
-		return false
-	}
-	if c := r.Renovate.LastCommit; c != nil && now.Sub(*c) <= stale {
-		return false
-	}
-	return true
 }

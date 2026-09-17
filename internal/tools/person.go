@@ -174,5 +174,5 @@ func (t *tools) callerTeams(ctx context.Context) (teams []string, source string)
 	if err != nil || len(p.teams) == 0 {
 		return nil, None
 	}
-	return p.teams, "github"
+	return p.teams, teamsSourceGitHub
 }

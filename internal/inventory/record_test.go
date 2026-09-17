@@ -1,6 +1,7 @@
 package inventory
 
 import (
+	"encoding/json"
 	"strings"
 	"testing"
 	"time"
@@ -9,60 +10,53 @@ import (
 	"github.com/giantswarm/devctl/v8/pkg/reposetup/reconcile"
 )
 
-func TestScoreHonoursTheStalePeriodAndListsReasons(t *testing.T) {
-	now := time.Date(2026, 9, 16, 12, 0, 0, 0, time.UTC)
-	old := now.AddDate(0, -8, 0)
-	rec := &Record{Repository: "giantswarm/x", Name: "x", Reality: &Reality{
-		LastCommit: &Commit{Date: now}, LastPersonCommit: &Commit{Date: old}, HistorySampled: 30,
-		Has: Presence{CircleCI: true}, UnknownCodeownersTeams: []string{"team-dissolved"},
-		OpenPullRequests: PullRequests{Total: 1, Bots: 1, OldestBotAt: &old, Onboarding: []PullRequest{{Number: 1}}},
-	}, Renovate: Renovate{Configured: true, Enabled: true, LastCommit: &old}}
-
-	six := Score(rec, 180*24*time.Hour, now)
-	want := []string{"no team file", "older than", "Renovate is silent", "no release", "team the org does not have", "onboarding", "oldest open bot"}
-	for _, w := range want {
-		if !strings.Contains(strings.Join(six.Reasons, "\n"), w) {
-			t.Errorf("180d: reason %q missing in %v", w, six.Reasons)
+// TestARecordOfTheEarlierShapeUnmarshals: a record stored before the orphan
+// score and the decision note were removed still loads — the unknown fields
+// are ignored — and is written back without them.
+func TestARecordOfTheEarlierShapeUnmarshals(t *testing.T) {
+	old := `{"repository":"giantswarm/x","name":"x","declaration":null,
+	  "reality":{"url":"https://github.com/giantswarm/x","visibility":"public","isArchived":true,"isFork":false,"isTemplate":false,"isEmpty":false,
+	    "createdAt":"2020-01-01T00:00:00Z","historySampled":30,"botCommits":0,"openPullRequests":{"total":0,"people":0,"bots":0,"renovate":0},"openIssues":0,
+	    "has":{"renovate":true,"dependabot":false,"circleci":true,"workflows":false,"dockerfile":false,"helm":false,"readme":true,"codeowners":false}},
+	  "renovate":{"configured":true,"enabled":true,"preset":true},"catalog":{"present":false},"mapping":{"present":false},"setup":{},
+	  "orphan":{"score":40,"reasons":["no team file declares the repository"],"stalePeriod":"4320h0m0s"},
+	  "findings":[{"kind":"undeclared-on-github","message":"giantswarm/x exists on GitHub and no team file declares it","source":"inventory"}],
+	  "decision":{"verdict":"keep","note":"ours","by":"alice","at":"2026-09-01T00:00:00Z"},
+	  "refreshedAt":"2026-09-16T12:00:00Z","source":"sweep"}`
+	var r Record
+	if err := json.Unmarshal([]byte(old), &r); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if r.Repository != "giantswarm/x" || r.Reality == nil || !r.Reality.IsArchived || !r.Renovate.Configured || len(r.Findings) != 1 || r.Findings[0].Kind != FindingUndeclaredOnGitHub || r.Source != SourceSweep {
+		t.Errorf("record: %+v", r)
+	}
+	b, err := json.Marshal(r)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, field := range []string{`"orphan"`, `"decision"`, `"score"`, `"stalePeriod"`, `"verdict"`} {
+		if strings.Contains(string(b), field) {
+			t.Errorf("%s written back: %s", field, b)
 		}
-	}
-	if six.Score != 100 || six.StalePeriod != "4320h0m0s" {
-		t.Errorf("180d: %+v", six)
-	}
-	year := Score(rec, 400*24*time.Hour, now)
-	for _, r := range year.Reasons {
-		if strings.Contains(r, "older than") || strings.Contains(r, "Renovate is silent") || strings.Contains(r, "oldest open bot") {
-			t.Errorf("400d: stale reason kept: %s", r)
-		}
-	}
-	if year.Score >= six.Score {
-		t.Errorf("400d score %d not below 180d score %d", year.Score, six.Score)
-	}
-
-	rec.Reality.IsArchived = true
-	if s := Score(rec, 0, now); s.Score != 0 || len(s.Reasons) != 1 {
-		t.Errorf("archived: %+v", s)
-	}
-	if s := Score(&Record{}, 0, now); s.Score != 0 || !strings.Contains(s.Reasons[0], "gone") {
-		t.Errorf("gone: %+v", s)
 	}
 }
 
 func TestFindingsDeclaredGoneAndUndeclared(t *testing.T) {
 	now := time.Now()
 	gone := &Record{Repository: "giantswarm/gone", Declaration: &Declaration{Team: "team-bumblebee", File: "repositories/team-bumblebee.yaml", Accepted: true}}
-	gone.Finalize(0, now)
+	gone.Finalize()
 	if len(gone.Findings) != 1 || gone.Findings[0].Kind != FindingDeclaredButGone || gone.Findings[0].Source != FindingSourceInventory {
 		t.Errorf("gone: %+v", gone.Findings)
 	}
 	stray := &Record{Repository: "giantswarm/stray", Reality: &Reality{}}
-	stray.Finalize(0, now)
+	stray.Finalize()
 	if len(stray.Findings) != 1 || stray.Findings[0].Kind != FindingUndeclaredOnGitHub {
 		t.Errorf("stray: %+v", stray.Findings)
 	}
 	entry := reposetup.Entry{Name: "legacy", Problems: []reposetup.Problem{{Field: "name", Message: "must not end in -app"}}}
 	refused := &Record{Repository: "giantswarm/legacy", Reality: &Reality{}, Declaration: &Declaration{Team: "t", Problems: []string{"name: must not end in -app"}},
 		Setup: Setup{Checks: reconcile.Refused(reconcile.Request{Team: "t", Entry: entry}, now)}}
-	refused.Finalize(0, now)
+	refused.Finalize()
 	if len(refused.Findings) != 1 || refused.Findings[0].Kind != string(reconcile.FindingEntryRefused) || refused.Findings[0].Source != FindingSourceEngine {
 		t.Errorf("refused: %+v", refused.Findings)
 	}

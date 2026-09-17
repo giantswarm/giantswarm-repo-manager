@@ -42,7 +42,8 @@ type options struct {
 	valkeyAddr, org, sweepTeams   string
 	sweepInterval, connectTimeout time.Duration
 	sweepEngineChecks, sweepOnce  bool
-	sweepConcurrency, staleDays   int
+	sweepConcurrency              int
+	renovateActiveDays            int
 	graphqlBudgetFloor            int
 
 	githubAPIURL, githubAppPrivateKeyFile string
@@ -68,7 +69,7 @@ func parseFlags(args []string) (*options, error) {
 	f.DurationVar(&o.sweepInterval, "sweep-interval", envDuration("SWEEP_INTERVAL", 24*time.Hour), "Full inventory sweep every interval; 0 turns the schedule off (SWEEP_INTERVAL)")
 	f.BoolVar(&o.sweepEngineChecks, "sweep-engine-checks", envBoolDefault("SWEEP_ENGINE_CHECKS", true), "Run the engine's set-up checks in read mode for every declared repository during a sweep (SWEEP_ENGINE_CHECKS)")
 	f.IntVar(&o.sweepConcurrency, "sweep-concurrency", int(envInt64Default("SWEEP_CONCURRENCY", 4)), "Parallel engine reads during a sweep (SWEEP_CONCURRENCY)")
-	f.IntVar(&o.staleDays, "stale-days", int(envInt64Default("ORPHAN_STALE_DAYS", 180)), "Stale period of the orphan score in days (ORPHAN_STALE_DAYS)")
+	f.IntVar(&o.renovateActiveDays, "renovate-active-days", int(envInt64Default("RENOVATE_ACTIVE_DAYS", 180)), "Days within which a Renovate pull request or commit counts as Renovate activity — list_repositories' renovate: active | inactive (RENOVATE_ACTIVE_DAYS)")
 	f.StringVar(&o.sweepTeams, "sweep-teams", envOr("SWEEP_TEAMS", tools.DefaultSweepTeams), "Comma-separated GitHub team slugs whose members may start a sweep with sweep_inventory — the teams that own the manager and the reconciler (SWEEP_TEAMS)")
 	f.IntVar(&o.graphqlBudgetFloor, "graphql-budget-floor", int(envInt64Default("GRAPHQL_BUDGET_FLOOR", 0)), "Stop a sweep cleanly when the GraphQL budget's remaining points fall below this; 0 never stops (GRAPHQL_BUDGET_FLOOR)")
 	f.BoolVar(&o.sweepOnce, "sweep-once", envBool("SWEEP_ONCE"), "Run one full sweep, print its summary as JSON and exit (SWEEP_ONCE)")
@@ -109,7 +110,8 @@ func main() {
 func run(ctx context.Context, o *options, log *slog.Logger) error {
 	deps := tools.Deps{Version: version(), GitHubAPIURL: o.githubAPIURL, Log: log,
 		TeamFilesRepository: o.teamFilesRepository, TeamFilesRef: o.teamFilesRef, ReconcilerWorkflow: o.reconcilerWorkflow, SweepTeams: splitList(o.sweepTeams),
-		Review: review.New(review.Config{BaseURL: o.reviewsURL, TokenFile: o.reviewsTokenFile, Channels: channelMap(o.reviewsChannels)})}
+		RenovateActive: time.Duration(o.renovateActiveDays) * 24 * time.Hour,
+		Review:         review.New(review.Config{BaseURL: o.reviewsURL, TokenFile: o.reviewsTokenFile, Channels: channelMap(o.reviewsChannels)})}
 
 	var reader *gh.Reader
 	if o.githubAppID != 0 || o.githubAppInstallationID != 0 || o.githubAppPrivateKeyFile != "" {
@@ -135,7 +137,7 @@ func run(ctx context.Context, o *options, log *slog.Logger) error {
 	}
 	if reader != nil && deps.Inventory != nil {
 		deps.Collector = collect.New(collect.Options{
-			Org: o.org, Stale: time.Duration(o.staleDays) * 24 * time.Hour, EngineChecks: o.sweepEngineChecks,
+			Org: o.org, EngineChecks: o.sweepEngineChecks,
 			Concurrency: o.sweepConcurrency, BudgetFloor: o.graphqlBudgetFloor,
 			Reconciler: collect.ReconcilerOptions{Repository: o.teamFilesRepository, Workflow: o.reconcilerWorkflow, PollInterval: o.reconcilerPollInterval},
 		}, reader, deps.Inventory, collect.NewEngine(o.org, reader), log)

@@ -13,7 +13,6 @@ import (
 	"github.com/mark3labs/mcp-go/mcp"
 	mcpserver "github.com/mark3labs/mcp-go/server"
 
-	"github.com/giantswarm/giantswarm-repo-manager/internal/identity"
 	"github.com/giantswarm/giantswarm-repo-manager/internal/inventory"
 )
 
@@ -22,32 +21,24 @@ const (
 	ToolListRepositories  = "list_repositories"
 	ToolGetRepository     = "get_repository"
 	ToolRefreshRepository = "refresh_repository"
-	ToolDecideRepository  = "decide_repository"
 	ToolSweepInventory    = "sweep_inventory"
 )
 
 const (
 	argRepository = "repository"
-	argStaleDays  = "stalePeriodDays"
 	argUndeclared = "undeclared"
-	argMinScore   = "minOrphanScore"
 	argFinding    = "finding"
 	argLimit      = "limit"
-	argVerdict    = "verdict"
-	argNote       = "note"
 	argScope      = "scope"
 	argSearch     = "search"
 	argRenovate   = "renovate"
 	argVisibility = "visibility"
 	argFork       = "fork"
+	argArchived   = "archived"
 	argInactive   = "inactiveDays"
-	argDecision   = "decision"
 
 	defaultLimit = 100
 )
-
-// DecisionKeep is the one verdict defined.
-const DecisionKeep = "keep"
 
 // Scopes of list_repositories (PRD D7, D9).
 const (
@@ -65,47 +56,44 @@ const (
 	RenovateInactive   = "inactive"
 )
 
-// None is the filter value for "without": team none (undeclared), lifecycle
-// none, decision none — and the teams source of a caller without teams.
+// None is the filter value for "without": team none (undeclared) — and the
+// teams source of a caller without teams.
 const None = "none"
 
-// TeamNone and DecisionNone select the repositories without a declaration or
-// without a decision.
-const (
-	TeamNone     = None
-	DecisionNone = None
-)
+// TeamNone selects the repositories without a declaration.
+const TeamNone = None
+
+// DefaultRenovateActive is the period Renovate is judged active against when
+// the server is not told otherwise: 180 days.
+const DefaultRenovateActive = 180 * 24 * time.Hour
 
 func (t *tools) registerInventory(s *mcpserver.MCPServer) {
-	stale := mcp.WithNumber(argStaleDays, mcp.Description("Judge the orphan score against this stale period in days instead of the server's (the score is recomputed from the record's facts)."))
 	s.AddTool(mcp.NewTool(ToolListRepositories,
 		mcp.WithDescription("Read-only. The inventory of the org's repositories from the store: one row per repository with team, lifecycle, "+
-			"visibility, orphan score and reasons, finding kinds, set-up state and record age, sorted by orphan score, plus the last sweep's summary. "+
+			"visibility, archived (on GitHub), fork, Renovate state, finding kinds, set-up state and record age, sorted by repository name, plus the last sweep's summary. "+
 			"Scope per caller: mine (the teams you belong to on GitHub, read as you), team (the team "+
-			"argument, or your teams), unassigned (on GitHub without a declaration), all. Filters as on the Repositories page: search, renovate, "+
-			"team including none, visibility, fork, lifecycle, inactiveDays, minOrphanScore, decision, finding. get_repository has the full record."),
+			"argument, or your teams), unassigned (on GitHub without a declaration), all. Filters as on the Repositories page: search, team (in every scope: "+
+			"under mine one of your teams — another selects no rows and note says so; none under all: undeclared), renovate, visibility, fork, lifecycle, archived, "+
+			"inactiveDays, finding. get_repository has the full record."),
 		mcp.WithReadOnlyHintAnnotation(true),
 		mcp.WithString(argScope, mcp.Enum(ScopeMine, ScopeTeam, ScopeUnassigned, ScopeAll), mcp.Description("mine | team | unassigned | all (default all).")),
-		mcp.WithString(argTeam, mcp.Description("Only repositories declared by this team (slug: team-bumblebee); none: only undeclared repositories.")),
+		mcp.WithString(argTeam, mcp.Description("Only repositories declared by this team (slug: team-bumblebee). Under all, none: only undeclared repositories; under mine: one of your teams (another selects no rows, and note says so); under unassigned: ignored.")),
 		mcp.WithBoolean(argUndeclared, mcp.Description("Only repositories on GitHub without a declaration (same as scope unassigned).")),
 		mcp.WithString(argSearch, mcp.Description("Only repositories whose name or description contains this text (case-insensitive).")),
-		mcp.WithString(argRenovate, mcp.Enum(RenovateConfigured, RenovateMissing, RenovateActive, RenovateInactive), mcp.Description("Renovate state: configured (a renovate.json5), missing, active (a Renovate PR or commit within the stale period), inactive.")),
+		mcp.WithString(argRenovate, mcp.Enum(RenovateConfigured, RenovateMissing, RenovateActive, RenovateInactive), mcp.Description("Renovate state: configured (a renovate.json5), missing, active (a Renovate pull request or commit within the server's Renovate activity period, default 180 days), inactive.")),
 		mcp.WithString(argVisibility, mcp.Enum("public", "private"), mcp.Description("Only public or only private repositories.")),
 		mcp.WithBoolean(argFork, mcp.Description("Only forks (true) or only non-forks (false).")),
-		mcp.WithString(argLifecycle, mcp.Description("Only repositories declared with this lifecycle (deprecated, archived, …); none: no lifecycle set.")),
+		mcp.WithString(argLifecycle, mcp.Description("Only repositories with this lifecycle: active (none declared, and not archived on GitHub), deprecated (declared), archived (declared archived, or archived on GitHub); another value is matched against the declared lifecycle.")),
+		mcp.WithBoolean(argArchived, mcp.Description("Only repositories that are archived — declared archived or archived on GitHub (true) — or only those that are not (false). Independent of lifecycle.")),
 		mcp.WithNumber(argInactive, mcp.Description("Only repositories whose last commit by a person is older than this many days (or that have none).")),
-		mcp.WithString(argDecision, mcp.Description("Only repositories with this decision (keep), or none.")),
-		mcp.WithNumber(argMinScore, mcp.Description("Only repositories with at least this orphan score (0-100).")),
 		mcp.WithString(argFinding, mcp.Description("Only repositories with a finding of this kind (declared-but-gone, undeclared-on-github, entry-refused, gen-circleci-refused, default-icon, …).")),
 		mcp.WithNumber(argLimit, mcp.Description(fmt.Sprintf("Rows to return (default %d).", defaultLimit))),
-		stale,
 	), t.listRepositories)
 	s.AddTool(mcp.NewTool(ToolGetRepository,
 		mcp.WithDescription("Read-only. The full inventory record of one repository: declaration, GitHub reality, CircleCI, Renovate, catalog and mapping, "+
-			"set-up state (the engine's read-mode checks and the last reconciler run), orphan score with reasons, findings, decision and age."),
+			"set-up state (the engine's read-mode checks and the last reconciler run), findings and age."),
 		mcp.WithReadOnlyHintAnnotation(true),
 		mcp.WithString(argRepository, mcp.Required(), mcp.Description("Repository name, with or without the org (giantswarm/muster or muster).")),
-		stale,
 	), t.getRepository)
 	s.AddTool(mcp.NewTool(ToolRefreshRepository,
 		mcp.WithDescription("Rebuild one repository's inventory record now from GitHub, CircleCI and the team files, run the engine's checks in read mode, "+
@@ -122,33 +110,22 @@ func (t *tools) registerInventory(s *mcpserver.MCPServer) {
 		mcp.WithIdempotentHintAnnotation(true),
 		mcp.WithDestructiveHintAnnotation(false),
 	), t.sweepInventory)
-	s.AddTool(mcp.NewTool(ToolDecideRepository,
-		mcp.WithDescription("Leave a decision note on a repository's inventory record as you (verdict keep, with text); it survives every refresh. "+
-			"An annotation of the inventory cache, not a change on GitHub — no dryRun or mode."),
-		mcp.WithIdempotentHintAnnotation(true),
-		mcp.WithDestructiveHintAnnotation(false),
-		mcp.WithString(argRepository, mcp.Required(), mcp.Description("Repository name, with or without the org.")),
-		mcp.WithString(argVerdict, mcp.Required(), mcp.Enum(DecisionKeep), mcp.Description("The verdict: keep.")),
-		mcp.WithString(argNote, mcp.Description("Why.")),
-	), t.decideRepository)
 }
 
 // Row is one line of list_repositories.
 type Row struct {
-	Repository       string           `json:"repository"`
-	Team             string           `json:"team,omitempty"`
-	Lifecycle        string           `json:"lifecycle,omitempty"`
-	Visibility       string           `json:"visibility,omitempty"`
-	Archived         bool             `json:"archived"`
-	Fork             bool             `json:"fork,omitempty"`
-	Gone             bool             `json:"gone,omitempty"`
-	Renovate         string           `json:"renovate,omitempty"`
-	LastPersonCommit string           `json:"lastPersonCommit,omitempty"`
-	Orphan           inventory.Orphan `json:"orphan"`
-	Findings         []string         `json:"findings,omitempty"`
-	Setup            RowSetup         `json:"setup"`
-	Decision         string           `json:"decision,omitempty"`
-	Age              string           `json:"age"`
+	Repository       string   `json:"repository"`
+	Team             string   `json:"team,omitempty"`
+	Lifecycle        string   `json:"lifecycle,omitempty"`
+	Visibility       string   `json:"visibility,omitempty"`
+	Archived         bool     `json:"archived"`
+	Fork             bool     `json:"fork,omitempty"`
+	Gone             bool     `json:"gone,omitempty"`
+	Renovate         string   `json:"renovate,omitempty"`
+	LastPersonCommit string   `json:"lastPersonCommit,omitempty"`
+	Findings         []string `json:"findings,omitempty"`
+	Setup            RowSetup `json:"setup"`
+	Age              string   `json:"age"`
 }
 
 // RowSetup is the set-up state in one line.
@@ -169,8 +146,11 @@ type Listing struct {
 	Scope string `json:"scope"`
 	// Teams are the caller's teams a mine/team scope was resolved to, and
 	// where they came from (github, argument, none).
-	Teams        []string                `json:"teams,omitempty"`
-	TeamsSource  string                  `json:"teamsSource,omitempty"`
+	Teams       []string `json:"teams,omitempty"`
+	TeamsSource string   `json:"teamsSource,omitempty"`
+	// Note says why the selection is what it is when the arguments alone
+	// do not: a team under mine the caller is not in.
+	Note         string                  `json:"note,omitempty"`
 	Sweep        *inventory.SweepSummary `json:"sweep"`
 	SweepRunning bool                    `json:"sweepRunning"`
 	Total        int                     `json:"total"`
@@ -189,14 +169,13 @@ func (t *tools) listRepositories(ctx context.Context, req mcp.CallToolRequest) (
 		return result(nil, err)
 	}
 	limit := int(number(args, argLimit, defaultLimit))
-	stale, ok := t.stale(args)
 
 	records, err := t.d.Inventory.List(ctx)
 	if err != nil {
 		return result(nil, err)
 	}
-	now := time.Now()
-	out := Listing{Scope: f.scope, Teams: f.teams, TeamsSource: f.teamsSource, Total: len(records), Repositories: []Row{}}
+	now, period := time.Now(), t.renovatePeriod()
+	out := Listing{Scope: f.scope, Teams: f.teams, TeamsSource: f.teamsSource, Note: f.note, Total: len(records), Repositories: []Row{}}
 	if out.Sweep, err = t.d.Inventory.Sweep(ctx); err != nil {
 		return result(nil, err)
 	}
@@ -205,21 +184,13 @@ func (t *tools) listRepositories(ctx context.Context, req mcp.CallToolRequest) (
 	}
 	for i := range records {
 		r := &records[i]
-		if ok {
-			r.Orphan = inventory.Score(r, stale, now)
-		}
-		if !f.matches(r, stale, now) {
+		if !f.matches(r, period, now) {
 			continue
 		}
 		out.Matched++
-		out.Repositories = append(out.Repositories, row(r, now))
+		out.Repositories = append(out.Repositories, row(r, period, now))
 	}
-	sort.SliceStable(out.Repositories, func(i, j int) bool {
-		if out.Repositories[i].Orphan.Score != out.Repositories[j].Orphan.Score {
-			return out.Repositories[i].Orphan.Score > out.Repositories[j].Orphan.Score
-		}
-		return out.Repositories[i].Repository < out.Repositories[j].Repository
-	})
+	sortRows(out.Repositories)
 	if limit > 0 && len(out.Repositories) > limit {
 		out.Repositories = out.Repositories[:limit]
 	}
@@ -227,14 +198,33 @@ func (t *tools) listRepositories(ctx context.Context, req mcp.CallToolRequest) (
 	return result(out, nil)
 }
 
-func row(r *inventory.Record, now time.Time) Row {
-	row := Row{Repository: r.Repository, Orphan: r.Orphan, Age: now.Sub(r.RefreshedAt).Round(time.Second).String(), Gone: r.Reality == nil}
+// sortRows orders the rows by repository name, case-insensitive ascending.
+func sortRows(rows []Row) {
+	sort.Slice(rows, func(i, j int) bool {
+		a, b := strings.ToLower(rows[i].Repository), strings.ToLower(rows[j].Repository)
+		if a != b {
+			return a < b
+		}
+		return rows[i].Repository < rows[j].Repository
+	})
+}
+
+// renovatePeriod is the period Renovate is judged active against.
+func (t *tools) renovatePeriod() time.Duration {
+	if t.d.RenovateActive > 0 {
+		return t.d.RenovateActive
+	}
+	return DefaultRenovateActive
+}
+
+func row(r *inventory.Record, period time.Duration, now time.Time) Row {
+	row := Row{Repository: r.Repository, Age: now.Sub(r.RefreshedAt).Round(time.Second).String(), Gone: r.Reality == nil}
 	if r.Declaration != nil {
 		row.Team, row.Lifecycle = r.Declaration.Team, r.Declaration.Lifecycle
 	}
 	if r.Reality != nil {
 		row.Visibility, row.Archived, row.Fork = r.Reality.Visibility, r.Reality.IsArchived, r.Reality.IsFork
-		row.Renovate = renovateState(r, r.Orphan.StalePeriod, now)
+		row.Renovate = renovateState(r, period, now)
 		if c := r.Reality.LastPersonCommit; c != nil {
 			row.LastPersonCommit = c.Date.Format("2006-01-02")
 		}
@@ -255,9 +245,6 @@ func row(r *inventory.Record, now time.Time) Row {
 	}
 	row.Setup.PendingRun = r.Setup.PendingRun
 	row.Setup.Error = r.Setup.CheckError
-	if r.Decision != nil {
-		row.Decision = r.Decision.Verdict
-	}
 	return row
 }
 
@@ -283,11 +270,7 @@ func (t *tools) getRepository(ctx context.Context, req mcp.CallToolRequest) (*mc
 	if err != nil {
 		return result(nil, err)
 	}
-	now := time.Now()
-	if stale, ok := t.stale(args); ok {
-		rec.Orphan = inventory.Score(rec, stale, now)
-	}
-	return result(rec.WithAge(now), nil)
+	return result(rec.WithAge(time.Now()), nil)
 }
 
 // errNoCollector is refresh_repository's and sweep_inventory's answer without
@@ -352,35 +335,6 @@ func (t *tools) sweepInventory(ctx context.Context, _ mcp.CallToolRequest) (*mcp
 	return result(&Sweep{Running: true, Started: started, Last: last, Login: p.login, Teams: t.d.SweepTeams}, nil)
 }
 
-func (t *tools) decideRepository(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-	if t.d.Inventory == nil {
-		return result(nil, errors.New("inventory store not configured (VALKEY_ADDR)"))
-	}
-	args := req.GetArguments()
-	key, err := t.repositoryKey(args)
-	if err != nil {
-		return result(nil, err)
-	}
-	verdict, _ := args[argVerdict].(string)
-	if verdict != DecisionKeep {
-		return result(nil, fmt.Errorf("verdict %q is not defined: %q is the one verdict", verdict, DecisionKeep))
-	}
-	id, ok := identity.FromContext(ctx)
-	if !ok {
-		return result(nil, errors.New("a decision needs a caller: the request carried no identity"))
-	}
-	rec, err := t.d.Inventory.Get(ctx, key)
-	if err != nil {
-		return result(nil, err)
-	}
-	note, _ := args[argNote].(string)
-	rec.Decision = &inventory.Decision{Verdict: verdict, Note: strings.TrimSpace(note), By: id.String(), At: time.Now().UTC()}
-	if err := t.d.Inventory.Put(ctx, rec); err != nil {
-		return result(nil, err)
-	}
-	return result(rec.WithAge(time.Now()), nil)
-}
-
 // repositoryKey is owner/name for the repository argument.
 func (t *tools) repositoryKey(args map[string]any) (string, error) {
 	name, _ := args[argRepository].(string)
@@ -399,15 +353,6 @@ func (t *tools) org() string {
 		return t.d.Collector.Options().Org
 	}
 	return "giantswarm"
-}
-
-// stale is the stale period a call asked for, if any.
-func (t *tools) stale(args map[string]any) (time.Duration, bool) {
-	days := number(args, argStaleDays, 0)
-	if days <= 0 {
-		return 0, false
-	}
-	return time.Duration(days*24) * time.Hour, true
 }
 
 func number(args map[string]any, key string, def float64) float64 {

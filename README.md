@@ -12,15 +12,15 @@ ships as its own Giant Swarm app (this chart, its own Valkey), not in the `agent
 
 The team files in [giantswarm/github](https://github.com/giantswarm/github) (`repositories/team-*.yaml`)
 are the desired state of every repository; GitHub is the reality. giantswarm-repo-manager keeps one
-inventory record per repository in Valkey — declaration, reality, set-up state and an orphan score — and
+inventory record per repository in Valkey — declaration, reality, set-up state and findings — and
 exposes it, with the repository lifecycle, as MCP tools with the prefix `giantswarm-repo-manager`
 (`x_giantswarm-repo-manager_<tool>` through muster):
 
 | Tool | Purpose |
 |---|---|
 | `get_info` | how the call is authenticated: the caller (login and id, verified with `GET /user`), the pinned authorization server, App identity, inventory store, engine, write modes |
-| `list_repositories`, `get_repository` | the inventory: one row per repository (team, lifecycle, visibility, Renovate state, orphan score with reasons, finding kinds, set-up state, record age) with the last sweep's summary, scoped per caller — `mine` (the caller's teams: their GitHub teams through the grant, else the IdP groups), `team`, `unassigned`, `all` — and filtered as on the Repositories page (search, renovate, team incl. none, visibility, fork, lifecycle, inactiveDays, minOrphanScore, decision, finding); the full record of one repository. Shape in [`docs/inventory-record.md`](docs/inventory-record.md) |
-| `refresh_repository`, `decide_repository` | rebuild one record now; leave a decision note (`keep`, with text) as the caller — annotations of the cache, nothing on GitHub |
+| `list_repositories`, `get_repository` | the inventory: one row per repository (team, lifecycle, visibility, archived on GitHub, fork, Renovate state, finding kinds, set-up state, record age), sorted by name, with the last sweep's summary, scoped per caller — `mine` (the caller's GitHub teams, read as them), `team`, `unassigned`, `all` — and filtered as on the Repositories page: `search`, `team` in every scope (under `mine` one of the caller's teams — another selects no rows and the answer's `note` says so; `none` under `all` is the undeclared), `renovate` (`configured`, `missing`, `active`, `inactive` against `inventory.renovate.activeDays`), `visibility`, `fork`, `lifecycle` (`active`, `deprecated`, `archived` — a repository archived on GitHub counts as archived whatever its declaration says), the boolean `archived`, `inactiveDays`, `finding`; the full record of one repository. Shape in [`docs/inventory-record.md`](docs/inventory-record.md) |
+| `refresh_repository` | rebuild one record now — writes the inventory cache, nothing on GitHub |
 | `validate_repository` | the dry run of one or more new declarations: the engine's rendered entries with defaults, the implied template and options, the name check through the App, the creation rules' refusals as data, and the guard notices a person sees before any pull request exists (`team-review` for an author outside the owning team and team-planeteers, `batch-review` above three entries) |
 | `create_repository` | the creation-only pull request adding the entries to `repositories/<team>.yaml` as the caller — machine-approved by giantswarm/github's Validate workflow when no notice stands |
 | `update_repository` | the entry replaced by the one passed (held to the schema, not the creation rules), one pull request as the caller |
@@ -83,7 +83,7 @@ write tool takes `dryRun` and `mode`.
 | Identity | Used for | Configured by |
 |---|---|---|
 | **The person** (their GitHub user token through the App `giantswarm-repo-manager`, put on every call by muster) | who is calling (`get_info`'s `caller`, verified with `GET /user`); every write: team-file pull requests, the reconciler dispatch; the reads as the person (their teams) | `oauth.enabled`, `muster.mcpServer.auth.authorizationServer.*` (the pin; the Secret `giantswarm-repo-manager-oauth-client` holds the App's client) |
-| **The inventory App installation** (`giantswarm-repo-manager-inventory`, read-only: Administration, Contents, Pull requests, Issues, Commit statuses, Metadata, Organization members) | unattended, read-only inventory reads (GraphQL sweeps, the engine's checks in read mode) and the engine's name checks — its own rate budget; `get_info` names it as `inventory.identity` (`app giantswarm-repo-manager-inventory (installation <id>)`, or `not configured`). Nothing stands in for it: without the App there are no unattended reads, and the tools that need them say so | `githubApp.appID`, `githubApp.installationID`, `githubApp.existingSecret` (`private-key`) |
+| **The inventory App installation** (`giantswarm-repo-manager-inventory`, read-only: Administration, Contents, Pull requests, Issues, Commit statuses, Checks — the engine's protection step reads the default branch head's check runs to learn which conditional checks exist, and without it every repository carries the finding `unchecked` (the checks on main not readable with this token, 403) —, Metadata, Organization members) | unattended, read-only inventory reads (GraphQL sweeps, the engine's checks in read mode) and the engine's name checks — its own rate budget; `get_info` names it as `inventory.identity` (`app giantswarm-repo-manager-inventory (installation <id>)`, or `not configured`). Nothing stands in for it: without the App there are no unattended reads, and the tools that need them say so | `githubApp.appID`, `githubApp.installationID`, `githubApp.existingSecret` (`private-key`) |
 
 No CircleCI token. The inventory's CircleCI facts come from GitHub and the reconciler: whether CircleCI builds
 a repository from the `ci/circleci:` commit statuses on its default branch head (read with the repository, as
@@ -107,7 +107,7 @@ pending — nothing reaches the server from the workflow) and on demand (`refres
 GraphQL — repository metadata 20 a page (halved when GitHub cannot answer a page), default-branch history in aliased batches of 20 — and the engine's checks run
 in read mode per accepted declaration (`inventory.sweep.engineChecks`). `--sweep-once` runs one sweep and prints the
 summary (calls, GraphQL points, REST calls, duration); `inventory.sweep.graphqlBudgetFloor` stops a sweep cleanly when
-the budget runs low. The record, its findings and the orphan score are described in
+the budget runs low. The record and its findings are described in
 [`docs/inventory-record.md`](docs/inventory-record.md).
 
 ## What the tests prove
@@ -132,9 +132,10 @@ the budget runs low. The record, its findings and the orphan score are described
   App answers `GET /app`; a seeded Valkey is reported (a real one through `VALKEY_ADDR`, else in-process).
 - **The inventory** (`internal/e2e/inventory_test.go`, a fake org behind the App's GraphQL): the full sweep leaves one
   record per repository — declared and present, declared but gone, a refused declaration, undeclared, archived — with
-  the findings, the engine's read-mode result, CircleCI, Renovate and the orphan scores; the tools list, filter, rescore,
-  refresh and decide; the reconciler's trigger stores its run and survives the next refresh; a sweep stops cleanly at the
-  GraphQL budget floor.
+  the findings, the engine's read-mode result, CircleCI and Renovate; the tools list the rows by name, filter them (`team`
+  under `mine`, `archived`, `lifecycle` counting GitHub's archived flag) and refresh one; the reconciler's run is stored and
+  survives the next refresh; a sweep stops cleanly at the GraphQL budget floor. Every filter value of `list_repositories`
+  has a table test (`internal/tools/filter_test.go`).
 - `make scenario-test` — muster's own scenario harness (`tests/scenarios`) with a mocked GitHub: a backend
   registered the way this chart registers the server (OAuth mode, pinned to the App as the authorization
   server, `grantScope: subject`); a person authorizes the App once and muster puts their token on the call

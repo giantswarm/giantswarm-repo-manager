@@ -485,50 +485,9 @@ func (t *tools) commitCreate(ctx context.Context, args map[string]any) (any, err
 	}
 	out.Committed, out.Then = committed, createdThen
 	for i := range out.Repositories {
-		out.Repositories[i].PendingRun = t.expectRun(ctx, p, out.Repositories[i].Name, committed.PullRequest)
+		out.Repositories[i].PendingRun = t.expectRun(ctx, p, t.org()+"/"+out.Repositories[i].Name, inventory.ChangeCreated, committed.PullRequest)
 	}
 	return out, nil
-}
-
-// expectRun marks a created repository's record as expecting the reconciler
-// run that follows its pull request's merge, the way an Align now marks a
-// dispatch: the poller reads the run's artifact within its pending interval,
-// and a run that does not report within the window leaves the finding
-// reconcile-run-missing. A repository the inventory has not seen yet gets
-// its record built first. Nil, with a log line, when the mark could not be
-// stored — the creation stands either way.
-func (t *tools) expectRun(ctx context.Context, p *person, name string, pr *teamfiles.PullRequest) *inventory.PendingRun {
-	if t.d.Inventory == nil || t.d.Collector == nil {
-		return nil
-	}
-	key := t.org() + "/" + name
-	rec, err := t.d.Inventory.Get(ctx, key)
-	if errors.Is(err, inventory.ErrNotFound) {
-		rec, err = t.d.Collector.Refresh(ctx, key, nil, inventory.SourceRefresh)
-	}
-	if err != nil {
-		t.d.Log.Error("pending run not stored: record unreadable", "repository", key, "error", err)
-		return nil
-	}
-	rec.Created(time.Now().UTC(), p.login, inventory.ChangePullRequest{Number: pr.Number, URL: pr.URL})
-	if err := t.putExpectedRun(ctx, rec); err != nil {
-		t.d.Log.Error("pending run not stored", "repository", key, "error", err)
-		return nil
-	}
-	return rec.Setup.PendingRun
-}
-
-// putExpectedRun stores rec, whose pending run was just marked, and wakes the
-// reconciler poller: the run's artifact is looked for at once and then every
-// pending interval, not at the poller's next tick.
-func (t *tools) putExpectedRun(ctx context.Context, rec *inventory.Record) error {
-	if err := t.d.Inventory.Put(ctx, rec); err != nil {
-		return err
-	}
-	if t.d.Collector != nil {
-		t.d.Collector.WakeReconciler()
-	}
-	return nil
 }
 
 // repositoryGetter adapts the App installation client to the engine's

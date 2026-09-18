@@ -13,6 +13,9 @@ import (
 // TestARecordOfTheEarlierShapeUnmarshals: a record stored before the orphan
 // score and the decision note were removed still loads — the unknown fields
 // are ignored — and is written back without them.
+// repoX is the repository the tests here record.
+const repoX = "giantswarm/x"
+
 func TestARecordOfTheEarlierShapeUnmarshals(t *testing.T) {
 	old := `{"repository":"giantswarm/x","name":"x","declaration":null,
 	  "reality":{"url":"https://github.com/giantswarm/x","visibility":"public","isArchived":true,"isFork":false,"isTemplate":false,"isEmpty":false,
@@ -27,7 +30,7 @@ func TestARecordOfTheEarlierShapeUnmarshals(t *testing.T) {
 	if err := json.Unmarshal([]byte(old), &r); err != nil {
 		t.Fatalf("unmarshal: %v", err)
 	}
-	if r.Repository != "giantswarm/x" || r.Reality == nil || !r.Reality.IsArchived || !r.Renovate.Configured || len(r.Findings) != 1 || r.Findings[0].Kind != FindingUndeclaredOnGitHub || r.Source != SourceSweep {
+	if r.Repository != repoX || r.Reality == nil || !r.Reality.IsArchived || !r.Renovate.Configured || len(r.Findings) != 1 || r.Findings[0].Kind != FindingUndeclaredOnGitHub || r.Source != SourceSweep {
 		t.Errorf("record: %+v", r)
 	}
 	b, err := json.Marshal(r)
@@ -79,5 +82,34 @@ func TestChangePersonMade(t *testing.T) {
 	var none *Change
 	if none.PersonMade() {
 		t.Error("an artifact without a change block should be the reconciler's own run")
+	}
+}
+
+// TestOpenedExpectsTheRunAndTheMissingFindingNamesTheKind: a team-file pull
+// request of any kind leaves the pending run following it and forgets an
+// earlier missing run; given up, the finding names the pull request by its
+// kind, where an Align now's names the dispatch.
+func TestOpenedExpectsTheRunAndTheMissingFindingNamesTheKind(t *testing.T) {
+	now := time.Date(2026, 9, 18, 14, 29, 31, 0, time.UTC)
+	runs := "https://github.com/giantswarm/github/actions/workflows/reconcile.yaml"
+	pr := ChangePullRequest{Number: 7, URL: "https://github.com/giantswarm/github/pull/7"}
+	for kind, noun := range map[string]string{ChangeCreated: "declaration", ChangeArchived: "archive", ChangeDeprecated: "deprecation", ChangeTransferred: "transfer", ChangeChanged: "change"} {
+		r := &Record{Repository: repoX, Setup: Setup{MissingRun: &MissingRun{}}}
+		r.Opened(now, "alice", kind, pr)
+		if p := r.Setup.PendingRun; p == nil || p.Kind != kind || !p.Follows(7) || p.By != "alice" || r.Setup.MissingRun != nil {
+			t.Fatalf("%s: pending run %+v, missing run %+v", kind, p, r.Setup.MissingRun)
+		}
+		r.RunMissing(now.Add(16*time.Minute), runs)
+		f := r.MissingRunFinding()
+		if f == nil || f.Kind != FindingReconcileRunMissing || r.Setup.PendingRun != nil ||
+			!strings.Contains(f.Message, "whose "+noun+" pull request "+pr.URL+" alice opened at 2026-09-18T14:29:31Z") || !strings.Contains(f.Fix, "merge it") || !strings.Contains(f.Fix, runs) {
+			t.Errorf("%s: finding %+v", kind, f)
+		}
+	}
+	r := &Record{Repository: repoX}
+	r.Dispatched(now, "alice")
+	r.RunMissing(now.Add(16*time.Minute), runs)
+	if f := r.MissingRunFinding(); f == nil || !strings.Contains(f.Message, "alice dispatched at 2026-09-18T14:29:31Z") || strings.Contains(f.Message, "pull request") {
+		t.Errorf("dispatch: finding %+v", f)
 	}
 }

@@ -304,6 +304,11 @@ func TestTransferNamesBothTeams(t *testing.T) {
 		out.Notice == nil || !out.Notice.Delivered || out.Notice.Channel != bumblebeeStandup || out.Notice.IntendedChannel != "" {
 		t.Errorf("asks=%v notices=%v out=%+v", asks, notices, out)
 	}
+	// The record — the repository's, whichever team's file it moves to —
+	// expects the run that follows the merge as a transfer.
+	if p := out.PendingRun; p == nil || p.Kind != inventory.ChangeTransferred || !p.Follows(pr.Number) || !st.record(t, repoPresent).Setup.PendingRun.Follows(pr.Number) {
+		t.Errorf("the transfer's pending run: %+v", p)
+	}
 }
 
 // TestDebugChannelReceivesEveryAskAndNotice: with reviews.debugChannel set,
@@ -355,6 +360,17 @@ func TestSetLifecycleArchivedAndApproveChange(t *testing.T) {
 	if !strings.Contains(file, "lifecycle: archived") || !strings.Contains(file, "- name: "+repoLegacy) || !strings.Contains(pr.Title, "archive "+repoPresent) {
 		t.Errorf("archive pull request %q\n%s", pr.Title, file)
 	}
+	// The record expects the run that follows the merge, the way a creation's
+	// does: the poller runs at its pending interval until the artifact.
+	if p := out.PendingRun; p == nil || p.Kind != inventory.ChangeArchived || !p.Follows(pr.Number) || p.By != alice {
+		t.Fatalf("the archive's pending run: %+v", p)
+	}
+	if rec := st.record(t, repoPresent); !rec.Setup.PendingRun.Follows(pr.Number) || rec.Setup.PendingRun.Kind != inventory.ChangeArchived {
+		t.Fatalf("record after the archive pull request: %+v", rec.Setup)
+	}
+	if p := st.poll(t); p.Pending != 1 {
+		t.Errorf("poll while the archive's run is expected: %+v", p)
+	}
 	asks, _ := st.gw.posted()
 	if len(asks) != 1 || asks[0][kChannel] != bumblebeeChannel || !strings.Contains(asks[0]["text"].(string), alice+" asks to archive") || !strings.Contains(asks[0]["text"].(string), "Reason: superseded. A member of") ||
 		!strings.Contains(asks[0]["text"].(string), "A member of "+team+" other than "+alice+" approves.") || strings.Contains(asks[0]["text"].(string), "https://") || !strings.HasSuffix(asks[0]["link"].(string), fmt.Sprintf("/pull/%d", pr.Number)) {
@@ -391,6 +407,22 @@ func TestSetLifecycleArchivedAndApproveChange(t *testing.T) {
 	}
 	if !a.Merged || !pr.Merged || a.Message != fmt.Sprintf("Approved as %s and merged: %s/github#%d.", dave, org, pr.Number) {
 		t.Errorf("landing: %+v fake merged=%v", a, pr.Merged)
+	}
+
+	// The run that follows the merge reports; the poller, on its pending
+	// cadence, reads its artifact: the expectation is answered, the record
+	// carries the run, and the team hears the one sentence about the archive.
+	finished := time.Now().UTC().Truncate(time.Second)
+	run := st.ghs.actions.addRun(t, runStatusCompleted, finished, artifactReport{name: repoPresent, finishedAt: finished, result: reconcile.Result{Converged: true},
+		change: &inventory.Change{Kind: inventory.ChangeArchived, By: alice, PullRequest: &inventory.ChangePullRequest{Number: pr.Number, URL: out.PullRequest.URL}}})
+	if p := st.poll(t); p.Artifacts != 1 || p.Pending != 0 {
+		t.Fatalf("poll with the archive's run: %+v", p)
+	}
+	if rec := st.record(t, repoPresent); rec.Setup.PendingRun != nil || rec.Setup.LastRun == nil || rec.Setup.LastRun.RunURL != runURL(run.ID) {
+		t.Fatalf("record after the run: %+v", rec.Setup)
+	}
+	if _, notices := st.gw.posted(); len(notices) != 1 || notices[0][kChannel] != bumblebeeStandup || !strings.Contains(notices[0]["text"].(string), alice+" archived the repo "+repoPresent) || notices[0]["link"] != out.PullRequest.URL {
+		t.Errorf("notices after the archiving run: %v", notices)
 	}
 }
 
@@ -441,6 +473,9 @@ func TestUpdateRepositoryReplacesOneEntry(t *testing.T) {
 	tail := teamFile[strings.Index(teamFile, "- name: "+repoGone):]
 	if !strings.HasPrefix(file, "# yaml-language-server") || !strings.Contains(file, "description: now described") || !strings.HasSuffix(file, tail) {
 		t.Errorf("file:\n%s", file)
+	}
+	if p := out.PendingRun; p == nil || p.Kind != inventory.ChangeChanged || !p.Follows(out.PullRequest.Number) {
+		t.Errorf("the update's pending run: %+v", p)
 	}
 	// A schema refusal is data in the dry run and an error in commit.
 	entry["visibility"] = "secret"

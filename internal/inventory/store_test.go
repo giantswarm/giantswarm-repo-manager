@@ -41,7 +41,7 @@ func TestWaitConnectedComesUpWhenValkeyAppears(t *testing.T) {
 	if err := st.Ping(ctx); !errors.Is(err, ErrUnavailable) || !strings.HasPrefix(err.Error(), "inventory unavailable") {
 		t.Fatalf("ping before any connection: %v", err)
 	}
-	if _, err := st.Get(ctx, "giantswarm/x"); !errors.Is(err, ErrUnavailable) {
+	if _, err := st.Get(ctx, repoX); !errors.Is(err, ErrUnavailable) {
 		t.Fatalf("get before any connection: %v", err)
 	}
 
@@ -67,10 +67,10 @@ func TestWaitConnectedComesUpWhenValkeyAppears(t *testing.T) {
 	if err := st.Ping(ctx); err != nil {
 		t.Fatalf("ping after connecting: %v", err)
 	}
-	if err := st.Put(ctx, &Record{Repository: "giantswarm/x", Name: "x"}); err != nil {
+	if err := st.Put(ctx, &Record{Repository: repoX, Name: "x"}); err != nil {
 		t.Fatal(err)
 	}
-	if got, err := st.Get(ctx, "giantswarm/x"); err != nil || got.Name != "x" {
+	if got, err := st.Get(ctx, repoX); err != nil || got.Name != "x" {
 		t.Fatalf("get after connecting: %v, %v", got, err)
 	}
 }

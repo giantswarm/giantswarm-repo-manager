@@ -29,6 +29,16 @@ const (
 
 	// FirstRelease says where a created repository's v0.1.0 comes from.
 	FirstRelease = "v0.1.0 follows from the scaffold's auto-release"
+
+	// alignRefusal is why an entry that says align: false is refused: the
+	// creation is the repository's opt-in to alignment, and the reconciler
+	// run after the creation-only pull request sets the repository up only
+	// from an opted-in entry.
+	alignRefusal = "a repository created through the manager is opted in to alignment by its creation: leave `align` out or set it to true"
+	// createdOptedIn is the sentence of the creation tools' descriptions
+	// about the field every created entry carries.
+	createdOptedIn = "Every entry is written with `align: true` — the creation is the repository's opt-in to alignment, so the reconciler run after the pull request " +
+		"merges sets the repository up; an entry saying `align: false` is refused. "
 )
 
 // Validation is validate_repository's result: the engine's dry run plus who
@@ -135,7 +145,8 @@ func (t *tools) registerValidate(s *mcpserver.MCPServer) {
 		mcp.WithDescription("Read-only. The dry run of creating one or more new repositories for a team, exactly what create_repository would do: each entry " +
 			"rendered with the schema's defaults, the implied template (giantswarm/template for Go, template-app for a chart, " +
 			"the minimal scaffold otherwise) and its options, whether the name is free on GitHub, and the refusals of the creation rules as data " +
-			"(entries[].problems, and as the engine's findings entry-refused / gen-circleci-refused). Plus the guard notices a person sees before any pull request exists: team-review when the author is outside the " +
+			"(entries[].problems, and as the engine's findings entry-refused / gen-circleci-refused). " + createdOptedIn +
+			"Plus the guard notices a person sees before any pull request exists: team-review when the author is outside the " +
 			"owning team and team-planeteers, batch-review above three entries, names-unchecked without the App. And the creation as you (creation): the create and scaffold steps the engine " +
 			"would run with your token and the pull request that follows, its body carrying your reason — or the refusal when you are not an owner of the org (the org lets only owners create repositories). Writes nothing. " +
 			"Takes the same arguments as create_repository (team, entry or entries, reason), so you run it with exactly the arguments you commit. " +
@@ -159,7 +170,7 @@ func (t *tools) createRepository() WriteTool {
 		Name: ToolCreateRepository,
 		Description: "Create one or more new repositories of the giantswarm org as you, in this order: the repository (you are its admin), one scaffold commit " +
 			"on its default branch rendered by the engine from the declaration (" + FirstRelease + "), then the pull request adding the entries to the team's file " +
-			"(repositories/<team>.yaml in giantswarm/github) — the reconciler sets the repositories up once it merges and never creates. An owner role in the org is " +
+			"(repositories/<team>.yaml in giantswarm/github) — the reconciler sets the repositories up once it merges and never creates. " + createdOptedIn + "An owner role in the org is " +
 			"required: the org lets only owners create repositories, and the dry run tells you so before any write. dryRun: true is validate_repository's result with the " +
 			"creation plan (creation: the create and scaffold steps, the pull request) and writes nothing; refusals are data (entries[].problems, creation.refusal), an error " +
 			"means the validation could not run. mode commit refuses before any write — the engine's refusals, a taken name, a missing owner role — and resumes a creation " +
@@ -327,10 +338,17 @@ func (t *tools) planCreation(ctx context.Context, p *person, v *Validation, args
 	return plan
 }
 
-// parseEntries renders the tool's entries as a team file of the team.
+// parseEntries renders the tool's entries as a team file of the team, each
+// opted in to alignment: the one place a created entry gets its field, so
+// the dry run's rendered entry, the validation and the pull request's diff
+// all carry it.
 func parseEntries(team string, entries []any) (*reposetup.TeamFile, error) {
 	var b strings.Builder
 	for _, e := range entries {
+		e, err := optedIn(e)
+		if err != nil {
+			return nil, err
+		}
 		d, err := teamfiles.EntryFromValue(e)
 		if err != nil {
 			return nil, fmt.Errorf("parse entry as a team-file entry: %w", err)
@@ -345,6 +363,26 @@ func parseEntries(team string, entries []any) (*reposetup.TeamFile, error) {
 		}
 	}
 	return reposetup.ParseTeamFile(team, strings.NewReader(b.String()))
+}
+
+// optedIn returns the entry with align: true — the creation is the opt-in
+// to alignment — and refuses one that says otherwise. A value that is not a
+// mapping is returned as it is for the parser to refuse.
+func optedIn(entry any) (any, error) {
+	m, ok := entry.(map[string]any)
+	if !ok {
+		return entry, nil
+	}
+	if v, set := m[teamfiles.FieldAlign]; set && v != true {
+		name, _ := m[teamfiles.FieldName].(string)
+		return nil, fmt.Errorf("%s: %s", name, alignRefusal)
+	}
+	out := make(map[string]any, len(m)+1)
+	for k, v := range m {
+		out[k] = v
+	}
+	out[teamfiles.FieldAlign] = true
+	return out, nil
 }
 
 // validator is the engine's validator with the App answering the name checks

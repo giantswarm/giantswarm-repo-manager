@@ -11,6 +11,7 @@ import (
 	mcpserver "github.com/mark3labs/mcp-go/server"
 
 	"github.com/giantswarm/giantswarm-repo-manager/internal/identity"
+	"github.com/giantswarm/giantswarm-repo-manager/internal/teamfiles"
 )
 
 const (
@@ -171,7 +172,8 @@ func TestCreateRepositoryDryRunIsTheEngineValidation(t *testing.T) {
 	if err := json.Unmarshal([]byte(text), &res); err != nil {
 		t.Fatalf("result is not the engine's Result JSON: %v\n%s", err, text)
 	}
-	if !res.Accepted || len(res.Entries) != 1 || res.Entries[0].Template != "giantswarm/template" || !strings.Contains(res.Entries[0].Rendered, "generate: true") {
+	if !res.Accepted || len(res.Entries) != 1 || res.Entries[0].Template != "giantswarm/template" || !strings.Contains(res.Entries[0].Rendered, "generate: true") ||
+		!strings.Contains(res.Entries[0].Rendered, "align: true") {
 		t.Errorf("unexpected dry run: %s", text)
 	}
 
@@ -229,5 +231,58 @@ func TestGetInfoWithoutComponents(t *testing.T) {
 	if info.Caller != nil || info.Auth.Mode != AuthModeNone || info.Auth.Reason == "" || info.GitHub.AppError == "" ||
 		info.Inventory.Connected || !info.Capabilities.ApplyRefused || info.Engine.Package != engineModule+"/pkg/reposetup" {
 		t.Errorf("unexpected info: %s", text)
+	}
+}
+
+// TestParseEntriesOptsEveryEntryIn: the creation is the repository's opt-in
+// to alignment — every entry the creation tools parse carries align: true,
+// after the keys the caller wrote; one saying align: false is refused with
+// the reason, and the caller's map is left as it was.
+func TestParseEntriesOptsEveryEntryIn(t *testing.T) {
+	tf, err := parseEntries(testTeam, []any{validEntry, map[string]any{teamfiles.FieldName: "other-service", teamfiles.FieldAlign: true}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, d := range tf.Entries {
+		f, err := d.Fields()
+		if err != nil || !f.Align {
+			t.Errorf("%s: %+v %v", d.Name, f, err)
+		}
+	}
+	if y, _ := tf.Entries[0].YAML(); !strings.Contains(y, "\n  componentType: service\n  align: true\n  gen:\n") {
+		t.Errorf("rendered:\n%s", y)
+	}
+	if _, set := validEntry[teamfiles.FieldAlign]; set {
+		t.Error("the caller's entry was changed")
+	}
+	_, err = parseEntries(testTeam, []any{map[string]any{teamfiles.FieldName: "opted-out", teamfiles.FieldAlign: false}})
+	if err == nil || err.Error() != "opted-out: "+alignRefusal {
+		t.Errorf("align: false: %v", err)
+	}
+}
+
+// TestAlignWarningNamesTheRepositoryAndItsOptIn: the paragraph names the
+// repository, not the team, and says what this run does — the entry's
+// opt-in decides; an undeclared repository is a check from the team alone.
+func TestAlignWarningNamesTheRepositoryAndItsOptIn(t *testing.T) {
+	const repo = "giantswarm/example-service"
+	cases := []struct {
+		name              string
+		team              string
+		optedIn, declared bool
+		want              string
+	}{
+		{"opted in", testTeam, true, true, repo + " is opted in to alignment (`align: true` in its entry): the planned changes are applied."},
+		{"declared without the field", testTeam, false, true, repo + " has not opted in to alignment: this run checks and reports the drift; nothing changes. Opt in with update_repository: `align: true` in its entry (the team reviews)."},
+		{"undeclared with a team", testTeam, false, false, repo + " has no entry: this run checks from the team alone and changes nothing; declare the repository with `align: true` in its entry to have it aligned."},
+		{"undeclared without a team", "", false, false, repo + " has no entry and no team is known for it: pass team."},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := alignWarning(repo, tc.team, tc.optedIn, tc.declared)
+			if !strings.HasPrefix(got, "Align now changes "+repo+" on GitHub and CircleCI") || !strings.Contains(got, alignChanges) || !strings.Contains(got, "It runs as you. "+tc.want) {
+				t.Errorf("got %q, want it to end in %q", got, tc.want)
+			}
+		})
 	}
 }

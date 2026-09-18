@@ -9,6 +9,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- The opt-in to alignment is the repository's own: `align: true` in its entry in `repositories/<team>.yaml`. `create_repository` and `validate_repository` write it into every entry they create — the creation is the opt-in, so the reconciler run after the creation-only pull request sets the repository up — and refuse an entry saying `align: false` (the dry run's rendered entry and the pull request's diff show the field). `set_lifecycle` writes it beside the lifecycle when the entry lacks it, and the pull request and the ask say so (without it the reconciler would record the lifecycle and apply nothing). `align_repository` answers from the declaring entry: `optedIn` is its `align`, `mode` is `align` with it and `check` without, the answer carries `declared`, and the warning names the repository — how to opt in (`update_repository`, the team reviews) for an entry without the field, a check from the team alone for a repository without an entry. The team's policy file `repository-setup/<team>.yaml` holds the two channels only; `alignOptIn` is read nowhere. devctl 8.66.0, whose embedded schema knows `align` (giantswarm/giantswarm-repo-manager#80).
+
 ### Fixed
 
 - The `circleci` step no longer says "CircleCI does not build <repository>" beside an `ok` when the reconciler's run found the project followed and the head simply carries no status yet: the summary then reads "no CircleCI status on main's head yet"; the conclusion is drawn only when nothing else has read the project.

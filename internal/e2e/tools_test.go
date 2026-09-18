@@ -39,6 +39,16 @@ func TestValidateRepositoryRendersAndRefuses(t *testing.T) {
 		len(v.Notices) != 0 || !v.MachineApproved || v.AuthorLogin != alice || v.TeamsSource != kGitHub {
 		t.Errorf("member's valid entry: %+v notices=%v teams=%v/%s", v.Result, v.Notices, v.AuthorTeams, v.TeamsSource)
 	}
+	// The creation is the opt-in to alignment: the rendered entry carries
+	// align: true although the caller's entry did not say so; one that says
+	// align: false is refused before the engine sees it.
+	if !strings.Contains(v.Entries[0].Rendered, "align: true") {
+		t.Errorf("the rendered entry should be opted in:\n%s", v.Entries[0].Rendered)
+	}
+	optedOut := map[string]any{kName: shinyService, kComponentType: kService, "align": false, kGen: newEntry[kGen]}
+	if text, isErr := call(t, asAlice, tools.ToolValidateRepository, map[string]any{argTeam: team, argEntry: optedOut}); !isErr || !strings.Contains(text, shinyService+": a repository created through the manager is opted in to alignment by its creation") {
+		t.Errorf("align: false should be refused: isError=%v %s", isErr, text)
+	}
 
 	bad := map[string]any{kName: "shiny-app", kComponentType: kService, kGen: map[string]any{kLanguage: kGo, kFlavours: []any{kApp}}}
 	st.callJSON(t, asAlice, tools.ToolValidateRepository, map[string]any{argTeam: team, argEntry: bad}, &v)
@@ -128,6 +138,10 @@ func TestCreateCommitCreatesScaffoldsThenOpensThePullRequestAsThePerson(t *testi
 	repo := st.ghs.repos.get(shinyService)
 	if repo == nil || !repo.admins[alice] {
 		t.Fatalf("shiny-service created as alice: %+v", repo)
+	}
+	// The declared entry carries the opt-in, after the keys the caller wrote.
+	if file := string(st.ghs.files.pullRequests()[0].Files["repositories/"+team+".yaml"]); !strings.Contains(file, "- name: "+shinyService+"\n  componentType: "+kService+"\n  align: true\n  gen:\n") {
+		t.Errorf("the creation pull request's entry should be opted in:\n%s", file)
 	}
 	if _, ok := repo.files["CODEOWNERS"]; !ok || repo.files[readmeFile] != scaffoldFiles[readmeFile] {
 		t.Errorf("the scaffold replaced the initial README: %v", repo.files)
@@ -360,6 +374,13 @@ func TestSetLifecycleArchivedAndApproveChange(t *testing.T) {
 	if !strings.Contains(file, "lifecycle: archived") || !strings.Contains(file, "- name: "+repoLegacy) || !strings.Contains(pr.Title, "archive "+repoPresent) {
 		t.Errorf("archive pull request %q\n%s", pr.Title, file)
 	}
+	// present-service had not opted in to alignment: the archive writes the
+	// opt-in beside the lifecycle (else the reconciler would record the
+	// lifecycle and archive nothing), and the pull request says so.
+	if !strings.Contains(file, "  lifecycle: archived\n  align: true\n") || !strings.Contains(pr.Body, "`lifecycle: archived` and `align: true` in `repositories/"+team+".yaml`") ||
+		!strings.Contains(pr.Body, "also opts the repository in to alignment") {
+		t.Errorf("the archive should opt the entry in: %q\n%s", pr.Body, file)
+	}
 	// The record expects the run that follows the merge, the way a creation's
 	// does: without a deadline while the pull request is open, so the poller
 	// does not hurry yet.
@@ -374,6 +395,7 @@ func TestSetLifecycleArchivedAndApproveChange(t *testing.T) {
 	}
 	asks, _ := st.gw.posted()
 	if len(asks) != 1 || asks[0][kChannel] != bumblebeeChannel || !strings.Contains(asks[0]["text"].(string), alice+" asks to archive") || !strings.Contains(asks[0]["text"].(string), "Reason: superseded. A member of") ||
+		!strings.Contains(asks[0]["text"].(string), "(owned by "+team+"). The change also opts the repository in to alignment (`align: true` in its entry), so the reconciler applies the lifecycle. Reason:") ||
 		!strings.Contains(asks[0]["text"].(string), "A member of "+team+" other than "+alice+" approves.") || strings.Contains(asks[0]["text"].(string), "https://") || !strings.HasSuffix(asks[0]["link"].(string), fmt.Sprintf("/pull/%d", pr.Number)) {
 		t.Fatalf("ask: %v", asks)
 	}
@@ -545,21 +567,30 @@ func TestReconcileDispatchesAsThePersonAndTheCompletionMessageFollows(t *testing
 	st := newStack(t)
 	c := st.as(t, aliceToken)
 	var d tools.Dispatch
-	st.callJSON(t, c, tools.ToolAlignRepository, map[string]any{argDryRun: true, kRepository: repoPresent}, &d)
+	st.callJSON(t, c, tools.ToolAlignRepository, map[string]any{argDryRun: true, kRepository: repoLegacy}, &d)
 	if d.Dispatched || d.As != alice || d.Workflow != reconcilerWorkflow || len(st.ghs.files.dispatches) != 0 {
 		t.Fatalf("dry run: %+v dispatches=%v", d, st.ghs.files.dispatches)
 	}
-	// The answer says what the run does: the declaring team has opted in, so
-	// the run aligns, and the warning names what an alignment changes.
-	if d.Team != team || !d.OptedIn || d.Mode != tools.DispatchModeAlign || !strings.Contains(d.Warning, "has opted in") ||
+	// The answer says what the run does: legacy-app's entry says align: true,
+	// so the run aligns, and the warning names what an alignment changes.
+	if d.Team != team || !d.Declared || !d.OptedIn || d.Mode != tools.DispatchModeAlign || !strings.Contains(d.Warning, org+"/"+repoLegacy+" is opted in to alignment (`align: true` in its entry)") ||
 		!strings.Contains(d.Warning, "enforce_admins") {
-		t.Errorf("dry run answer for an opted-in team: team=%q optedIn=%v mode=%q warning=%q", d.Team, d.OptedIn, d.Mode, d.Warning)
+		t.Errorf("dry run answer for an opted-in entry: team=%q declared=%v optedIn=%v mode=%q warning=%q", d.Team, d.Declared, d.OptedIn, d.Mode, d.Warning)
 	}
-	// A team without the opt-in: the run is a check, and the warning says nothing changes.
+	// An entry without the field: the run is a check, and the warning says
+	// nothing changes and how the repository opts in.
 	var check tools.Dispatch
-	st.callJSON(t, c, tools.ToolAlignRepository, map[string]any{argDryRun: true, kRepository: repoPresent, argTeam: teamPlaneteers}, &check)
-	if check.Team != teamPlaneteers || check.OptedIn || check.Mode != tools.DispatchModeCheck || !strings.Contains(check.Warning, "has not opted in") {
-		t.Errorf("dry run answer for a team without opt-in: team=%q optedIn=%v mode=%q warning=%q", check.Team, check.OptedIn, check.Mode, check.Warning)
+	st.callJSON(t, c, tools.ToolAlignRepository, map[string]any{argDryRun: true, kRepository: repoPresent}, &check)
+	if check.Team != team || !check.Declared || check.OptedIn || check.Mode != tools.DispatchModeCheck ||
+		!strings.Contains(check.Warning, org+"/"+repoPresent+" has not opted in to alignment: this run checks and reports the drift; nothing changes. Opt in with update_repository: `align: true` in its entry (the team reviews).") {
+		t.Errorf("dry run answer for an entry without the opt-in: team=%q declared=%v optedIn=%v mode=%q warning=%q", check.Team, check.Declared, check.OptedIn, check.Mode, check.Warning)
+	}
+	// No entry in the named team's file: a check from the team alone.
+	var stray tools.Dispatch
+	st.callJSON(t, c, tools.ToolAlignRepository, map[string]any{argDryRun: true, kRepository: repoStray, argTeam: teamPlaneteers}, &stray)
+	if stray.Team != teamPlaneteers || stray.Declared || stray.OptedIn || stray.Mode != tools.DispatchModeCheck ||
+		!strings.Contains(stray.Warning, org+"/"+repoStray+" has no entry: this run checks from the team alone and changes nothing; declare the repository with `align: true`") {
+		t.Errorf("dry run answer for an undeclared repository: team=%q declared=%v optedIn=%v mode=%q warning=%q", stray.Team, stray.Declared, stray.OptedIn, stray.Mode, stray.Warning)
 	}
 	st.callJSON(t, c, tools.ToolAlignRepository, map[string]any{argMode: modeCommit, kRepository: repoPresent, argTeam: team}, &d)
 	ds := st.ghs.files.dispatches

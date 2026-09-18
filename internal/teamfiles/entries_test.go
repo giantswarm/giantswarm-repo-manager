@@ -89,6 +89,19 @@ func TestRemoveEntryAndSetField(t *testing.T) {
 	if !strings.HasPrefix(y, "- name: beta\n") || !strings.Contains(y, "lifecycle: deprecated") {
 		t.Errorf("rendered:\n%s", y)
 	}
+
+	// The opt-in to alignment is a boolean field the same edit writes, after
+	// the keys the author wrote; Fields reads it back as the bool it is.
+	optedIn, err := SetField(changed, FieldAlign, "true")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if f, err := optedIn.Fields(); err != nil || !f.Align || f.Lifecycle != LifecycleDeprecated {
+		t.Errorf("set align: %+v %v", f, err)
+	}
+	if y, _ := optedIn.YAML(); !strings.HasSuffix(y, "  lifecycle: deprecated\n  align: true\n") {
+		t.Errorf("rendered:\n%s", y)
+	}
 }
 
 // TestRerenderFileReappliesTheChangedEntries: a pull request's change of one

@@ -33,7 +33,8 @@ func openNeighbours(t *testing.T, st *stack) (archive, deprecate *fakePullReques
 }
 
 // mainCarriesBothChanges: the team file on main reads as the fixture plus
-// the two lifecycle lines and nothing else.
+// the two lifecycle lines, the archive's opt-in to alignment (present-service
+// had none) and nothing else.
 func mainCarriesBothChanges(t *testing.T, st *stack) {
 	t.Helper()
 	final := string(st.ghs.files.at(mainBranch, teamFilePath))
@@ -45,8 +46,11 @@ func mainCarriesBothChanges(t *testing.T, st *stack) {
 			t.Errorf("main lost the line %q:\n%s", line, final)
 		}
 	}
-	if got, want := strings.Count(final, "\n"), strings.Count(teamFile, "\n")+2; got != want {
-		t.Errorf("main has %d lines, want %d (the fixture plus two lifecycle lines):\n%s", got, want, final)
+	if got, want := strings.Count(final, "\n"), strings.Count(teamFile, "\n")+3; got != want {
+		t.Errorf("main has %d lines, want %d (the fixture plus two lifecycle lines and the archive's align: true):\n%s", got, want, final)
+	}
+	if !strings.Contains(final, "  lifecycle: archived\n  align: true\n") {
+		t.Errorf("main should carry the archive's opt-in:\n%s", final)
 	}
 }
 

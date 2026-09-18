@@ -27,7 +27,7 @@ exposes it, with the repository lifecycle, as MCP tools with the prefix `giantsw
 | `update_repository` | the entry replaced by the one passed (held to the schema, not the creation rules), one pull request as the caller |
 | `transfer_repository` | the entry moved between two team files in one pull request naming the giving and the receiving team; the ask to the receiving team's channel, a notice to the giving team's |
 | `set_lifecycle` | `deprecated` or `archived` set on the entry; the ask to the owning team's channel |
-| `approve_change` | the caller's GitHub team membership checked (the team named in the pull request), then the approving review submitted as the caller — what the Slack ask's Approve button calls as the clicking member |
+| `approve_change` | the caller's GitHub team membership checked (the team named in the pull request), then the approving review submitted as the caller — what the Slack ask's Approve button calls as the clicking member; a pull request GitHub reports conflicting with its base (a neighbouring entry changed first) is re-rendered on the current base as the caller before the review, so it merges |
 | `align_repository` | *Align now*: the reconciler workflow (`reconcile-repositories.yaml` in giantswarm/github) dispatched for one repository as the caller — it changes the repository to its declared set-up and the company baseline only when the owning team has opted in (`alignOptIn` in its policy file), and checks otherwise; the answer carries the mode, the opt-in, the planned changes of the last check and a warning paragraph; the record shows `setup.pendingRun` until the inventory has read the run's artifact as `setup.lastRun` (with the run's `change` block); the team's standup channel hears nothing about it -- an Align now is the caller's, and its failed steps and findings are on the record and in the run |
 
 Every tool's description and input schema, as muster exposes them: [`docs/tools.md`](docs/tools.md).
@@ -39,6 +39,17 @@ committed and opened with the caller's own GitHub token, so the author is the pe
 refused for every write: a repository changed on GitHub without its declaration is the drift the reconciler
 reports. Team files are edited byte for byte — header comment, comments on entries and the authors' key
 order stay; only the one entry changes.
+
+**A pull request stays mergeable.** When a neighbouring entry of the same team file changes first — a
+repository declared next to the one being archived, two lifecycle changes side by side — GitHub reports the
+pull request conflicting (`mergeable: false`) and neither a review nor auto-merge lands it. The change is
+declarative, so `approve_change` re-renders it instead of anyone rebasing by hand: the entries the pull
+request changes, found against its merge base, re-applied to the files as they read on the base now, the
+branch force-pushed as the approver with that one commit — the pull request, its ask and its auto-merge
+kept — then the review; the answer names the re-render (`rerendered`). The poller, which reads as the
+inventory App and pushes nothing, notes a conflicting open pull request on the record
+(`setup.pendingRun.conflictsSince`) and, for one approved already — its ask spent, its auto-merge unable to
+fire — posts a fresh ask to the deciding team's channel, once, whose Approve re-renders and lands it.
 
 **Existing entries are held to the schema, not the creation rules.** `gen.flavours`, `gen.language` and
 `gen.ci.generate` are mandatory for an entry the reconciler *creates*; for a declared repository the

@@ -103,6 +103,9 @@ type ReconcilerPoll struct {
 	// a merged pull request — and Missing the ones given up this time. A
 	// pull request still open is neither: no run is due yet.
 	Pending, Missing int
+	// Conflicting is the open pull requests GitHub reports conflicting with
+	// their base this time (pendingRun.conflictsSince on their records).
+	Conflicting int
 	// Watermark is where the cursor stands after the poll.
 	Watermark time.Time
 	Errors    []string
@@ -132,6 +135,16 @@ func (c *Collector) RunReconcilerPoll(ctx context.Context) {
 		}
 		return poll.Pending > 0
 	})
+}
+
+// OnConflict registers the hook the poller calls when it first finds an open
+// pull request of this server conflicting with its base (mergeable: false —
+// a neighbouring entry of the team file changed first), with the record
+// whose pending run the pull request is and the pull request as read. The
+// poller reads as the inventory App and cannot push; what follows — an ask
+// for the approve_change that re-renders the pull request — is the hook's.
+func (c *Collector) OnConflict(fn func(context.Context, *inventory.Record, *github.PullRequest)) {
+	c.conflicted = fn
 }
 
 // WakeReconciler makes the poller read the reconciler's runs at once rather
@@ -505,7 +518,7 @@ func (c *Collector) expirePending(ctx context.Context, now time.Time, poll *Reco
 		}
 		from := p.AwaitedFrom()
 		if from.IsZero() {
-			if from = c.readMerge(ctx, rec); from.IsZero() {
+			if from = c.readMerge(ctx, rec, poll); from.IsZero() {
 				continue
 			}
 		}
@@ -528,7 +541,7 @@ func (c *Collector) expirePending(ctx context.Context, now time.Time, poll *Reco
 // merge time from then on), a close without a merge drops the mark. It
 // returns the window's start — zero while the pull request is open, closed
 // or not readable now.
-func (c *Collector) readMerge(ctx context.Context, rec *inventory.Record) time.Time {
+func (c *Collector) readMerge(ctx context.Context, rec *inventory.Record, poll *ReconcilerPoll) time.Time {
 	owner, repo := c.opts.Reconciler.repo()
 	p := rec.Setup.PendingRun
 	log := c.log.With("repository", rec.Repository, "pullRequest", p.PullRequest.URL)
@@ -547,6 +560,7 @@ func (c *Collector) readMerge(ctx context.Context, rec *inventory.Record) time.T
 		rec.Closed()
 		log.Info("reconciler run no longer expected: pull request closed without a merge")
 	default:
+		c.readConflict(ctx, rec, pr, poll, log)
 		return time.Time{}
 	}
 	if err := c.store.Put(ctx, rec); err != nil {
@@ -554,6 +568,44 @@ func (c *Collector) readMerge(ctx context.Context, rec *inventory.Record) time.T
 		return time.Time{}
 	}
 	return from
+}
+
+// readConflict notes on the mark whether GitHub reports the open pull
+// request conflicting with its base — mergeable: false, a neighbouring entry
+// changed first (pendingRun.conflictsSince) — and hands a conflict found for
+// the first time to the conflict hook: this identity reads only; a member's
+// approve_change re-renders the pull request. A pull request mergeable again
+// — re-rendered, or rebased by hand — drops the note. While GitHub has not
+// computed the mergeability (null) nothing changes; the next poll reads it.
+func (c *Collector) readConflict(ctx context.Context, rec *inventory.Record, pr *github.PullRequest, poll *ReconcilerPoll, log *slog.Logger) {
+	if pr.Mergeable == nil {
+		return
+	}
+	p := rec.Setup.PendingRun
+	conflicts := !pr.GetMergeable()
+	if conflicts {
+		poll.Conflicting++
+	}
+	switch {
+	case conflicts && !p.Conflicting():
+		now := c.now()
+		rec.Conflicts(now)
+		if err := c.store.Put(ctx, rec); err != nil {
+			log.Error("reconciler poll: conflict not stored", "error", err)
+			return
+		}
+		log.Warn("pull request conflicts with its base: a neighbouring entry changed first", "since", now, "by", p.By, "kind", p.Kind)
+		if c.conflicted != nil {
+			c.conflicted(ctx, rec, pr)
+		}
+	case !conflicts && p.Conflicting():
+		rec.Mergeable()
+		if err := c.store.Put(ctx, rec); err != nil {
+			log.Error("reconciler poll: mergeable state not stored", "error", err)
+			return
+		}
+		log.Info("pull request mergeable again")
+	}
 }
 
 // firstTime is the first non-zero time.

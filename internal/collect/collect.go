@@ -21,6 +21,7 @@ import (
 
 	"github.com/giantswarm/devctl/v8/pkg/reposetup"
 	"github.com/giantswarm/devctl/v8/pkg/reposetup/reconcile"
+	"github.com/google/go-github/v92/github"
 
 	"github.com/giantswarm/giantswarm-repo-manager/internal/gh"
 	"github.com/giantswarm/giantswarm-repo-manager/internal/inventory"
@@ -86,6 +87,7 @@ var ErrSweepRunning = errors.New("a sweep is already running")
 // Collector fills the store.
 type Collector struct {
 	reconciled func(context.Context, *inventory.Record)
+	conflicted func(context.Context, *inventory.Record, *github.PullRequest)
 	opts       Options
 	reader     *gh.Reader
 	gql        *graphQL

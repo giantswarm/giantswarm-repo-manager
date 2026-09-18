@@ -49,6 +49,15 @@ clears it. `get_repository` and `list_repositories` (`setup.pendingRun` in the r
 shows; `watch_repository` reads `setup.lastRun` (the run whose `change.pullRequest.number` is the creation's) and
 `setup.missingRun` for its `setUp` phase.
 
+**Conflicting pull requests.** Reading an open pull request, the poller also reads GitHub's `mergeable`: `false` means a
+neighbouring entry of the team file changed first and the pull request cannot merge as it stands. The record notes it
+(`pendingRun.conflictsSince`); the poller reads as the inventory App and pushes nothing. `approve_change` re-renders the
+pull request on the current base as the approving member before approving — the entries it changes re-applied to the
+files as they read now, the branch force-pushed, the pull request, its ask and its auto-merge kept — and drops the note. A
+pull request that awaits its review needs nothing more: the ask standing in the team's channel is that click. One
+approved already (its ask spent, its auto-merge unable to fire) gets a fresh ask to the deciding team's channel, once,
+whose Approve re-renders and lands it. A pull request mergeable again — re-rendered, or rebased by hand — drops the note.
+
 **Artifact contract for 6031a:** `reconcile-<name>.json` is `reconcile.Result` as `devctl repo reconcile` prints it
 (`pkg/reposetup/reconcile`, JSON tags on every field: `repository`, `declared`, `team`, `mode`, `added`, `startedAt`,
 `finishedAt`, `steps[]{step, verdict, summary, changes[], findings[]{kind, message, fix}}`, `converged`) plus
@@ -130,7 +139,8 @@ the message to the team's standup channel is rendered from (README, "Asks and me
     "checkError": "",                   // why checks is missing (no read identity, …); a refused entry has checks = the engine's Refused result
     "lastRun": {"result": {"…": "reconcile.Result"}, "runUrl": "…", "timestamp": "…", "runId": 1, "attempt": 1,
                 "change": {"kind": "created", "by": "alice", "pullRequest": {"number": 4711, "url": "…"}}},  // kind: created | added | transferred (+fromTeam) | archived | deprecated | changed | dispatched | nightly
-    "pendingRun": {"dispatchedAt": "…", "by": "alice", "kind": "created", "pullRequest": {"number": 4711, "url": "…"}},  // a run expected: kind dispatched (an Align now) or created (the pull request's run)
+    "pendingRun": {"dispatchedAt": "…", "by": "alice", "kind": "created", "pullRequest": {"number": 4711, "url": "…"},   // a run expected: kind dispatched (an Align now) or the pull request's kind
+                   "mergedAt": "…", "conflictsSince": "…"},   // the merge, once read; the pull request found conflicting with its base (mergeable: false), until it is re-rendered
     "missingRun": {"dispatchedAt": "…", "by": "alice", "kind": "dispatched", "noticedAt": "…", "runsUrl": "…"}   // one that did not report in 15 min
   },
   "findings": [

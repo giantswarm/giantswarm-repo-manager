@@ -156,6 +156,7 @@ func newStackWith(t *testing.T, debugChannel string) *stack {
 		Review:   reviews,
 		Scaffold: fakeScaffold{}})
 	st.col.OnReconciled(ts.Reconciled)
+	st.col.OnConflict(ts.Conflicted)
 	mcpSrv := ts.MCPServer()
 
 	s, err := server.New(server.Config{Addr: "127.0.0.1:0", MCPPath: "/mcp",

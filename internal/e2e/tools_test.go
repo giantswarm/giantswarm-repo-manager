@@ -2,6 +2,7 @@ package e2e
 
 import (
 	"context"
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -303,9 +304,13 @@ func TestTransferNamesBothTeams(t *testing.T) {
 }
 
 // TestSetLifecycleArchivedOpensThePullRequestAndPostsTheAsk, then
-// approve_change refuses the outsider and lands the member's review.
+// approve_change refuses the outsider and the asker, and lands another
+// member's review.
 func TestSetLifecycleArchivedAndApproveChange(t *testing.T) {
 	st := newStack(t)
+	// dave is the other member of team-bumblebee here: the one who did not
+	// open the pull request and may approve it.
+	st.ghs.teams[dave] = []string{team}
 	c := st.as(t, aliceToken)
 	var out tools.Committed
 	st.callJSON(t, c, tools.ToolSetLifecycle, map[string]any{argMode: modeCommit, kRepository: repoPresent, argLifecycle: lifecycleArchived, argReason: "superseded"}, &out)
@@ -315,7 +320,8 @@ func TestSetLifecycleArchivedAndApproveChange(t *testing.T) {
 		t.Errorf("archive pull request %q\n%s", pr.Title, file)
 	}
 	asks, _ := st.gw.posted()
-	if len(asks) != 1 || asks[0][kChannel] != bumblebeeChannel || !strings.Contains(asks[0]["text"].(string), alice+" asks to archive") || !strings.Contains(asks[0]["text"].(string), "superseded") {
+	if len(asks) != 1 || asks[0][kChannel] != bumblebeeChannel || !strings.Contains(asks[0]["text"].(string), alice+" asks to archive") || !strings.Contains(asks[0]["text"].(string), "Reason: superseded. A member of") ||
+		!strings.Contains(asks[0]["text"].(string), "A member of "+team+" other than "+alice+" approves.") || strings.Contains(asks[0]["text"].(string), "https://") || !strings.HasSuffix(asks[0]["link"].(string), fmt.Sprintf("/pull/%d", pr.Number)) {
 		t.Fatalf("ask: %v", asks)
 	}
 	approve := asks[0]["approve"].(map[string]any)
@@ -331,10 +337,17 @@ func TestSetLifecycleArchivedAndApproveChange(t *testing.T) {
 	if !isErr || !strings.Contains(text, "not a member") || len(pr.Reviews) != 0 {
 		t.Errorf("carol: isError=%v %s reviews=%v", isErr, text, pr.Reviews)
 	}
+	// alice opened the pull request: her own click is refused with why, before
+	// GitHub would refuse it, whatever her membership.
+	text, isErr = call(t, c, tools.ToolApproveChange, map[string]any{argMode: modeCommit, argPullRequest: pr.Number})
+	if !isErr || !strings.Contains(text, alice+" opened "+org+"/github#") || !strings.Contains(text, "another member of "+team+" has to approve") || len(pr.Reviews) != 0 {
+		t.Errorf("alice's own approval: isError=%v %s reviews=%v", isErr, text, pr.Reviews)
+	}
+	// dave, a member who did not open it, lands the review.
 	var a tools.Approval
-	st.callJSON(t, c, tools.ToolApproveChange, map[string]any{argMode: modeCommit, argPullRequest: pr.Number}, &a)
-	if !a.Member || a.Team != team || a.ReviewURL == "" || len(pr.Reviews) != 1 || pr.Reviews[0].User != alice || pr.Reviews[0].Event != "APPROVE" {
-		t.Errorf("alice's approval: %+v reviews=%v", a, pr.Reviews)
+	st.callJSON(t, st.as(t, daveToken), tools.ToolApproveChange, map[string]any{argMode: modeCommit, argPullRequest: pr.Number}, &a)
+	if !a.Member || a.Team != team || a.Author != alice || a.ReviewURL == "" || len(pr.Reviews) != 1 || pr.Reviews[0].User != dave || pr.Reviews[0].Event != "APPROVE" {
+		t.Errorf("dave's approval: %+v reviews=%v", a, pr.Reviews)
 	}
 }
 

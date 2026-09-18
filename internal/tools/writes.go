@@ -236,7 +236,10 @@ func (t *tools) deliver(ctx context.Context, m *PlannedMessage, pr *teamfiles.Pu
 		d.Error = m.Reason
 		return d
 	}
-	text := m.Text + " — " + pr.URL
+	// The pull request travels as the message's link — the gateway renders it
+	// as the Open PR button of an ask and the Open PR line of a notice — and
+	// not in the text, which would show it twice.
+	text := m.Text
 	var posted *review.Posted
 	var err error
 	if ask {
@@ -444,16 +447,29 @@ func (t *tools) planTransfer(ctx context.Context, repo teamfiles.Repo, as string
 		fmt.Sprintf("## Problem\n\n`%s/%s` changes owner.\n\n## Solution\n\nThe entry moves from `%s` (giving team: **%s**) to `%s` (receiving team: **%s**), unchanged. "+
 			"The reconciler re-applies team permissions, CODEOWNERS and the catalog mapping for %s after this merges.\n\n%s\n\nOpened by giantswarm-repo-manager (`%s`) as the caller.",
 			t.org(), name, from.Path, from.Team, dst.Path, to, to, reasonLine(reason), ToolTransferRepository))
-	pl.Ask = t.message(ctx, repo, to, fmt.Sprintf("%s asks to transfer `%s/%s` from %s to %s: your team receives it.%s", as, t.org(), name, from.Team, to, reasonSuffix(reason)), true)
+	pl.Ask = t.message(ctx, repo, to, fmt.Sprintf("%s asks to transfer `%s/%s` from %s to %s: your team receives it.%s%s", as, t.org(), name, from.Team, to, reasonSuffix(reason), decides(to, as)), true)
 	pl.Notice = t.message(ctx, repo, from.Team, fmt.Sprintf("%s asks to transfer `%s/%s` from %s to %s: your team gives it; %s decides.%s", as, t.org(), name, from.Team, to, to, reasonSuffix(reason)), false)
 	return pl, nil
 }
 
+// reasonSuffix is the asker's reason as a sentence of the ask, so that what
+// follows it — who decides — starts a sentence of its own.
 func reasonSuffix(reason string) string {
-	if strings.TrimSpace(reason) == "" {
+	reason = strings.TrimSpace(reason)
+	if reason == "" {
 		return ""
 	}
-	return " " + strings.TrimSpace(reason)
+	if !strings.HasSuffix(reason, ".") && !strings.HasSuffix(reason, "!") && !strings.HasSuffix(reason, "?") {
+		reason += "."
+	}
+	return " Reason: " + reason
+}
+
+// decides closes an ask with who may approve it: a member of the deciding
+// team who is not the asker — GitHub does not accept an author's approval of
+// their own pull request, and approve_change refuses it in the same words.
+func decides(team, as string) string {
+	return fmt.Sprintf(" A member of %s other than %s approves.", team, as)
 }
 
 // --- set_lifecycle --------------------------------------------------------
@@ -522,7 +538,7 @@ func (t *tools) planLifecycle(ctx context.Context, repo teamfiles.Repo, as strin
 	pl.finish(repo, as, "reposetup/"+lc+"-"+name, fmt.Sprintf("chore(repositories): %s %s (%s)", verb(lc), name, tf.Team),
 		fmt.Sprintf("## Problem\n\n`%s/%s` is to be %s.\n\n## Solution\n\n`lifecycle: %s` in `%s` — %s.\n\n%s\n\nOpened by giantswarm-repo-manager (`%s`) as the caller.",
 			t.org(), name, lc, lc, tf.Path, effect, reasonLine(reason), ToolSetLifecycle))
-	pl.Ask = t.message(ctx, repo, tf.Team, fmt.Sprintf("%s asks to %s `%s/%s` (owned by %s).%s", as, verb(lc), t.org(), name, tf.Team, reasonSuffix(reason)), true)
+	pl.Ask = t.message(ctx, repo, tf.Team, fmt.Sprintf("%s asks to %s `%s/%s` (owned by %s).%s%s", as, verb(lc), t.org(), name, tf.Team, reasonSuffix(reason), decides(tf.Team, as)), true)
 	return pl, nil
 }
 
@@ -537,12 +553,14 @@ func verb(lifecycle string) string {
 
 // Approval is approve_change's result.
 type Approval struct {
-	PullRequest int      `json:"pullRequest"`
-	Team        string   `json:"team"`
-	Login       string   `json:"login"`
-	Teams       []string `json:"teams,omitempty"`
-	Member      bool     `json:"member"`
-	ReviewURL   string   `json:"reviewUrl,omitempty"`
+	PullRequest int    `json:"pullRequest"`
+	Team        string `json:"team"`
+	// Author opened the pull request; the approval is somebody else's to give.
+	Author    string   `json:"author,omitempty"`
+	Login     string   `json:"login"`
+	Teams     []string `json:"teams,omitempty"`
+	Member    bool     `json:"member"`
+	ReviewURL string   `json:"reviewUrl,omitempty"`
 }
 
 func (t *tools) approveChange() WriteTool {
@@ -550,7 +568,8 @@ func (t *tools) approveChange() WriteTool {
 		Name: ToolApproveChange,
 		Description: "Approve a team-file pull request as you, after this server has checked on GitHub that you are a member of the team " +
 			"the change belongs to (the owning team; for a transfer the receiving team). The Approve button of a Slack ask calls this tool as the " +
-			"clicking member; a member may also call it directly, and approving on GitHub is equivalent. A non-member is refused.",
+			"clicking member; a member may also call it directly, and approving on GitHub is equivalent. A non-member is refused, and so is the " +
+			"person who opened the pull request: GitHub does not accept an author's approval of their own pull request, another member has to approve.",
 		Options: []mcp.ToolOption{
 			mcp.WithNumber(argPullRequest, mcp.Required(), mcp.Description("The pull request number in the team-files repository (giantswarm/github).")),
 		},
@@ -567,6 +586,11 @@ func (t *tools) approveChange() WriteTool {
 // caller is not in the team the tool is reserved for.
 var ErrNotAMember = errors.New("not a member of the deciding team")
 
+// ErrOwnPullRequest is approve_change's refusal of the person who opened the
+// pull request: GitHub does not accept an author's approval of their own pull
+// request, so the click would fail there; refusing it here says why.
+var ErrOwnPullRequest = errors.New("the author cannot approve their own pull request")
+
 func (t *tools) approve(ctx context.Context, args map[string]any, submit bool) (*Approval, error) {
 	n := int(number(args, argPullRequest, 0))
 	if n <= 0 {
@@ -576,49 +600,77 @@ func (t *tools) approve(ctx context.Context, args map[string]any, submit bool) (
 	if err != nil {
 		return nil, err
 	}
-	team, err := t.decidingTeam(ctx, p.repo, n)
+	d, err := t.decision(ctx, p.repo, n)
 	if err != nil {
 		return nil, err
 	}
-	a := &Approval{PullRequest: n, Team: team, Login: p.login, Teams: p.teams, Member: p.member(team)}
-	if !a.Member {
-		return nil, p.notAMember(team, fmt.Sprintf("the review of %s#%d is not yours to give", p.repo.Owner+"/"+p.repo.Name, n))
+	a, err := d.approvalBy(p)
+	if err != nil {
+		return nil, err
 	}
 	if !submit {
 		return a, nil
 	}
-	url, err := p.repo.Approve(ctx, n, fmt.Sprintf("Approved as a member of %s through giantswarm-repo-manager.", team))
+	url, err := p.repo.Approve(ctx, n, fmt.Sprintf("Approved as a member of %s through giantswarm-repo-manager.", d.team))
 	if err != nil {
 		return nil, err
 	}
 	a.ReviewURL = url
-	t.d.Log.Info("pull request approved", "pr", n, "team", team, "as", p.login)
+	t.d.Log.Info("pull request approved", "pr", n, "team", d.team, "as", p.login)
 	return a, nil
 }
 
-// decidingTeam is the team whose member may approve: the marker this server
-// wrote into the body, else the one team file the pull request touches.
-func (t *tools) decidingTeam(ctx context.Context, repo teamfiles.Repo, n int) (string, error) {
+// decision is what a pull request's approval turns on: the team whose member
+// may give it and the person who opened it, who may not.
+type decision struct {
+	repo   teamfiles.Repo
+	number int
+	team   string
+	author string
+}
+
+// approvalBy is the approval p may give, or the refusal in the person's own
+// words: the author of the pull request first (their membership does not
+// matter), then a non-member of the deciding team.
+func (d decision) approvalBy(p *person) (*Approval, error) {
+	a := &Approval{PullRequest: d.number, Team: d.team, Author: d.author, Login: p.login, Teams: p.teams, Member: p.member(d.team)}
+	pr := fmt.Sprintf("%s/%s#%d", d.repo.Owner, d.repo.Name, d.number)
+	if strings.EqualFold(d.author, p.login) {
+		return nil, fmt.Errorf("%w: %s opened %s, and GitHub does not accept an author's approval of their own pull request; another member of %s has to approve", ErrOwnPullRequest, p.login, pr, d.team)
+	}
+	if !a.Member {
+		return nil, p.notAMember(d.team, fmt.Sprintf("the review of %s is not yours to give", pr))
+	}
+	return a, nil
+}
+
+// decision reads the pull request once for its author and the deciding team:
+// the marker this server wrote into the body, else the one team file the
+// pull request touches.
+func (t *tools) decision(ctx context.Context, repo teamfiles.Repo, n int) (decision, error) {
 	pr, _, err := repo.Client.PullRequests.Get(ctx, repo.Owner, repo.Name, n)
 	if err != nil {
-		return "", fmt.Errorf("%s#%d: %w", repo.Owner+"/"+repo.Name, n, err)
+		return decision{}, fmt.Errorf("%s/%s#%d: %w", repo.Owner, repo.Name, n, err)
 	}
+	d := decision{repo: repo, number: n, author: pr.GetUser().GetLogin()}
 	if _, after, ok := strings.Cut(pr.GetBody(), "<!-- giantswarm-repo-manager: team="); ok {
 		if team, _, ok := strings.Cut(after, " -->"); ok && team != "" {
-			return team, nil
+			d.team = team
+			return d, nil
 		}
 	}
 	teams, err := repo.ChangedTeamFiles(ctx, n)
 	if err != nil {
-		return "", err
+		return decision{}, err
 	}
 	switch len(teams) {
 	case 0:
-		return "", fmt.Errorf("%s#%d changes no team file: nothing for this tool to decide", repo.Owner+"/"+repo.Name, n)
+		return decision{}, fmt.Errorf("%s/%s#%d changes no team file: nothing for this tool to decide", repo.Owner, repo.Name, n)
 	case 1:
-		return teams[0], nil
+		d.team = teams[0]
+		return d, nil
 	default:
-		return "", fmt.Errorf("%s#%d changes the files of %s and was not opened by this server: approve it on GitHub", repo.Owner+"/"+repo.Name, n, strings.Join(teams, " and "))
+		return decision{}, fmt.Errorf("%s/%s#%d changes the files of %s and was not opened by this server: approve it on GitHub", repo.Owner, repo.Name, n, strings.Join(teams, " and "))
 	}
 }
 

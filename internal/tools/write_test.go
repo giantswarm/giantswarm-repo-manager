@@ -263,25 +263,52 @@ func TestParseEntriesOptsEveryEntryIn(t *testing.T) {
 
 // TestAlignWarningNamesTheRepositoryAndItsOptIn: the paragraph names the
 // repository, not the team, and says what this run does — the entry's
-// opt-in decides; an undeclared repository is a check from the team alone.
+// opt-in decides: applied, opted in first (the pull request the team
+// reviews), or a check from the team alone for an undeclared repository.
 func TestAlignWarningNamesTheRepositoryAndItsOptIn(t *testing.T) {
 	const repo = "giantswarm/example-service"
+	head := "Align now changes " + repo + " on GitHub and CircleCI to its declared set-up and the company baseline: " + alignChanges + ". It runs as you. "
 	cases := []struct {
 		name              string
 		team              string
 		optedIn, declared bool
 		want              string
 	}{
-		{"opted in", testTeam, true, true, repo + " is opted in to alignment (`align: true` in its entry): the planned changes are applied."},
-		{"declared without the field", testTeam, false, true, repo + " has not opted in to alignment: this run checks and reports the drift; nothing changes. Opt in with update_repository: `align: true` in its entry (the team reviews)."},
-		{"undeclared with a team", testTeam, false, false, repo + " has no entry: this run checks from the team alone and changes nothing; declare the repository with `align: true` in its entry to have it aligned."},
-		{"undeclared without a team", "", false, false, repo + " has no entry and no team is known for it: pass team."},
+		{"opted in", testTeam, true, true, head + repo + " is opted in to alignment (`align: true` in its entry): the planned changes are applied."},
+		{"declared without the field", testTeam, false, true, repo + " has not opted in to alignment. Align now opts it in — `align: true` in its entry, in a pull request " + testTeam + " reviews (the ask goes to " + testTeam + "'s channel; a member other than you approves) — and the reconciler applies the planned changes when it merges: " + alignChanges + ". It runs as you."},
+		{"undeclared with a team", testTeam, false, false, head + repo + " has no entry: this run checks from the team alone and changes nothing; declare the repository with `align: true` in its entry to have it aligned."},
+		{"undeclared without a team", "", false, false, head + repo + " has no entry and no team is known for it: pass team. The run then checks from the team alone and changes nothing; declare the repository with `align: true` in its entry to have it aligned."},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			got := alignWarning(repo, tc.team, tc.optedIn, tc.declared)
-			if !strings.HasPrefix(got, "Align now changes "+repo+" on GitHub and CircleCI") || !strings.Contains(got, alignChanges) || !strings.Contains(got, "It runs as you. "+tc.want) {
-				t.Errorf("got %q, want it to end in %q", got, tc.want)
+			if got := alignWarning(repo, tc.team, tc.optedIn, tc.declared); got != tc.want {
+				t.Errorf("got  %q\nwant %q", got, tc.want)
+			}
+		})
+	}
+}
+
+// TestPlannedSentenceCountsTheChanges: the opt-in's ask and pull request
+// body say what the reconciler applies once the pull request merges — the
+// last check's changes counted with their steps, or why none are known.
+func TestPlannedSentenceCountsTheChanges(t *testing.T) {
+	const checked = "2026-09-18T12:00:00Z"
+	cases := []struct {
+		name      string
+		planned   []PlannedStep
+		checkedAt string
+		want      string
+	}{
+		{"no check", nil, "", "the reconciler applies what its run finds once merged (no check has run yet)"},
+		{"converged", nil, checked, "the reconciler applies what its run finds once merged (the last check found the repository converged)"},
+		{"one change", []PlannedStep{{Step: "merge", Changes: []string{"squash only"}}}, checked, "the reconciler applies 1 planned change once merged — merge"},
+		{"several steps", []PlannedStep{{Step: "merge", Changes: []string{"squash only", "auto-merge"}}, {Step: "protection", Changes: []string{"enforce_admins on"}}}, checked, "the reconciler applies 3 planned changes once merged — merge, protection"},
+		{"drift without a listed change", []PlannedStep{{Step: "circleci"}}, checked, "the reconciler applies the planned changes once merged — circleci"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := plannedSentence(tc.planned, tc.checkedAt); got != tc.want {
+				t.Errorf("got  %q\nwant %q", got, tc.want)
 			}
 		})
 	}

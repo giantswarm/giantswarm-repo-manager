@@ -11,12 +11,18 @@ import (
 	"github.com/giantswarm/giantswarm-repo-manager/internal/inventory"
 )
 
+// Test constants of this package's CircleCI derivations.
+const (
+	stateSuccess         = "success"
+	sourceStatusesEngine = inventory.CircleCISourceStatuses + "+" + inventory.CircleCISourceEngine
+)
+
 // TestEngineCircleCI: the engine's own circleci step — real when the runner
 // has a CircleCI client — is the third source of the record's CircleCI
 // state: what it says stands, the facts it yields leave Unknown, and a
 // skipped step (no client) adds nothing.
 func TestEngineCircleCI(t *testing.T) {
-	head := &inventory.HeadStatus{State: "success", Contexts: []string{"ci/circleci: go-build"}}
+	head := &inventory.HeadStatus{State: stateSuccess, Contexts: []string{"ci/circleci: go-build"}}
 	yes, no := true, false
 	fromStatuses := func() *inventory.CircleCI {
 		return &inventory.CircleCI{Followed: true, Head: head, Source: inventory.CircleCISourceStatuses, Unknown: []string{inventory.CircleCIFactSetupWorkflows}}
@@ -34,13 +40,13 @@ func TestEngineCircleCI(t *testing.T) {
 		want inventory.CircleCI
 	}{
 		{"converged: followed, setup workflows on, nothing unknown", fromStatuses(), res(reconcile.VerdictOK, "followed, setup workflows on, checkout key present"),
-			inventory.CircleCI{Followed: true, SetupWorkflows: &yes, Head: head, Source: "statuses+engine"}},
+			inventory.CircleCI{Followed: true, SetupWorkflows: &yes, Head: head, Source: sourceStatusesEngine}},
 		{"drift: setup workflows off", fromStatuses(), res(reconcile.VerdictDrift, "", "enable setup workflows"),
-			inventory.CircleCI{Followed: true, SetupWorkflows: &no, Head: head, Source: "statuses+engine"}},
+			inventory.CircleCI{Followed: true, SetupWorkflows: &no, Head: head, Source: sourceStatusesEngine}},
 		{"drift: not followed — the head's statuses decide followed, settings unread", bare(), res(reconcile.VerdictDrift, "", "follow giantswarm/x", "enable setup workflows", "create a deploy key"),
-			inventory.CircleCI{Source: "statuses+engine", Unknown: []string{inventory.CircleCIFactSetupWorkflows}}},
+			inventory.CircleCI{Source: sourceStatusesEngine, Unknown: []string{inventory.CircleCIFactSetupWorkflows}}},
 		{"failed: the engine's error", fromStatuses(), res(reconcile.VerdictFailed, "api error: 502"),
-			inventory.CircleCI{Followed: true, Head: head, Source: "statuses+engine", Error: "the engine's circleci step failed: api error: 502", Unknown: []string{inventory.CircleCIFactSetupWorkflows}}},
+			inventory.CircleCI{Followed: true, Head: head, Source: sourceStatusesEngine, Error: "the engine's circleci step failed: api error: 502", Unknown: []string{inventory.CircleCIFactSetupWorkflows}}},
 		{"skipped (no client): nothing added", fromStatuses(), res(reconcile.VerdictSkipped, "no CircleCI client"),
 			*fromStatuses()},
 		{"no circleci step: nothing added", fromStatuses(), &reconcile.Result{Steps: []reconcile.StepResult{{Step: reconcile.StepSettings, Verdict: reconcile.VerdictOK}}},

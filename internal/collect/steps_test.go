@@ -18,7 +18,6 @@ import (
 func TestFillClientlessSteps(t *testing.T) {
 	const (
 		slug       = "giantswarm/x"
-		success    = "success"
 		buildsMain = "CircleCI builds main"
 		createKey  = "create a deploy key"
 		enableSW   = "enable setup workflows"
@@ -26,7 +25,7 @@ func TestFillClientlessSteps(t *testing.T) {
 	)
 	ran := time.Date(2026, 9, 17, 22, 17, 0, 0, time.UTC)
 	built := time.Date(2026, 9, 18, 8, 0, 0, 0, time.UTC)
-	head := &inventory.HeadStatus{State: success, Contexts: []string{"ci/circleci: go-build", "ci/circleci: push"}, At: built}
+	head := &inventory.HeadStatus{State: stateSuccess, Contexts: []string{"ci/circleci: go-build", "ci/circleci: push"}, At: built}
 	yes := true
 	engine := func(steps ...reconcile.StepResult) *reconcile.Result {
 		res := &reconcile.Result{Repository: slug, Declared: slug, Mode: reconcile.ModeCheck, Converged: true}

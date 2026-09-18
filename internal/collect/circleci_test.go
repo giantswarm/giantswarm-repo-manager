@@ -68,7 +68,7 @@ func TestCircleCIDerivation(t *testing.T) {
 			inventory.CircleCI{Source: inventory.CircleCISourceBoth, Unknown: []string{inventory.CircleCIFactSetupWorkflows}, Error: "the reconciler's circleci step failed: the step's summary"}},
 		{"skipped step (no client in that run) counts as no run", head(false, circleA), run(reconcile.ModeCheck, reconcile.VerdictSkipped),
 			inventory.CircleCI{Followed: true, Source: inventory.CircleCISourceStatuses, Unknown: []string{inventory.CircleCIFactSetupWorkflows},
-				Head: &inventory.HeadStatus{State: "success", Contexts: []string{circleA}, At: now}}},
+				Head: &inventory.HeadStatus{State: stateSuccess, Contexts: []string{circleA}, At: now}}},
 		{"statuses beat a check run that planned the follow", head(false, circleA), run(reconcile.ModeCheck, reconcile.VerdictDrift, "follow giantswarm/x"),
 			inventory.CircleCI{Followed: true, Source: inventory.CircleCISourceBoth, Unknown: []string{inventory.CircleCIFactSetupWorkflows},
 				Head: &inventory.HeadStatus{State: "success", Contexts: []string{circleA}, At: now}}},

@@ -236,7 +236,8 @@ type Setup struct {
 	// no run id), or the run that follows the merge of a team-file pull
 	// request (a creation, a lifecycle change, a transfer, a configuration
 	// change). The run's artifact clears it; so does the pending window
-	// running out, which leaves MissingRun.
+	// running out — from the dispatch, or from the pull request's merge —
+	// which leaves MissingRun.
 	PendingRun *PendingRun `json:"pendingRun,omitempty"`
 	// MissingRun is an expected run that did not report within the pending
 	// window: the finding reconcile-run-missing, until the next artifact,
@@ -320,8 +321,8 @@ func (ch *Change) PersonMade() bool {
 
 // PendingRun is an expected reconciler run that has not reported yet.
 type PendingRun struct {
-	// DispatchedAt is when the run was expected from: the dispatch of an
-	// Align now, or the opening of the pull request.
+	// DispatchedAt is when the run was marked: the dispatch of an Align
+	// now, or the opening of the pull request.
 	DispatchedAt time.Time `json:"dispatchedAt"`
 	// By is the login of the person who dispatched it, or who opened the
 	// pull request.
@@ -333,11 +334,28 @@ type PendingRun struct {
 	// PullRequest is the team-file pull request whose merge the run
 	// follows; nil for an Align now.
 	PullRequest *ChangePullRequest `json:"pullRequest,omitempty"`
+	// MergedAt is when the pull request merged, once the poller has read it
+	// from the pull request: the pending window counts from it. nil while
+	// the pull request is open — no run is due yet — and for an Align now.
+	MergedAt *time.Time `json:"mergedAt,omitempty"`
 }
 
 // Follows says whether the pending run is the one of pull request number.
 func (p *PendingRun) Follows(number int) bool {
 	return p != nil && p.PullRequest != nil && p.PullRequest.Number == number
+}
+
+// AwaitedFrom is when the run is awaited from — the pending window's start:
+// the dispatch of an Align now, the merge of a pull request. Zero while the
+// pull request is open: the window has not started.
+func (p *PendingRun) AwaitedFrom() time.Time {
+	switch {
+	case p.PullRequest == nil:
+		return p.DispatchedAt
+	case p.MergedAt != nil:
+		return *p.MergedAt
+	}
+	return time.Time{}
 }
 
 // MissingRun is an expected reconciler run that never reported.
@@ -433,7 +451,7 @@ func (r *Record) findings() []Finding {
 // missing run, nil without one, in the words of the run that was expected:
 // an Align now that started no run or whose run failed before its report
 // step, or the run of a team-file pull request (named by its kind) that
-// follows a merge which may not have happened yet.
+// did not follow the merge.
 func (r *Record) MissingRunFinding() *Finding {
 	m := r.Setup.MissingRun
 	if m == nil {
@@ -442,8 +460,12 @@ func (r *Record) MissingRunFinding() *Finding {
 	f := &Finding{Kind: FindingReconcileRunMissing, Source: FindingSourceInventory}
 	dispatched, noticed := m.DispatchedAt.Format(time.RFC3339), m.NoticedAt.Format(time.RFC3339)
 	if m.PullRequest != nil {
-		f.Message = fmt.Sprintf("the reconciler run for %s, whose %s pull request %s %s opened at %s, had not reported by %s", r.Repository, pullRequestNoun(m.Kind), m.PullRequest.URL, m.By, dispatched, noticed)
-		f.Fix = fmt.Sprintf("the run follows the pull request's merge: merge it, or look for the run on %s — it may have failed before its report step; the next artifact clears this", m.RunsURL)
+		merged := ""
+		if m.MergedAt != nil {
+			merged = " was merged at " + m.MergedAt.Format(time.RFC3339)
+		}
+		f.Message = fmt.Sprintf("the reconciler run for %s, whose %s pull request %s %s opened at %s%s, had not reported by %s", r.Repository, pullRequestNoun(m.Kind), m.PullRequest.URL, m.By, dispatched, merged, noticed)
+		f.Fix = fmt.Sprintf("the run follows the pull request's merge: look for it on %s — it may have failed before its report step; the next artifact clears this", m.RunsURL)
 		return f
 	}
 	f.Message = fmt.Sprintf("the reconciler run %s dispatched at %s for %s had not reported by %s", m.By, dispatched, r.Repository, noticed)
@@ -476,10 +498,24 @@ func (r *Record) Dispatched(now time.Time, by string) {
 
 // Opened marks a team-file pull request pr of kind (created, archived,
 // deprecated, transferred, changed) opened by login at now: setup.pendingRun
-// expects the reconciler run that follows the merge, the way an Align now
-// expects its run, until the run's artifact or the pending window's end.
+// expects the reconciler run that follows the merge — without a deadline
+// while the pull request is open, within the pending window once it has
+// merged (Merged) — until the run's artifact or the window's end.
 func (r *Record) Opened(now time.Time, by, kind string, pr ChangePullRequest) {
 	r.expectRun(PendingRun{DispatchedAt: now, By: by, Kind: kind, PullRequest: &pr})
+}
+
+// Merged notes that the pending run's pull request merged at: the pending
+// window counts from there.
+func (r *Record) Merged(at time.Time) {
+	r.Setup.PendingRun.MergedAt = &at
+}
+
+// Closed forgets the pending run of a pull request closed without a merge:
+// no run follows, nothing is missing.
+func (r *Record) Closed() {
+	r.Setup.PendingRun = nil
+	r.Findings = r.findings()
 }
 
 func (r *Record) expectRun(p PendingRun) {

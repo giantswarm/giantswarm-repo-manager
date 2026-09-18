@@ -36,8 +36,9 @@ type ReconcilerOptions struct {
 	PollInterval time.Duration
 	// PendingInterval is the poll interval while an Align now is pending.
 	PendingInterval time.Duration
-	// PendingWindow is how long a dispatched run may take to report before it
-	// is given up as missing.
+	// PendingWindow is how long an expected run may take to report — from
+	// the dispatch of an Align now, from the merge of a pull request — before
+	// it is given up as missing.
 	PendingWindow time.Duration
 	// Lookback bounds the first poll and a cursor that fell behind: runs
 	// created earlier are not read.
@@ -98,8 +99,9 @@ type ReconcilerPoll struct {
 	// Runs is the completed runs consumed, Artifacts the artifacts stored as
 	// a repository's setup.lastRun, Skipped the ones a record already named.
 	Runs, Artifacts, Skipped int
-	// Pending is the Align nows still waiting for their run, Missing the
-	// ones given up this time.
+	// Pending is the expected runs whose window is running — an Align now,
+	// a merged pull request — and Missing the ones given up this time. A
+	// pull request still open is neither: no run is due yet.
 	Pending, Missing int
 	// Watermark is where the cursor stands after the poll.
 	Watermark time.Time
@@ -483,8 +485,12 @@ func decodeArtifact(zipped []byte, max int64) (*artifactReport, error) {
 	return nil, fmt.Errorf("%w: no JSON file in the zip", errArtifactMalformed)
 }
 
-// expirePending gives up the Align nows older than the pending window
-// with the finding reconcile-run-missing and counts the ones still waiting.
+// expirePending gives up the expected runs whose pending window ran out with
+// the finding reconcile-run-missing and counts the ones still waiting. An
+// Align now's window counts from the dispatch; a pull request's from its
+// merge, read from the pull request until the mark carries it — an open pull
+// request waits without a deadline, one closed without a merge is followed
+// by no run.
 func (c *Collector) expirePending(ctx context.Context, now time.Time, poll *ReconcilerPoll) {
 	recs, err := c.store.List(ctx)
 	if err != nil {
@@ -497,7 +503,13 @@ func (c *Collector) expirePending(ctx context.Context, now time.Time, poll *Reco
 		if p == nil {
 			continue
 		}
-		if now.Sub(p.DispatchedAt) < c.opts.Reconciler.PendingWindow {
+		from := p.AwaitedFrom()
+		if from.IsZero() {
+			if from = c.readMerge(ctx, rec); from.IsZero() {
+				continue
+			}
+		}
+		if now.Sub(from) < c.opts.Reconciler.PendingWindow {
 			poll.Pending++
 			continue
 		}
@@ -507,8 +519,41 @@ func (c *Collector) expirePending(ctx context.Context, now time.Time, poll *Reco
 			continue
 		}
 		poll.Missing++
-		c.log.Warn("reconciler run missing", "repository", rec.Repository, "dispatchedAt", p.DispatchedAt, "by", p.By, slog.Duration("window", c.opts.Reconciler.PendingWindow))
+		c.log.Warn("reconciler run missing", "repository", rec.Repository, "awaitedFrom", from, "by", p.By, slog.Duration("window", c.opts.Reconciler.PendingWindow))
 	}
+}
+
+// readMerge reads the pull request of rec's pending run as the inventory App
+// and stores what it learns: a merge starts the window (the mark carries the
+// merge time from then on), a close without a merge drops the mark. It
+// returns the window's start — zero while the pull request is open, closed
+// or not readable now.
+func (c *Collector) readMerge(ctx context.Context, rec *inventory.Record) time.Time {
+	owner, repo := c.opts.Reconciler.repo()
+	p := rec.Setup.PendingRun
+	log := c.log.With("repository", rec.Repository, "pullRequest", p.PullRequest.URL)
+	pr, _, err := c.reader.REST().PullRequests.Get(ctx, owner, repo, p.PullRequest.Number)
+	if err != nil {
+		log.Error("reconciler poll: pull request not read", "error", err)
+		return time.Time{}
+	}
+	var from time.Time
+	switch {
+	case pr.GetMerged():
+		from = pr.GetMergedAt().Time
+		rec.Merged(from)
+		log.Info("reconciler run awaited from the merge", "mergedAt", from)
+	case pr.GetState() == "closed":
+		rec.Closed()
+		log.Info("reconciler run no longer expected: pull request closed without a merge")
+	default:
+		return time.Time{}
+	}
+	if err := c.store.Put(ctx, rec); err != nil {
+		log.Error("reconciler poll: pull request's state not stored", "error", err)
+		return time.Time{}
+	}
+	return from
 }
 
 // firstTime is the first non-zero time.

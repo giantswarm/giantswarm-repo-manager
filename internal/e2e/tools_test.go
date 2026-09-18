@@ -361,15 +361,16 @@ func TestSetLifecycleArchivedAndApproveChange(t *testing.T) {
 		t.Errorf("archive pull request %q\n%s", pr.Title, file)
 	}
 	// The record expects the run that follows the merge, the way a creation's
-	// does: the poller runs at its pending interval until the artifact.
+	// does: without a deadline while the pull request is open, so the poller
+	// does not hurry yet.
 	if p := out.PendingRun; p == nil || p.Kind != inventory.ChangeArchived || !p.Follows(pr.Number) || p.By != alice {
 		t.Fatalf("the archive's pending run: %+v", p)
 	}
 	if rec := st.record(t, repoPresent); !rec.Setup.PendingRun.Follows(pr.Number) || rec.Setup.PendingRun.Kind != inventory.ChangeArchived {
 		t.Fatalf("record after the archive pull request: %+v", rec.Setup)
 	}
-	if p := st.poll(t); p.Pending != 1 {
-		t.Errorf("poll while the archive's run is expected: %+v", p)
+	if p := st.poll(t); p.Pending != 0 || p.Missing != 0 {
+		t.Errorf("poll while the archive pull request is open: %+v", p)
 	}
 	asks, _ := st.gw.posted()
 	if len(asks) != 1 || asks[0][kChannel] != bumblebeeChannel || !strings.Contains(asks[0]["text"].(string), alice+" asks to archive") || !strings.Contains(asks[0]["text"].(string), "Reason: superseded. A member of") ||

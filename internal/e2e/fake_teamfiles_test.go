@@ -40,6 +40,7 @@ const (
 	kPath          = "path"
 	kType          = "type"
 	kMessage       = "message"
+	kData          = "data"
 	kGitHub        = "github"
 	kSHA           = "sha"
 	kObject        = "object"
@@ -369,7 +370,7 @@ func (f *fakeTeamFiles) handleAutoMerge(w http.ResponseWriter, body []byte) {
 	defer f.mu.Unlock()
 	pr := f.pulls[n]
 	refuse := func(msg string) {
-		writeJSON(w, http.StatusOK, map[string]any{"data": nil, "errors": []map[string]any{{kMessage: msg, kType: "UNPROCESSABLE"}}})
+		writeJSON(w, http.StatusOK, map[string]any{kData: nil, "errors": []map[string]any{{kMessage: msg, kType: "UNPROCESSABLE"}}})
 	}
 	switch {
 	case pr == nil:
@@ -380,7 +381,7 @@ func (f *fakeTeamFiles) handleAutoMerge(w http.ResponseWriter, body []byte) {
 		refuse("Pull request is in clean status")
 	default:
 		pr.AutoMerge = true
-		writeJSON(w, http.StatusOK, map[string]any{"data": map[string]any{"enablePullRequestAutoMerge": map[string]any{"pullRequest": map[string]any{"number": n}}}})
+		writeJSON(w, http.StatusOK, map[string]any{kData: map[string]any{"enablePullRequestAutoMerge": map[string]any{"pullRequest": map[string]any{"number": n}}}})
 	}
 }
 

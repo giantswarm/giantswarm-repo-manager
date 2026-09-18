@@ -152,7 +152,7 @@ func (o *fakeOrg) handle(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 	}
-	resp := map[string]any{"data": data}
+	resp := map[string]any{kData: data}
 	if errs != nil {
 		resp["errors"] = errs
 	}

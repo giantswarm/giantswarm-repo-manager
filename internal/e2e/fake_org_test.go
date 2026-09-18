@@ -93,6 +93,9 @@ type fakeOrg struct {
 	remaining int
 	queries   atomic.Int32
 	now       time.Time
+	// repos are the repositories created through the REST surface: the
+	// node of one of them is a plain repository as GraphQL would answer.
+	repos *fakeRepos
 }
 
 var (
@@ -204,6 +207,13 @@ func (o *fakeOrg) node(name string) map[string]any {
 		return base(false)
 	case repoArchived:
 		return base(true)
+	}
+	if o.repos != nil {
+		if r := o.repos.get(name); r != nil {
+			n := base(false)
+			n[kCreatedAt], n["isEmpty"] = r.createdAt.UTC().Format(time.RFC3339), r.empty
+			return n
+		}
 	}
 	return nil
 }

@@ -16,6 +16,7 @@ Generated from the registered tools (`make tools-doc`); through muster every too
 | `transfer_repository` | write (dryRun, mode: commit) |
 | `update_repository` | write (dryRun, mode: commit) |
 | `validate_repository` | read-only |
+| `watch_repository` | read-only |
 
 ## `align_repository`
 
@@ -423,6 +424,36 @@ Read-only. The dry run of creating one or more new repositories for a team, exac
   },
   "required": [
     "team"
+  ],
+  "type": "object"
+}
+```
+
+## `watch_repository`
+
+Read-only. Follow a new repository to readiness after create_repository, and return when it is ready, when a phase fails, or when timeout runs out — with the phases reached either way, each with its timestamp and the seconds since the phase before: created (the repository exists), scaffolded (its default branch carries the scaffold commit), declared (the declaration pull request is open), merged, setUp (the reconciler run of that pull request has reported: a failed step or a refused entry fails the phase, the run's other findings are carried as findings), released (the first release exists and the CircleCI statuses on its commit are green; a failing status fails the phase; while CircleCI has not reported on the release's commit — a repository the reconciler has only just followed — the reconciler run's release step decides: a failed step or a red-release finding fails the phase, anything else keeps waiting for the statuses). ready is true when every phase is done; pending names the phase still waited for when the timeout ran out — call again to keep following. GitHub is read as you every few seconds. Takes the repository and the pull request number create_repository's answer carries.
+
+```json
+{
+  "properties": {
+    "pullRequest": {
+      "description": "The declaration pull request's number in the team files repository (create_repository's pullRequest.number).",
+      "type": "number"
+    },
+    "repository": {
+      "description": "Repository name, with or without the org.",
+      "type": "string"
+    },
+    "timeout": {
+      "default": 120,
+      "description": "Seconds to wait before answering with what is pending (default 120, at most 150 — under the MCPServer's 180 s).",
+      "maximum": 150,
+      "type": "number"
+    }
+  },
+  "required": [
+    "repository",
+    "pullRequest"
   ],
   "type": "object"
 }

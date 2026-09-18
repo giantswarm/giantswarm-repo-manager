@@ -16,6 +16,7 @@ import (
 	mcpserver "github.com/mark3labs/mcp-go/server"
 
 	"github.com/giantswarm/giantswarm-repo-manager/internal/identity"
+	"github.com/giantswarm/giantswarm-repo-manager/internal/inventory"
 	"github.com/giantswarm/giantswarm-repo-manager/internal/teamfiles"
 )
 
@@ -89,7 +90,15 @@ type Created struct {
 	Repositories []CreatedRepository `json:"repositories"`
 	*Committed
 	FirstRelease string `json:"firstRelease"`
+	// Then says how to follow the repositories to readiness.
+	Then string `json:"then"`
 }
+
+// createdThen is what follows a creation: the repository is minutes from
+// usable, and watch_repository follows it there.
+const createdThen = "the repositories are not ready yet: the pull request merges, the reconciler sets them up and the first release builds — " +
+	"follow each with " + ToolWatchRepository + " (repository, pullRequest: pullRequest.number) and report the link when it answers ready; " +
+	"get_repository shows setup.pendingRun until the reconciler run of the pull request has reported"
 
 // CreatedRepository is one repository after the create and scaffold steps.
 type CreatedRepository struct {
@@ -102,6 +111,10 @@ type CreatedRepository struct {
 	// ScaffoldCommit is the scaffold at the head of the default branch.
 	ScaffoldCommit string                 `json:"scaffoldCommit,omitempty"`
 	Steps          []reconcile.StepResult `json:"steps"`
+	// PendingRun is the record's expectation of the reconciler run that
+	// follows the pull request's merge, the way an Align now leaves one: the
+	// inventory reads the run's artifact within its pending interval.
+	PendingRun *inventory.PendingRun `json:"pendingRun,omitempty"`
 }
 
 // creationArguments are the arguments create_repository and its dry run
@@ -470,8 +483,39 @@ func (t *tools) commitCreate(ctx context.Context, args map[string]any) (any, err
 	if err != nil {
 		return nil, fmt.Errorf("the repositories stand, the pull request does not: %w — run again to open it", err)
 	}
-	out.Committed = committed
+	out.Committed, out.Then = committed, createdThen
+	for i := range out.Repositories {
+		out.Repositories[i].PendingRun = t.expectRun(ctx, p, out.Repositories[i].Name, committed.PullRequest)
+	}
 	return out, nil
+}
+
+// expectRun marks a created repository's record as expecting the reconciler
+// run that follows its pull request's merge, the way an Align now marks a
+// dispatch: the poller reads the run's artifact within its pending interval,
+// and a run that does not report within the window leaves the finding
+// reconcile-run-missing. A repository the inventory has not seen yet gets
+// its record built first. Nil, with a log line, when the mark could not be
+// stored — the creation stands either way.
+func (t *tools) expectRun(ctx context.Context, p *person, name string, pr *teamfiles.PullRequest) *inventory.PendingRun {
+	if t.d.Inventory == nil || t.d.Collector == nil {
+		return nil
+	}
+	key := t.org() + "/" + name
+	rec, err := t.d.Inventory.Get(ctx, key)
+	if errors.Is(err, inventory.ErrNotFound) {
+		rec, err = t.d.Collector.Refresh(ctx, key, nil, inventory.SourceRefresh)
+	}
+	if err != nil {
+		t.d.Log.Error("pending run not stored: record unreadable", "repository", key, "error", err)
+		return nil
+	}
+	rec.Created(time.Now().UTC(), p.login, inventory.ChangePullRequest{Number: pr.Number, URL: pr.URL})
+	if err := t.d.Inventory.Put(ctx, rec); err != nil {
+		t.d.Log.Error("pending run not stored", "repository", key, "error", err)
+		return nil
+	}
+	return rec.Setup.PendingRun
 }
 
 // repositoryGetter adapts the App installation client to the engine's

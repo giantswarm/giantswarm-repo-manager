@@ -286,7 +286,7 @@
                         },
                         "timeout": {
                             "type": "integer",
-                            "description": "Seconds muster waits for one call before it cancels it (the CR's `spec.timeout`; muster's own default is 30, the CRD allows 1–300). 180 because `create_repository` in `mode: commit` does its writes in one call — create the repository, fetch and render the template, push the scaffold, open the pull request — and `align_repository` and `set_lifecycle` with the ask come close to muster's default as well.",
+                            "description": "Seconds muster waits for one call before it cancels it (the CR's `spec.timeout`; muster's own default is 30, the CRD allows 1–300). 180 because `create_repository` in `mode: commit` does its writes in one call — create the repository, fetch and render the template, push the scaffold, open the pull request — `watch_repository` blocks up to its `timeout` of at most 150 s, and `align_repository` and `set_lifecycle` with the ask come close to muster's default as well.",
                             "maximum": 300,
                             "minimum": 1
                         }

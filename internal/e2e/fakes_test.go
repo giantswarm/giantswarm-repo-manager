@@ -55,6 +55,8 @@ type fakeGitHub struct {
 func newFakeGitHub(t *testing.T, logins map[string]string) *fakeGitHub {
 	t.Helper()
 	g := &fakeGitHub{logins: logins, teams: map[string][]string{}, org: &fakeOrg{remaining: 5000, now: time.Now()}, files: newFakeTeamFiles(), actions: &fakeActions{}, repos: newFakeRepos(), roles: map[string]string{}}
+	// The org's GraphQL knows the repositories the REST surface creates.
+	g.org.repos = g.repos
 	mux := http.NewServeMux()
 	mux.HandleFunc("POST /api/v3/graphql", func(w http.ResponseWriter, r *http.Request) {
 		// The team-files fake takes the auto-merge mutation; the org fake

@@ -88,8 +88,12 @@ type fakePullRequest struct {
 	// the way GitHub merges by itself. MergeTitle is the squash commit's.
 	AutoMerge  bool
 	Merged     bool
+	MergedAt   time.Time
 	MergeTitle string
 }
+
+// merge marks the pull request merged now.
+func (pr *fakePullRequest) merge() { pr.Merged, pr.MergedAt = true, time.Now() }
 
 type fakeReview struct{ User, Event, Body string }
 
@@ -295,7 +299,7 @@ func (f *fakeTeamFiles) register(mux *http.ServeMux, g *fakeGitHub) {
 		pr.Reviews = append(pr.Reviews, fakeReview{User: login, Event: req.Event, Body: req.Body})
 		if req.Event == "APPROVE" && pr.AutoMerge && !f.checksPending[pr.Number] {
 			// GitHub merges an auto-merge pull request itself once the review is in.
-			pr.Merged = true
+			pr.merge()
 		}
 		writeJSON(w, http.StatusOK, map[string]any{kID: len(pr.Reviews), kState: "APPROVED", kHTMLURL: fmt.Sprintf("https://github.com/%s/github/pull/%d#pullrequestreview-%d", org, pr.Number, len(pr.Reviews)), "user": map[string]any{kLogin: login}})
 	})
@@ -320,7 +324,8 @@ func (f *fakeTeamFiles) register(mux *http.ServeMux, g *fakeGitHub) {
 		case req.MergeMethod != "squash":
 			ghMessage(w, http.StatusMethodNotAllowed, "Merge method not allowed")
 		default:
-			pr.Merged, pr.MergeTitle = true, req.CommitTitle
+			pr.merge()
+			pr.MergeTitle = req.CommitTitle
 			writeJSON(w, http.StatusOK, map[string]any{"sha": "merged00", "merged": true, kMessage: "Pull Request successfully merged"})
 		}
 	})
@@ -344,8 +349,11 @@ func (f *fakeTeamFiles) pull(r *http.Request) *fakePullRequest {
 
 func (f *fakeTeamFiles) pullJSON(pr *fakePullRequest) map[string]any {
 	out := map[string]any{"number": pr.Number, "node_id": pullNodeID(pr.Number), "title": pr.Title, "body": pr.Body, kHTMLURL: fmt.Sprintf("https://github.com/%s/github/pull/%d", org, pr.Number),
-		"user": map[string]any{kLogin: pr.Author}, "head": map[string]any{kRef: pr.Head}, "created_at": time.Now().UTC().Format(time.RFC3339),
-		"merged": pr.Merged, "mergeable": !pr.Merged, "mergeable_state": "blocked"}
+		"user": map[string]any{kLogin: pr.Author}, "head": map[string]any{kRef: pr.Head}, kCreatedAtREST: time.Now().UTC().Format(time.RFC3339),
+		"merged": pr.Merged, "mergeable": !pr.Merged, "mergeable_state": "blocked", kState: "open"}
+	if pr.Merged {
+		out[kState], out["merged_at"] = "closed", pr.MergedAt.UTC().Format(time.RFC3339)
+	}
 	if len(pr.Reviews) > 0 && !f.checksPending[pr.Number] {
 		out["mergeable_state"] = "clean"
 	}
@@ -386,6 +394,13 @@ func (f *fakeTeamFiles) handleAutoMerge(w http.ResponseWriter, body []byte) {
 		pr.AutoMerge = true
 		writeJSON(w, http.StatusOK, map[string]any{kData: map[string]any{"enablePullRequestAutoMerge": map[string]any{"pullRequest": map[string]any{"number": n}}}})
 	}
+}
+
+// merge merges pull request n the way a machine approval does.
+func (f *fakeTeamFiles) merge(n int) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.pulls[n].merge()
 }
 
 // setChecksPending marks n's checks as still running (or done).

@@ -75,8 +75,8 @@ type Deps struct {
 	// repository, the one align_repository dispatches and the inventory
 	// reads the runs of; empty is teamfiles.ReconcilerWorkflow.
 	ReconcilerWorkflow string
-	// WatchInterval is how often watch_repository reads GitHub as the
-	// caller while it follows a new repository; 0 is DefaultWatchInterval.
+	// WatchInterval is how often watch_repository reads GitHub while it
+	// follows a new repository; 0 is DefaultWatchInterval.
 	WatchInterval time.Duration
 	// Review is klaus-gateway's team-review endpoint; nil leaves the asks
 	// undelivered and reported as such.

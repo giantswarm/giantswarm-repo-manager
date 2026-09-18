@@ -21,9 +21,9 @@ const ToolWatchRepository = "watch_repository"
 
 const argTimeout = "timeout"
 
-// The watch's bounds: how often GitHub is read as the caller, how long one
-// call waits without being told, and the most it may wait — under the
-// MCPServer's 180 s.
+// The watch's bounds: how often GitHub is read, how long one call waits
+// without being told, and the most it may wait — under the MCPServer's
+// 180 s.
 const (
 	DefaultWatchInterval = 5 * time.Second
 	DefaultWatchTimeout  = 120
@@ -55,6 +55,10 @@ type Watch struct {
 	// Pending names the phase still waited for when the call's timeout ran
 	// out; empty when ready or failed.
 	Pending string `json:"pending,omitempty"`
+	// PendingReason says why the pending phase could not be decided on the
+	// last read — a read GitHub refused, or the statuses no identity reads;
+	// empty when the phase is simply not reached yet.
+	PendingReason string `json:"pendingReason,omitempty"`
 	// Failure names the phase that failed and why; the phases before it are
 	// done.
 	Failure *Failure `json:"failure,omitempty"`
@@ -97,8 +101,11 @@ func (t *tools) registerWatch(s *mcpserver.MCPServer) {
 			"carried as findings), released (the first release exists and the CircleCI statuses on its commit are green; a failing status fails the phase; while "+
 			"CircleCI has not reported on the release's commit — a repository the reconciler has only just followed — the reconciler run's release step decides: "+
 			"a failed step or a red-release finding fails the phase, anything else keeps waiting for the statuses). ready is true when every phase is done; "+
-			"pending names the phase still waited for when the timeout ran out — call again to keep following. GitHub is read as you every few seconds. "+
-			"Takes the repository and the pull request number create_repository's answer carries."),
+			"pending names the phase still waited for when the timeout ran out — call again to keep following. Who reads what: the repository, its commits, "+
+			"the pull request and the release are read as you every few seconds; the commit statuses as the inventory App giantswarm-repo-manager-inventory, "+
+			"the identity of the unattended reads (your token through the App giantswarm-repo-manager cannot read them) — without that App the reconciler "+
+			"run's release step alone decides the released phase and pendingReason says so. A read GitHub refuses (403) keeps its phase pending with the "+
+			"refusal in pendingReason; the call errors only on wrong arguments. Takes the repository and the pull request number create_repository's answer carries."),
 		mcp.WithReadOnlyHintAnnotation(true),
 		mcp.WithString(argRepository, mcp.Required(), mcp.Description("Repository name, with or without the org.")),
 		mcp.WithNumber(argPullRequest, mcp.Required(), mcp.Description("The declaration pull request's number in the team files repository (create_repository's pullRequest.number).")),
@@ -117,8 +124,8 @@ func (d Deps) watchInterval() time.Duration {
 	return DefaultWatchInterval
 }
 
-// watch reads the phases as the caller until the repository is ready, a
-// phase fails or the timeout runs out.
+// watch reads the phases until the repository is ready, a phase fails or
+// the timeout runs out.
 func (t *tools) watch(ctx context.Context, args map[string]any) (*Watch, error) {
 	if t.d.Inventory == nil {
 		return nil, errors.New("inventory store not configured (VALKEY_ADDR): the setUp phase is read from the record")
@@ -185,21 +192,27 @@ type watcher struct {
 }
 
 // outcome is what one read of a phase found: done at a time, failed for a
-// reason, or neither — pending.
+// reason, or neither — pending, with the reason it could not be decided
+// when a read was refused.
 type outcome struct {
 	done   bool
+	failed bool
 	at     time.Time
 	reason string
 }
 
 func done(at time.Time) outcome    { return outcome{done: true, at: at} }
-func failed(reason string) outcome { return outcome{reason: reason} }
+func failed(reason string) outcome { return outcome{failed: true, reason: reason} }
+
+// unread is a phase left pending because a read was refused or no identity
+// makes it: a fact about the phase, never the tool's error.
+func unread(reason string) outcome { return outcome{reason: reason} }
 
 var pending = outcome{}
 
 // advance reads the phases after the ones done, in order, until one is
-// pending or failed, or all are done. An error is a read that could not be
-// made (the tool's error), not a phase failing.
+// pending or failed, or all are done. An error is the tool's own: a wrong
+// argument or the inventory store, never a read GitHub refused.
 func (w *watcher) advance(ctx context.Context) error {
 	checks := []struct {
 		name  string
@@ -214,11 +227,11 @@ func (w *watcher) advance(ctx context.Context) error {
 			return err
 		}
 		switch {
-		case o.reason != "":
+		case o.failed:
 			w.out.Failure = &Failure{Phase: c.name, Reason: o.reason}
 			return nil
 		case !o.done:
-			w.out.Pending = c.name
+			w.out.Pending, w.out.PendingReason = c.name, o.reason
 			return nil
 		}
 		ph := Phase{Name: c.name, At: o.at.UTC()}
@@ -227,7 +240,7 @@ func (w *watcher) advance(ctx context.Context) error {
 		}
 		w.out.Phases = append(w.out.Phases, ph)
 	}
-	w.out.Ready, w.out.Pending = true, ""
+	w.out.Ready, w.out.Pending, w.out.PendingReason = true, "", ""
 	return nil
 }
 
@@ -240,7 +253,7 @@ func (w *watcher) created(ctx context.Context) (outcome, error) {
 	case notFound(resp, err):
 		return pending, nil
 	case err != nil:
-		return pending, fmt.Errorf("read %s/%s as you: %w", w.org(), w.name, err)
+		return unread(fmt.Sprintf("read %s/%s as you: %v", w.org(), w.name, err)), nil
 	}
 	w.out.Repository, w.branch = repo.GetHTMLURL(), repo.GetDefaultBranch()
 	return done(repo.GetCreatedAt().Time), nil
@@ -255,31 +268,33 @@ func (w *watcher) scaffolded(ctx context.Context) (outcome, error) {
 		// An empty repository answers 409; a branch not yet pushed 404.
 		return pending, nil
 	case err != nil:
-		return pending, fmt.Errorf("read the commits of %s/%s as you: %w", w.org(), w.name, err)
+		return unread(fmt.Sprintf("read the commits of %s/%s as you: %v", w.org(), w.name, err)), nil
 	case len(commits) == 0:
 		return pending, nil
 	}
 	return done(commits[0].GetCommit().GetCommitter().GetDate().Time), nil
 }
 
-// pull reads the declaration pull request as the caller.
-func (w *watcher) pull(ctx context.Context) (*github.PullRequest, error) {
+// pull reads the declaration pull request as the caller. Without the pull
+// request the outcome stands: a refused read leaves the phase pending; a
+// number that does not exist is the tool's error.
+func (w *watcher) pull(ctx context.Context) (*github.PullRequest, outcome, error) {
 	r := w.p.repo
 	pr, resp, err := r.Client.PullRequests.Get(ctx, r.Owner, r.Name, w.number)
 	switch {
 	case notFound(resp, err):
-		return nil, fmt.Errorf("%s/%s#%d does not exist: pass the pull request number create_repository answered", r.Owner, r.Name, w.number)
+		return nil, pending, fmt.Errorf("%s/%s#%d does not exist: pass the pull request number create_repository answered", r.Owner, r.Name, w.number)
 	case err != nil:
-		return nil, fmt.Errorf("read %s/%s#%d as you: %w", r.Owner, r.Name, w.number, err)
+		return nil, unread(fmt.Sprintf("read %s/%s#%d as you: %v", r.Owner, r.Name, w.number, err)), nil
 	}
-	return pr, nil
+	return pr, pending, nil
 }
 
 // declared: the pull request is open and declares this repository.
 func (w *watcher) declared(ctx context.Context) (outcome, error) {
-	pr, err := w.pull(ctx)
-	if err != nil {
-		return pending, err
+	pr, o, err := w.pull(ctx)
+	if pr == nil {
+		return o, err
 	}
 	if !strings.Contains(pr.GetTitle()+"\n"+pr.GetBody(), w.name) {
 		return failed(fmt.Sprintf("%s does not declare %s: it names neither in its title nor in its body", pr.GetHTMLURL(), w.name)), nil
@@ -290,9 +305,9 @@ func (w *watcher) declared(ctx context.Context) (outcome, error) {
 
 // merged: the pull request is merged; closed without a merge fails.
 func (w *watcher) merged(ctx context.Context) (outcome, error) {
-	pr, err := w.pull(ctx)
-	if err != nil {
-		return pending, err
+	pr, o, err := w.pull(ctx)
+	if pr == nil {
+		return o, err
 	}
 	switch {
 	case pr.GetMerged():
@@ -336,23 +351,33 @@ func (w *watcher) setUp(ctx context.Context) (outcome, error) {
 	return done(run.Timestamp), nil
 }
 
-// released: the first release exists and the CircleCI statuses on its commit
-// are green. A failing status fails the phase. Without any status yet, the
-// reconciler run's release step decides: failed, or a red-release finding,
-// fails the phase; anything else waits for the statuses.
+// released: the first release exists (read as the caller) and the CircleCI
+// statuses on its commit are green — read as the inventory App, the identity
+// of the unattended reads: the caller's token through the App
+// giantswarm-repo-manager has no statuses permission. A failing status fails
+// the phase. Without any status yet, the reconciler run's release step
+// decides: failed, or a red-release finding, fails the phase; anything else
+// waits for the statuses. Without the inventory App the release step alone
+// decides, and the pending phase says so.
 func (w *watcher) released(ctx context.Context) (outcome, error) {
 	rel, resp, err := w.p.gh.Repositories.GetLatestRelease(ctx, w.org(), w.name)
 	switch {
 	case notFound(resp, err):
 		return pending, nil
 	case err != nil:
-		return pending, fmt.Errorf("read the releases of %s/%s as you: %w", w.org(), w.name, err)
+		return unread(fmt.Sprintf("read the releases of %s/%s as you: %v", w.org(), w.name, err)), nil
 	}
 	tag := rel.GetTagName()
 	w.out.Release = &WatchRelease{Tag: tag, URL: rel.GetHTMLURL()}
-	st, _, err := w.p.gh.Repositories.GetCombinedStatus(ctx, w.org(), w.name, tag, &github.ListOptions{PerPage: 100})
+	if w.t.d.App == nil {
+		if o := w.releaseStepVerdict(); o.failed {
+			return o, nil
+		}
+		return unread(fmt.Sprintf("the CircleCI statuses on %s are not read — %v; the reconciler run's release step alone decides", tag, ErrNoApp)), nil
+	}
+	st, _, err := w.t.d.App.Installation().Repositories.GetCombinedStatus(ctx, w.org(), w.name, tag, &github.ListOptions{PerPage: 100})
 	if err != nil {
-		return pending, fmt.Errorf("read the statuses of %s/%s@%s as you: %w", w.org(), w.name, tag, err)
+		return unread(fmt.Sprintf("read the statuses of %s/%s@%s as the inventory App: %v", w.org(), w.name, tag, err)), nil
 	}
 	switch {
 	case st.GetTotalCount() == 0:

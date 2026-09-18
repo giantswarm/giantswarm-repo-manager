@@ -18,8 +18,12 @@ import (
 )
 
 // inventoryApp is the slug GET /app answers: the read-only App of the
-// unattended reads.
-const inventoryApp = "giantswarm-repo-manager-inventory"
+// unattended reads; installationToken is the token the fake mints for its
+// installation.
+const (
+	inventoryApp      = "giantswarm-repo-manager-inventory"
+	installationToken = "installation-token"
+)
 
 // fakeGitHub answers the calls of the identity chain: GET /user as the person
 // (the bearer verification and the read as the person), GET /user/teams, GET
@@ -92,7 +96,7 @@ func newFakeGitHub(t *testing.T, logins map[string]string) *fakeGitHub {
 		writeJSON(w, http.StatusOK, map[string]any{"id": 17164699, kSlug: inventoryApp})
 	})
 	mux.HandleFunc("POST /api/v3/app/installations/{id}/access_tokens", func(w http.ResponseWriter, _ *http.Request) {
-		writeJSON(w, http.StatusCreated, map[string]any{"token": "installation-token", "expires_at": time.Now().Add(time.Hour).UTC().Format(time.RFC3339)})
+		writeJSON(w, http.StatusCreated, map[string]any{"token": installationToken, "expires_at": time.Now().Add(time.Hour).UTC().Format(time.RFC3339)})
 	})
 	mux.HandleFunc("GET /api/v3/user", func(w http.ResponseWriter, r *http.Request) {
 		g.userCalls.Add(1)
@@ -133,6 +137,12 @@ func userID(login string) int64 {
 
 func bearer(r *http.Request) string {
 	return strings.TrimSpace(strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer "))
+}
+
+// asApp says the request carries the installation token — the `token`
+// scheme ghinstallation uses, not a bearer.
+func asApp(r *http.Request) bool {
+	return r.Header.Get("Authorization") == "token "+installationToken
 }
 
 // ghMessage is GitHub's error body shape.

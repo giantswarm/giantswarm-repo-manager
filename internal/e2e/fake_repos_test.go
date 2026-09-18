@@ -57,6 +57,9 @@ type fakeRepo struct {
 	// statuses are the commit statuses on the release's tag: the combined
 	// status GET /commits/{ref}/status derives.
 	statuses []fakeStatus
+	// uninstalled says the inventory App's installation does not cover the
+	// repository: the App's reads on it answer 403.
+	uninstalled bool
 }
 
 // fakeRelease is the repository's latest release.
@@ -103,6 +106,14 @@ func (f *fakeRepos) report(name, state string, contexts ...string) {
 	for _, c := range contexts {
 		r.statuses = append(r.statuses, fakeStatus{context: c, state: state, updatedAt: time.Now()})
 	}
+}
+
+// installed sets whether the inventory App's installation covers the
+// repository.
+func (f *fakeRepos) installed(name string, on bool) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.repos[name].uninstalled = !on
 }
 
 // get is the repository by name, nil when it does not exist.
@@ -189,6 +200,14 @@ func (f *fakeRepos) register(mux *http.ServeMux, g *fakeGitHub) {
 			"published_at": repo.release.publishedAt.UTC().Format(time.RFC3339)})
 	}))
 	mux.HandleFunc("GET /api/v3/repos/{owner}/{repo}/commits/{ref}/status", withRepo(func(w http.ResponseWriter, r *http.Request, repo *fakeRepo) {
+		// The statuses are the inventory App's read: a person's token
+		// through the App giantswarm-repo-manager has no statuses
+		// permission, and an installation that does not cover the
+		// repository has no access to it.
+		if !asApp(r) || repo.uninstalled {
+			ghMessage(w, http.StatusForbidden, "Resource not accessible by integration")
+			return
+		}
 		if repo.release == nil || r.PathValue(kRef) != repo.release.tag {
 			ghMessage(w, http.StatusNotFound, "Not Found")
 			return

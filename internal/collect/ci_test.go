@@ -9,6 +9,9 @@ import (
 	"github.com/giantswarm/giantswarm-repo-manager/internal/inventory"
 )
 
+// The .circleci file names as the fixtures use them.
+var cfgFile, wfFile, customFile = ciFiles[0], ciFiles[1], ciFiles[2]
+
 func fixture(t *testing.T, name string) string {
 	t.Helper()
 	b, err := os.ReadFile(filepath.Join("testdata", name)) //nolint:gosec // a fixture of this package
@@ -24,15 +27,15 @@ func fixture(t *testing.T, name string) string {
 // signed images and charts on a public repository.
 func TestCIFactsGenerated(t *testing.T) {
 	texts := map[string]string{
-		"config.yml":    fixture(t, "generated-config.yml"),
-		"workflows.yml": fixture(t, "generated-workflows.yml"),
-		"custom.yml":    fixture(t, "generated-custom.yml"),
+		cfgFile:    fixture(t, "generated-config.yml"),
+		wfFile:     fixture(t, "generated-workflows.yml"),
+		customFile: fixture(t, "generated-custom.yml"),
 	}
 	ci := parseCI(texts, true)
 	if strings.Join(ci.Files, ",") != "config.yml,workflows.yml,custom.yml" || !ci.Generated || ci.Orb != "10.5.0" || ci.Error != "" {
 		t.Errorf("files %v generated %v orb %q error %q", ci.Files, ci.Generated, ci.Orb, ci.Error)
 	}
-	if !ci.ImagePush || !ci.ChartPush || strings.Join(ci.Platforms, ",") != "linux/amd64,linux/arm64" || ci.ARM64 == nil || !*ci.ARM64 {
+	if !ci.ImagePush || !ci.ChartPush || strings.Join(ci.Platforms, ",") != defaultPlatforms || ci.ARM64 == nil || !*ci.ARM64 {
 		t.Errorf("image %v chart %v platforms %v arm64 %v", ci.ImagePush, ci.ChartPush, ci.Platforms, ci.ARM64)
 	}
 	if ci.ChinaPush != inventory.ChinaPushSplit || ci.Signing != inventory.SigningSigned || ci.SigningReason != "" {
@@ -47,7 +50,7 @@ func TestCIFactsGenerated(t *testing.T) {
 // TestCIFactsLegacy: a single hand-maintained config.yml on orb 9.5.5 with an
 // amd64-only push and the split China push.
 func TestCIFactsLegacy(t *testing.T) {
-	ci := parseCI(map[string]string{"config.yml": fixture(t, "legacy-config.yml")}, true)
+	ci := parseCI(map[string]string{cfgFile: fixture(t, "legacy-config.yml")}, true)
 	if ci.Generated || ci.Orb != "9.5.5" || ci.Error != "" || strings.Join(ci.Files, ",") != "config.yml" {
 		t.Errorf("generated %v orb %q error %q files %v", ci.Generated, ci.Orb, ci.Error, ci.Files)
 	}
@@ -140,16 +143,16 @@ workflows:
 		signing   string
 		reason    string
 	}{
-		{"pre-9 multiarch job: both platforms, inline China, orb predates signing", pre9, true, "linux/amd64,linux/arm64", &yes, inventory.ChinaPushInline, inventory.SigningUnsigned, "predates signing"},
+		{"pre-9 multiarch job: both platforms, inline China, orb predates signing", pre9, true, defaultPlatforms, &yes, inventory.ChinaPushInline, inventory.SigningUnsigned, "predates signing"},
 		{"pre-9 plain push with sign false: amd64 only, sign off", plainOld, true, "linux/amd64", &no, inventory.ChinaPushInline, inventory.SigningUnsigned, "sign: false on push"},
 		{"buildx without go-build and a registry override: platforms unknown, custom China", buildxNoGo, true, "", nil, inventory.ChinaPushCustom, inventory.SigningSigned, ""},
-		{"native per-architecture builds merged: both platforms, split China, signed", native, true, "linux/amd64,linux/arm64", &yes, inventory.ChinaPushSplit, inventory.SigningSigned, ""},
+		{"native per-architecture builds merged: both platforms, split China, signed", native, true, defaultPlatforms, &yes, inventory.ChinaPushSplit, inventory.SigningSigned, ""},
 		{"chart only on a dev orb: no image, signing unknown", chartOnly, true, "", nil, inventory.ChinaPushNone, inventory.SigningUnknown, "not a release"},
 		{"no architect orb, nothing pushed", noOrb, true, "", nil, inventory.ChinaPushNone, inventory.SigningNone, ""},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			ci := parseCI(map[string]string{"config.yml": tc.text}, tc.public)
+			ci := parseCI(map[string]string{cfgFile: tc.text}, tc.public)
 			if ci.Error != "" {
 				t.Fatalf("error %q", ci.Error)
 			}
@@ -165,7 +168,7 @@ workflows:
 			}
 		})
 	}
-	if ci := parseCI(map[string]string{"config.yml": noOrb}, true); ci.Orb != "" || ci.ImagePush || ci.ChartPush || len(ci.Platforms) != 0 {
+	if ci := parseCI(map[string]string{cfgFile: noOrb}, true); ci.Orb != "" || ci.ImagePush || ci.ChartPush || len(ci.Platforms) != 0 {
 		t.Errorf("no orb: %+v", ci)
 	}
 }
@@ -173,7 +176,7 @@ workflows:
 // TestCIFactsUnparsable: a file that is not YAML is named in Error; the
 // other files still answer.
 func TestCIFactsUnparsable(t *testing.T) {
-	ci := parseCI(map[string]string{"config.yml": "version: [", "workflows.yml": fixture(t, "generated-workflows.yml")}, true)
+	ci := parseCI(map[string]string{cfgFile: "version: [", wfFile: fixture(t, "generated-workflows.yml")}, true)
 	if !strings.HasPrefix(ci.Error, "config.yml: ") || ci.Orb != "10.5.0" || !ci.ImagePush {
 		t.Errorf("error %q orb %q image %v", ci.Error, ci.Orb, ci.ImagePush)
 	}

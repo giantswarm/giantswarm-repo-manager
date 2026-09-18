@@ -157,8 +157,9 @@ func TestCreateCommitCreatesScaffoldsThenOpensThePullRequestAsThePerson(t *testi
 }
 
 // TestCreateDryRunPlansTheThreeWrites: the dry run names the create and
-// scaffold steps the engine would run as alice and the pull request with
-// the reason in its body, and writes nothing; validate_repository takes the
+// scaffold steps the engine would run as alice (a Go service with the app
+// flavour scaffolds with template-app's chart at helm/<name>) and the pull
+// request with the reason in its body, and writes nothing; validate_repository takes the
 // same arguments and carries the same plan, without a reason as before.
 func TestCreateDryRunPlansTheThreeWrites(t *testing.T) {
 	st := newStack(t)
@@ -176,7 +177,8 @@ func TestCreateDryRunPlansTheThreeWrites(t *testing.T) {
 		}
 		steps := v.Creation.Repositories[0].Steps
 		if len(steps) != 2 || steps[0].Step != reconcile.StepCreate || steps[0].Verdict != reconcile.VerdictDrift || len(steps[0].Changes) != 1 || !strings.Contains(steps[0].Changes[0], "create "+org+"/shiny-service") ||
-			steps[1].Step != reconcile.StepScaffold || steps[1].Verdict != reconcile.VerdictDrift || len(steps[1].Changes) != 1 || !strings.Contains(steps[1].Changes[0], "push it as the first commit") {
+			steps[1].Step != reconcile.StepScaffold || steps[1].Verdict != reconcile.VerdictDrift || len(steps[1].Changes) != 1 || !strings.Contains(steps[1].Changes[0], "push it as the first commit") ||
+			!strings.Contains(steps[1].Changes[0], "with the chart of "+string(reposetup.TemplateChart)+" at helm/"+shinyService) {
 			t.Errorf("%s: steps: %+v", tool, steps)
 		}
 		if pr := v.Creation.PullRequest; pr.Repository != org+"/github" || pr.Branch != "reposetup/create-shiny-service" || pr.As != alice || len(pr.Files) != 1 || !strings.Contains(pr.Body, "\n\nReason: the shiny thing\n\n") {

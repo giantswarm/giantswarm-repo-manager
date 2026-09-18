@@ -93,11 +93,11 @@ the message to the team's standup channel is rendered from (README, "Asks and me
     "unknownCodeownersTeams": [],       // CODEOWNERS teams the org does not have
     "has": {"renovate": true, "dependabot": false, "circleci": true, "workflows": true, "dockerfile": true, "helm": true, "readme": true, "codeowners": true}
   },
-  "circleci": {                         // absent when the repository is gone; no CircleCI token is involved
+  "circleci": {                         // absent when the repository is gone
     "followed": true,                   // ci/circleci: statuses on the head, or the reconciler's circleci step found the project followed
-    "setupWorkflows": true,             // from the reconciler's run artifact only; absent and named in unknown until a run tells
+    "setupWorkflows": true,             // from the reconciler's run artifact or the engine's own check (CircleCI token); absent and named in unknown until one tells
     "head": {"state": "success", "contexts": ["ci/circleci: go-build", "ci/circleci: push-to-registries"], "at": "…"},  // the default branch head's ci/circleci: statuses (worst state)
-    "source": "statuses+artifact",      // statuses | artifact | statuses+artifact: the sources that answered
+    "source": "statuses+artifact",      // the sources that answered, joined by +: statuses, artifact, engine (the engine's own circleci step, with a CircleCI token)
     "unknown": [],                      // the facts no source yields: setupWorkflows, followed (status contexts truncated, none CircleCI's)
     "error": ""                         // the reconciler's circleci step failing, as its run reported it
   },

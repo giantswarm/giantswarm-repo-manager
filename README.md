@@ -97,16 +97,21 @@ write tool takes `dryRun` and `mode`.
 | **The person** (their GitHub user token through the App `giantswarm-repo-manager`, put on every call by muster) | who is calling (`get_info`'s `caller`, verified with `GET /user`); every write: team-file pull requests, the reconciler dispatch; the reads as the person (their teams) | `oauth.enabled`, `muster.mcpServer.auth.authorizationServer.*` (the pin; the Secret `giantswarm-repo-manager-oauth-client` holds the App's client) |
 | **The inventory App installation** (`giantswarm-repo-manager-inventory`, read-only: Administration, Contents, Pull requests, Issues, Commit statuses, Checks — the engine's protection step reads the default branch head's check runs to learn which conditional checks exist, and without it every repository carries the finding `unchecked` (the checks on main not readable with this token, 403) —, Metadata, Organization members) | unattended, read-only inventory reads (GraphQL sweeps, the engine's checks in read mode) and the engine's name checks — its own rate budget; `get_info` names it as `inventory.identity` (`app giantswarm-repo-manager-inventory (installation <id>)`, or `not configured`). Nothing stands in for it: without the App there are no unattended reads, and the tools that need them say so | `githubApp.appID`, `githubApp.installationID`, `githubApp.existingSecret` (`private-key`) |
 
-No CircleCI token. The inventory's CircleCI facts come from GitHub and the reconciler: whether CircleCI builds
-a repository from the `ci/circleci:` commit statuses on its default branch head (read with the repository, as
-the inventory App — CircleCI posts them for the projects it builds) together with the `.circleci/config.yml`
-blob; whether the project is followed and setup workflows are on from the reconciler's run artifact, read from
-GitHub after every run (its `circleci` step). What neither source yields, the record names as
-`unknown` — the last pipeline is not derivable and is not part of the record. `get_info` reports
-`circleci.source: statuses+artifact`. The engine's read-mode checks run without a CircleCI client, which skips
-their `circleci` and `release` steps; the inventory writes those two steps from its sources instead — the reconciler's
-last run decides followed, setup workflows, checkout key and the tag build when it ran, the head's statuses say
-whether CircleCI builds the branch — and what no source yields is the finding `unchecked` with Align now as the fix.
+CircleCI. With a CircleCI API token (`circleci.existingSecret`, key `token`, passed as `CIRCLECI_TOKEN`) the engine's
+read-mode checks read each project themselves — followed, setup workflows, checkout key, the latest release's
+pipeline — so the set-up steps show CircleCI drift on every sweep and refresh; check mode never writes to CircleCI,
+and the token is the one static credential this service holds (the reconciler's `CIRCLECI_API_TOKEN`, a CircleCI
+personal token cannot be scoped). The record's CircleCI facts also come from GitHub and the reconciler: whether
+CircleCI builds a repository from the `ci/circleci:` commit statuses on its default branch head (read with the
+repository, as the inventory App — CircleCI posts them for the projects it builds) together with the
+`.circleci/config.yml` blob; whether the project is followed and setup workflows are on from the reconciler's run
+artifact, read from GitHub after every run (its `circleci` step). `circleci.source` names the sources that answered
+(`statuses`, `artifact`, `engine`, joined by `+`), `unknown` what none yields — the last pipeline is not derivable
+and is not part of the record. `get_info` reports `circleci.configured` and `circleci.source`. Without a token the
+engine skips its `circleci` and `release` steps and the inventory writes those two from the record's other
+sources — the reconciler's last run decides followed, setup workflows, checkout key and the tag build when it ran,
+the head's statuses say whether CircleCI builds the branch — and a repository no run has checked yet carries the
+finding `unchecked` until one does.
 
 Effective rights of a write are the person's own ∩ the App `giantswarm-repo-manager`'s permissions, on
 the repository at hand. No personal token, no token held or exchanged by this server, no broker; the

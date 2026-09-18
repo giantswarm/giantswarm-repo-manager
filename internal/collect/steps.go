@@ -81,9 +81,9 @@ func runStep(last *inventory.LastRun, step reconcile.Step) *reconcile.StepResult
 	return sr
 }
 
-// alignFix is the fix of every unchecked finding here: the reconciler holds
-// the CircleCI token this service does not.
-const alignFix = "run Align now: the reconciler checks it with its CircleCI token and the record follows within minutes"
+// alignFix is the fix of every unchecked finding here: a CircleCI token for
+// the engine's checks, or a reconciler run in the meantime.
+const alignFix = "configure the inventory's CircleCI token (chart value circleci.existingSecret): the engine then checks it on every sweep and refresh; until then a reconciler run reports it — Align now starts one at once, and for a team that has not opted in it checks and changes nothing"
 
 // convergedCircleCI is the engine's summary of a converged circleci step.
 const convergedCircleCI = "followed, setup workflows on, checkout key present"

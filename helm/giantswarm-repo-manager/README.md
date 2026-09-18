@@ -83,6 +83,7 @@ its own app, not as a component of the `agent-platform` meta chart.
 | githubApp.installationID | int | `0` | The inventory App's installation id on the org. |
 | githubApp.existingSecret | string | `""` | Existing Secret with the inventory App's PEM private key under `private-key`. |
 | githubApp.apiURL | string | `""` | GitHub API base URL; empty is api.github.com. |
+| circleci.existingSecret | string | `""` | Existing Secret with a CircleCI API token under `token`, passed as `CIRCLECI_TOKEN`: the engine's checks in read mode read each project with it — followed, setup workflows, checkout key, the latest release's pipeline — so the set-up steps show CircleCI drift on every sweep and refresh; check mode never writes to CircleCI. Empty leaves those two steps to the record's other sources, the head's `ci/circleci:` statuses and the reconciler's last run, and a repository no run has checked reads `unchecked` until one does. |
 | serviceAccount.create | bool | `true` | Create a ServiceAccount. |
 | serviceAccount.annotations | object | `{}` | Annotations on the ServiceAccount. |
 | serviceAccount.name | string | `""` | ServiceAccount name (generated when empty). |

@@ -153,7 +153,9 @@ type CircleCI struct {
 	// Head is the default branch head's CircleCI statuses; nil when it has
 	// none.
 	Head *HeadStatus `json:"head,omitempty"`
-	// Source is what answered: statuses, artifact, or statuses+artifact.
+	// Source names the sources that answered, joined by `+`: statuses (the
+	// head's `ci/circleci:` statuses), artifact (the reconciler's run) and
+	// engine (the engine's own circleci step, when it has a CircleCI client).
 	Source string `json:"source"`
 	// Unknown names the facts no source yields: followed (the head's status
 	// contexts were truncated and none was CircleCI's), setupWorkflows.
@@ -167,6 +169,7 @@ const (
 	CircleCISourceStatuses = "statuses"
 	CircleCISourceArtifact = "artifact"
 	CircleCISourceBoth     = CircleCISourceStatuses + "+" + CircleCISourceArtifact
+	CircleCISourceEngine   = "engine"
 
 	CircleCIFactFollowed       = "followed"
 	CircleCIFactSetupWorkflows = "setupWorkflows"

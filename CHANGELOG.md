@@ -15,6 +15,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- A Go service with the `app` flavour is scaffolded with template-app's chart at `helm/<name>/`: the engine is devctl v8.65.8 (`get_info` reports it); with the older engine the repository was created without its chart and its first release was red. The scaffold plan's sentence names the chart (giantswarm/giantswarm-repo-manager#66).
+
 - The set-up steps `circleci` and `release` of a repository's `setup.checks` no longer read `skipped: no CircleCI client` — the engine runs without a CircleCI token here, and the inventory now writes those two steps from what it knows: the reconciler's last run over the repository (followed, setup workflows, checkout key, the tag's build — checked with its token) when it ran, and the `ci/circleci:` statuses on the default branch head, which say whether CircleCI builds the branch. Each summary names its source and time; a repository no run has checked yet carries the finding `unchecked` naming what is out of reach and Align now as the fix; a head without a CircleCI status is the drift the engine would report for an unfollowed project. `converged` follows the rewritten steps.
 
 ### Added

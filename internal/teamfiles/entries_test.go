@@ -85,13 +85,16 @@ func TestRemoveEntryAndSetField(t *testing.T) {
 	if err != nil || f.Lifecycle != LifecycleDeprecated || f.ComponentType != "service" || f.Gen == nil || f.Gen.Language != "generic" {
 		t.Errorf("set lifecycle: %+v %v", f, err)
 	}
+	// The added field lands before the gen block, the entry's tail, with the
+	// author's comment on gen staying with gen.
 	y, _ := changed.YAML()
-	if !strings.HasPrefix(y, "- name: beta\n") || !strings.Contains(y, "lifecycle: deprecated") {
+	if !strings.HasPrefix(y, "- name: beta\n  componentType: service\n  lifecycle: deprecated\n  # a comment inside beta\n  gen:\n") || !strings.HasSuffix(y, "flavours: [app]\n") {
 		t.Errorf("rendered:\n%s", y)
 	}
 
 	// The opt-in to alignment is a boolean field the same edit writes, after
-	// the keys the author wrote; Fields reads it back as the bool it is.
+	// the other added key and before gen; Fields reads it back as the bool it
+	// is.
 	optedIn, err := SetField(changed, FieldAlign, "true")
 	if err != nil {
 		t.Fatal(err)
@@ -99,7 +102,21 @@ func TestRemoveEntryAndSetField(t *testing.T) {
 	if f, err := optedIn.Fields(); err != nil || !f.Align || f.Lifecycle != LifecycleDeprecated {
 		t.Errorf("set align: %+v %v", f, err)
 	}
-	if y, _ := optedIn.YAML(); !strings.HasSuffix(y, "  lifecycle: deprecated\n  align: true\n") {
+	if y, _ := optedIn.YAML(); !strings.Contains(y, "  lifecycle: deprecated\n  align: true\n  # a comment inside beta\n  gen:\n") {
+		t.Errorf("rendered:\n%s", y)
+	}
+
+	// A key the entry has keeps its place; an entry without gen gets the
+	// field after the author's keys.
+	if again, err := SetField(optedIn, FieldAlign, "false"); err != nil {
+		t.Fatal(err)
+	} else if y, _ := again.YAML(); !strings.Contains(y, "  lifecycle: deprecated\n  align: false\n  # a comment inside beta\n  gen:\n") {
+		t.Errorf("rendered:\n%s", y)
+	}
+	gamma, _ := tf.Entry("gamma")
+	if plain, err := SetField(gamma, FieldAlign, "true"); err != nil {
+		t.Fatal(err)
+	} else if y, _ := plain.YAML(); !strings.HasSuffix(y, "  componentType: configuration\n  align: true\n") {
 		t.Errorf("rendered:\n%s", y)
 	}
 }

@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"errors"
 	"fmt"
+	"slices"
 	"sort"
 	"strings"
 
@@ -24,6 +25,9 @@ const (
 	// reconciler changes the repository to its declared set-up on every
 	// trigger; without it every run is a check.
 	FieldAlign = "align"
+	// FieldGen is the generators' block, the tail of an entry in the team
+	// files: a field an edit adds goes before it.
+	FieldGen = "gen"
 )
 
 // Lifecycle values (the schema's; the reconciler acts on them, PRD D5).
@@ -163,8 +167,10 @@ func declares(tf *reposetup.TeamFile, d reposetup.Declaration) bool {
 	return aerr == nil && berr == nil && a == b
 }
 
-// SetField returns d with the top-level scalar field set (added at the end
-// when absent, after the other keys the author wrote).
+// SetField returns d with the top-level scalar field set: a key the entry
+// has keeps its place; an absent one is added before the gen block, the
+// entry's tail in the team files, else after the other keys the author
+// wrote.
 func SetField(d reposetup.Declaration, field, value string) (reposetup.Declaration, error) {
 	text, err := d.YAML()
 	if err != nil {
@@ -178,15 +184,21 @@ func SetField(d reposetup.Declaration, field, value string) (reposetup.Declarati
 		return d, fmt.Errorf("entry %s did not render as one list item", d.Name)
 	}
 	m := doc.Content[0].Content[0]
-	set := false
+	val := &yaml.Node{Kind: yaml.ScalarNode, Value: value}
+	at := len(m.Content)
 	for i := 0; i+1 < len(m.Content); i += 2 {
-		if m.Content[i].Value == field {
-			m.Content[i+1] = &yaml.Node{Kind: yaml.ScalarNode, Value: value}
-			set = true
+		switch m.Content[i].Value {
+		case field:
+			m.Content[i+1] = val
+			at = -1
+		case FieldGen:
+			if at > i {
+				at = i
+			}
 		}
 	}
-	if !set {
-		m.Content = append(m.Content, &yaml.Node{Kind: yaml.ScalarNode, Value: field}, &yaml.Node{Kind: yaml.ScalarNode, Value: value})
+	if at >= 0 {
+		m.Content = slices.Insert(m.Content, at, &yaml.Node{Kind: yaml.ScalarNode, Value: field}, val)
 	}
 	var buf bytes.Buffer
 	enc := yaml.NewEncoder(&buf)
@@ -226,7 +238,7 @@ func ParseEntry(text []byte) (reposetup.Declaration, error) {
 
 // keyOrder is the order the team files write an entry's keys in; keys not
 // listed follow alphabetically.
-var keyOrder = []string{FieldName, "componentType", "description", "visibility", FieldLifecycle, FieldAlign, "system", "choreReviewers", "replace", "gen"}
+var keyOrder = []string{FieldName, "componentType", "description", "visibility", FieldLifecycle, FieldAlign, "system", "choreReviewers", "replace", FieldGen}
 
 // EntryFromValue renders a JSON-compatible value (a tool argument) as a
 // declaration, its keys in the team files' order (name first).

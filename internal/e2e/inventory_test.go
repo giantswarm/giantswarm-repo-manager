@@ -325,18 +325,18 @@ func TestReconcileNowPendingUntilTheArtifactOrTheWindow(t *testing.T) {
 	}
 	c := st.as(t, aliceToken)
 	var d tools.Dispatch
-	st.callJSON(t, c, tools.ToolAlignRepository, map[string]any{argMode: modeCommit, kRepository: repoPresent}, &d)
+	st.callJSON(t, c, tools.ToolAlignRepository, map[string]any{argMode: modeCommit, kRepository: repoLegacy}, &d)
 	if !d.Dispatched || d.PendingRun == nil || d.PendingRun.By != alice || !strings.Contains(d.Then, "pendingRun") {
 		t.Fatalf("dispatch: %+v", d)
 	}
-	if p := st.record(t, repoPresent).Setup.PendingRun; p == nil || p.By != alice {
+	if p := st.record(t, repoLegacy).Setup.PendingRun; p == nil || p.By != alice {
 		t.Fatalf("pendingRun on the record: %+v", p)
 	}
 	var listing tools.Listing
 	st.callJSON(t, c, tools.ToolListRepositories, map[string]any{argTeam: team}, &listing)
 	var shown bool
 	for _, row := range listing.Repositories {
-		shown = shown || (row.Repository == org+"/"+repoPresent && row.Setup.PendingRun != nil && row.Setup.PendingRun.By == alice)
+		shown = shown || (row.Repository == org+"/"+repoLegacy && row.Setup.PendingRun != nil && row.Setup.PendingRun.By == alice)
 	}
 	if !shown {
 		t.Errorf("list_repositories does not show the pending run: %+v", listing.Repositories)
@@ -347,15 +347,15 @@ func TestReconcileNowPendingUntilTheArtifactOrTheWindow(t *testing.T) {
 	}
 	// The run completes: its artifact answers the pending run.
 	finished := time.Now().UTC().Truncate(time.Second)
-	st.ghs.actions.addRun(t, runStatusCompleted, finished, artifactReport{name: repoPresent, finishedAt: finished, result: reconcile.Result{Converged: true}})
+	st.ghs.actions.addRun(t, runStatusCompleted, finished, artifactReport{name: repoLegacy, finishedAt: finished, result: reconcile.Result{Converged: true}})
 	if p := st.poll(t); p.Pending != 0 || p.Artifacts != 1 {
 		t.Errorf("poll with the run: %+v", p)
 	}
-	if rec := st.record(t, repoPresent); rec.Setup.PendingRun != nil || rec.Setup.LastRun == nil || hasKind(rec, inventory.FindingReconcileRunMissing) {
+	if rec := st.record(t, repoLegacy); rec.Setup.PendingRun != nil || rec.Setup.LastRun == nil || hasKind(rec, inventory.FindingReconcileRunMissing) {
 		t.Errorf("after the run: %+v findings %+v", rec.Setup, rec.Findings)
 	}
 	// Dispatched again and no run within the window: given up with the finding.
-	st.callJSON(t, c, tools.ToolAlignRepository, map[string]any{argMode: modeCommit, kRepository: repoPresent}, &d)
+	st.callJSON(t, c, tools.ToolAlignRepository, map[string]any{argMode: modeCommit, kRepository: repoLegacy}, &d)
 	st.advance(14 * time.Minute)
 	if p := st.poll(t); p.Pending != 1 || p.Missing != 0 {
 		t.Errorf("poll inside the window: %+v", p)
@@ -364,7 +364,7 @@ func TestReconcileNowPendingUntilTheArtifactOrTheWindow(t *testing.T) {
 	if p := st.poll(t); p.Pending != 0 || p.Missing != 1 {
 		t.Errorf("poll past the window: %+v", p)
 	}
-	rec := st.record(t, repoPresent)
+	rec := st.record(t, repoLegacy)
 	if rec.Setup.PendingRun != nil || rec.Setup.MissingRun == nil || rec.Setup.MissingRun.By != alice || !hasKind(rec, inventory.FindingReconcileRunMissing) {
 		t.Fatalf("missing run: %+v findings %+v", rec.Setup, rec.Findings)
 	}
@@ -374,13 +374,13 @@ func TestReconcileNowPendingUntilTheArtifactOrTheWindow(t *testing.T) {
 		}
 	}
 	var got inventory.Record
-	st.callJSON(t, c, tools.ToolGetRepository, map[string]any{kRepository: repoPresent}, &got)
+	st.callJSON(t, c, tools.ToolGetRepository, map[string]any{kRepository: repoLegacy}, &got)
 	if !hasKind(&got, inventory.FindingReconcileRunMissing) {
 		t.Errorf("get_repository does not carry the finding: %+v", got.Findings)
 	}
 	// The next dispatch forgets the missing run.
-	st.callJSON(t, c, tools.ToolAlignRepository, map[string]any{argMode: modeCommit, kRepository: repoPresent}, &d)
-	if rec := st.record(t, repoPresent); rec.Setup.PendingRun == nil || rec.Setup.MissingRun != nil || hasKind(rec, inventory.FindingReconcileRunMissing) {
+	st.callJSON(t, c, tools.ToolAlignRepository, map[string]any{argMode: modeCommit, kRepository: repoLegacy}, &d)
+	if rec := st.record(t, repoLegacy); rec.Setup.PendingRun == nil || rec.Setup.MissingRun != nil || hasKind(rec, inventory.FindingReconcileRunMissing) {
 		t.Errorf("after the next dispatch: %+v findings %+v", rec.Setup, rec.Findings)
 	}
 }

@@ -577,25 +577,46 @@ func TestReconcileDispatchesAsThePersonAndTheCompletionMessageFollows(t *testing
 		!strings.Contains(d.Warning, "enforce_admins") {
 		t.Errorf("dry run answer for an opted-in entry: team=%q declared=%v optedIn=%v mode=%q warning=%q", d.Team, d.Declared, d.OptedIn, d.Mode, d.Warning)
 	}
-	// An entry without the field: the run is a check, and the warning says
-	// nothing changes and how the repository opts in.
-	var check tools.Dispatch
-	st.callJSON(t, c, tools.ToolAlignRepository, map[string]any{argDryRun: true, kRepository: repoPresent}, &check)
-	if check.Team != team || !check.Declared || check.OptedIn || check.Mode != tools.DispatchModeCheck ||
-		!strings.Contains(check.Warning, org+"/"+repoPresent+" has not opted in to alignment: this run checks and reports the drift; nothing changes. Opt in with update_repository: `align: true` in its entry (the team reviews).") {
-		t.Errorf("dry run answer for an entry without the opt-in: team=%q declared=%v optedIn=%v mode=%q warning=%q", check.Team, check.Declared, check.OptedIn, check.Mode, check.Warning)
+	// An entry without the field: the run is the pull request that opts the
+	// repository in — planned here, nothing dispatched, nothing opened — and
+	// the warning and then say so.
+	var optIn tools.Dispatch
+	st.callJSON(t, c, tools.ToolAlignRepository, map[string]any{argDryRun: true, kRepository: repoPresent}, &optIn)
+	if optIn.Team != team || !optIn.Declared || optIn.OptedIn || optIn.Mode != tools.DispatchModeOptIn || optIn.Dispatched || optIn.OptIn == nil || optIn.OptIn.Committed != nil ||
+		!strings.Contains(optIn.Warning, org+"/"+repoPresent+" has not opted in to alignment. Align now opts it in — `align: true` in its entry, in a pull request "+team+" reviews (the ask goes to "+team+"'s channel; a member other than you approves) — and the reconciler applies the planned changes when it merges:") ||
+		!strings.Contains(optIn.Then, "when the pull request merges, the reconciler aligns "+org+"/"+repoPresent+" (its push run)") ||
+		len(st.ghs.files.dispatches) != 0 || len(st.ghs.files.pullRequests()) != 0 {
+		t.Fatalf("dry run answer for an entry without the opt-in: %+v dispatches=%v", optIn, st.ghs.files.dispatches)
+	}
+	// Its plan: the entry as it will read — `align: true` before gen, nothing
+	// else changed — the pull request as alice, the ask to the team's channel.
+	pl := optIn.OptIn.Plan
+	if pl.Repository != org+"/"+repoPresent || pl.Team != team || !pl.Accepted || pl.Entry != strings.Replace(pl.Before, "  componentType: service\n", "  componentType: service\n  align: true\n", 1) ||
+		!strings.Contains(pl.Entry, "  align: true\n  gen:\n") {
+		t.Errorf("opt-in plan entry: accepted=%v\nbefore:\n%s\nentry:\n%s", pl.Accepted, pl.Before, pl.Entry)
+	}
+	if pl.PullRequest.Branch != "reposetup/align-"+repoPresent || pl.PullRequest.Title != "chore(repositories): opt "+repoPresent+" in to alignment ("+team+")" || pl.PullRequest.As != alice ||
+		!strings.Contains(pl.PullRequest.Body, "`align: true` in the entry in `repositories/"+team+".yaml`, nothing else changed") {
+		t.Errorf("opt-in pull request: %+v", pl.PullRequest)
+	}
+	if pl.Ask == nil || pl.Ask.Team != team || pl.Ask.Channel != bumblebeeChannel || !pl.Ask.Deliverable ||
+		!strings.HasPrefix(pl.Ask.Text, alice+" asks to align `"+org+"/"+repoPresent+"` (owned by "+team+"): the change opts it in to alignment (`align: true`) and the reconciler applies ") ||
+		!strings.Contains(pl.Ask.Text, " once merged") || !strings.HasSuffix(pl.Ask.Text, " A member of "+team+" other than "+alice+" approves.") {
+		t.Errorf("opt-in ask: %+v", pl.Ask)
 	}
 	// No entry in the named team's file: a check from the team alone.
 	var stray tools.Dispatch
 	st.callJSON(t, c, tools.ToolAlignRepository, map[string]any{argDryRun: true, kRepository: repoStray, argTeam: teamPlaneteers}, &stray)
-	if stray.Team != teamPlaneteers || stray.Declared || stray.OptedIn || stray.Mode != tools.DispatchModeCheck ||
+	if stray.Team != teamPlaneteers || stray.Declared || stray.OptedIn || stray.Mode != tools.DispatchModeCheck || stray.OptIn != nil ||
 		!strings.Contains(stray.Warning, org+"/"+repoStray+" has no entry: this run checks from the team alone and changes nothing; declare the repository with `align: true`") {
 		t.Errorf("dry run answer for an undeclared repository: team=%q declared=%v optedIn=%v mode=%q warning=%q", stray.Team, stray.Declared, stray.OptedIn, stray.Mode, stray.Warning)
 	}
-	st.callJSON(t, c, tools.ToolAlignRepository, map[string]any{argMode: modeCommit, kRepository: repoPresent, argTeam: team}, &d)
+	// Opted in: the commit dispatches the workflow as alice, for the
+	// repository and the team.
+	st.callJSON(t, c, tools.ToolAlignRepository, map[string]any{argMode: modeCommit, kRepository: repoLegacy, argTeam: team}, &d)
 	ds := st.ghs.files.dispatches
-	if !d.Dispatched || len(ds) != 1 || ds[0]["workflow"] != reconcilerWorkflow || ds[0]["as"] != alice || ds[0]["ref"] != mainBranch ||
-		ds[0]["inputs"].(map[string]any)["repository"] != repoPresent || ds[0]["inputs"].(map[string]any)["team"] != team {
+	if !d.Dispatched || d.Mode != tools.DispatchModeAlign || d.OptIn != nil || len(ds) != 1 || ds[0]["workflow"] != reconcilerWorkflow || ds[0]["as"] != alice || ds[0]["ref"] != mainBranch ||
+		ds[0]["inputs"].(map[string]any)["repository"] != repoLegacy || ds[0]["inputs"].(map[string]any)["team"] != team || len(st.ghs.files.pullRequests()) != 0 {
 		t.Errorf("dispatch: %+v %v", d, ds)
 	}
 
@@ -604,12 +625,12 @@ func TestReconcileDispatchesAsThePersonAndTheCompletionMessageFollows(t *testing
 	// team hears nothing — an Align now with nothing to fix is not news.
 	finished := time.Now().UTC()
 	converged := reconcile.Result{Converged: true, Steps: []reconcile.StepResult{{Step: "release", Verdict: "ok", Summary: "v0.1.0 built"}}}
-	run := st.ghs.actions.addRun(t, runStatusCompleted, finished, artifactReport{name: repoPresent, finishedAt: finished, result: converged,
+	run := st.ghs.actions.addRun(t, runStatusCompleted, finished, artifactReport{name: repoLegacy, finishedAt: finished, result: converged,
 		change: &inventory.Change{Kind: inventory.ChangeDispatched, By: alice}})
 	if p := st.poll(t); p.Artifacts != 1 {
 		t.Fatalf("poll: %+v", p)
 	}
-	rec := st.record(t, repoPresent)
+	rec := st.record(t, repoLegacy)
 	if rec.Setup.LastRun == nil || rec.Setup.LastRun.RunURL != runURL(run.ID) || rec.Setup.PendingRun != nil ||
 		rec.Setup.LastRun.Change == nil || rec.Setup.LastRun.Change.Kind != inventory.ChangeDispatched || rec.Setup.LastRun.Change.By != alice {
 		t.Fatalf("record after the run: %+v change=%+v", rec.Setup, rec.Setup.LastRun.Change)
@@ -636,6 +657,83 @@ func TestReconcileDispatchesAsThePersonAndTheCompletionMessageFollows(t *testing
 		notices[0]["text"] != alice+" created a new repo: "+repoPresent+" (app, go)" || notices[0]["link"] != prURL ||
 		notices[1][kChannel] != bumblebeeStandup || notices[1]["text"] != repoPresent+": the repository has the default icon — upload one under Settings" || notices[1]["link"] != runURL(pushed.ID) {
 		t.Errorf("messages after the creating run: %v", notices)
+	}
+}
+
+// TestAlignOptsADeclaredRepositoryInAndDispatchesNothing: Align now on a
+// declared repository without `align: true` opens the pull request that sets
+// the field as the person — auto-merge armed, the ask in the team's channel,
+// the record expecting the run of the merge — and dispatches nothing. The
+// other member's approval lands it; the reconciler's run of the merge aligns
+// the repository and reports: the record carries the run, and the team hears
+// no sentence about an opt-in.
+func TestAlignOptsADeclaredRepositoryInAndDispatchesNothing(t *testing.T) {
+	st := newStack(t)
+	st.ghs.teams[dave] = []string{team}
+	c := st.as(t, aliceToken)
+	var d tools.Dispatch
+	st.callJSON(t, c, tools.ToolAlignRepository, map[string]any{argMode: modeCommit, kRepository: repoPresent}, &d)
+	if d.Mode != tools.DispatchModeOptIn || d.Dispatched || len(st.ghs.files.dispatches) != 0 || d.OptIn == nil || d.OptIn.Committed == nil || d.OptIn.Committed.PullRequest == nil {
+		t.Fatalf("opt-in commit: %+v dispatches=%v", d, st.ghs.files.dispatches)
+	}
+	prs := st.ghs.files.pullRequests()
+	if len(prs) != 1 {
+		t.Fatalf("pull requests after the opt-in: %d", len(prs))
+	}
+	pr := prs[0]
+	file := string(pr.Files["repositories/"+team+".yaml"])
+	if pr.Author != alice || pr.Head != "reposetup/align-"+repoPresent || pr.Title != "chore(repositories): opt "+repoPresent+" in to alignment ("+team+")" ||
+		!strings.Contains(file, "- name: "+repoPresent+"\n  componentType: service\n  align: true\n  gen:\n") || !strings.Contains(file, "- name: "+repoLegacy) || strings.Count(file, "align: true") != 2 {
+		t.Errorf("opt-in pull request %q by %s from %s:\n%s", pr.Title, pr.Author, pr.Head, file)
+	}
+	committed := d.OptIn.Committed
+	if committed.PullRequest.Number != pr.Number || !committed.PullRequest.AutoMerge || !pr.AutoMerge {
+		t.Errorf("auto-merge is armed as the author at opening: %+v fake=%v", committed.PullRequest, pr.AutoMerge)
+	}
+	// The record expects the run of the merge as a change by alice, without a
+	// deadline while the pull request is open.
+	if p := committed.PendingRun; p == nil || p.Kind != inventory.ChangeChanged || !p.Follows(pr.Number) || p.By != alice {
+		t.Fatalf("the opt-in's pending run: %+v", p)
+	}
+	if rec := st.record(t, repoPresent); !rec.Setup.PendingRun.Follows(pr.Number) || rec.Setup.PendingRun.Kind != inventory.ChangeChanged {
+		t.Fatalf("record after the opt-in pull request: %+v", rec.Setup)
+	}
+	if p := st.poll(t); p.Pending != 0 || p.Missing != 0 {
+		t.Errorf("poll while the opt-in pull request is open: %+v", p)
+	}
+	// The ask, in the team's channel, names the repository, the team and who
+	// approves; the pull request travels as its link; no notice goes out.
+	asks, notices := st.gw.posted()
+	if len(asks) != 1 || len(notices) != 0 || asks[0][kChannel] != bumblebeeChannel ||
+		!strings.HasPrefix(asks[0]["text"].(string), alice+" asks to align `"+org+"/"+repoPresent+"` (owned by "+team+"): the change opts it in to alignment (`align: true`) and the reconciler applies ") ||
+		!strings.HasSuffix(asks[0]["text"].(string), " A member of "+team+" other than "+alice+" approves.") || strings.Contains(asks[0]["text"].(string), "https://") ||
+		!strings.HasSuffix(asks[0]["link"].(string), fmt.Sprintf("/pull/%d", pr.Number)) {
+		t.Fatalf("ask: %v notices: %v", asks, notices)
+	}
+	if committed.Ask == nil || !committed.Ask.Delivered || committed.Ask.Channel != bumblebeeChannel || committed.Ask.ReviewID == "" {
+		t.Errorf("delivery: %+v", committed.Ask)
+	}
+	// dave, a member who did not open it, approves; auto-merge lands it.
+	var a tools.Approval
+	st.callJSON(t, st.as(t, daveToken), tools.ToolApproveChange, map[string]any{argMode: modeCommit, argPullRequest: pr.Number}, &a)
+	if !a.Merged || !pr.Merged || a.Team != team || a.Author != alice {
+		t.Fatalf("landing: %+v fake merged=%v", a, pr.Merged)
+	}
+	// The reconciler's run of the merge aligns the repository and reports; the
+	// poller reads its artifact: the record carries the run, and nothing about
+	// the opt-in reaches the team's standup channel.
+	finished := time.Now().UTC().Truncate(time.Second)
+	run := st.ghs.actions.addRun(t, runStatusCompleted, finished, artifactReport{name: repoPresent, finishedAt: finished, result: reconcile.Result{Converged: true},
+		change: &inventory.Change{Kind: inventory.ChangeChanged, By: alice, PullRequest: &inventory.ChangePullRequest{Number: pr.Number, URL: committed.PullRequest.URL}}})
+	if p := st.poll(t); p.Artifacts != 1 || p.Pending != 0 {
+		t.Fatalf("poll with the run of the merge: %+v", p)
+	}
+	if rec := st.record(t, repoPresent); rec.Setup.PendingRun != nil || rec.Setup.LastRun == nil || rec.Setup.LastRun.RunURL != runURL(run.ID) ||
+		rec.Setup.LastRun.Change == nil || rec.Setup.LastRun.Change.Kind != inventory.ChangeChanged || rec.Setup.LastRun.Change.PullRequest == nil || rec.Setup.LastRun.Change.PullRequest.Number != pr.Number {
+		t.Fatalf("record after the run: %+v", rec.Setup)
+	}
+	if _, notices := st.gw.posted(); len(notices) != 0 {
+		t.Errorf("the run of an opt-in should post no sentence: %v", notices)
 	}
 }
 

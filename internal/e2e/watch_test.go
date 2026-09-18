@@ -15,13 +15,15 @@ import (
 
 // watch_repository against the fakes: a creation followed phase by phase as
 // GitHub and the inventory show them — to ready, to a failed step, to a run
-// that never reported, to a red release — and the timeout that answers with
-// what is pending.
+// that never reported, to a red release, through a read GitHub refuses — and
+// the timeout that answers with what is pending.
 
 const (
 	argTimeout = "timeout"
 	firstTag   = "v0.1.0"
 	shinyURL   = "https://github.com/" + org + "/" + shinyService
+	// throughSetUp are the phases done once the reconciler run has reported.
+	throughSetUp = "created scaffolded declared merged setUp"
 )
 
 // createShiny creates shiny-service as alice and merges nothing.
@@ -70,8 +72,10 @@ func names(ps []tools.Phase) string {
 // record expecting the run of its pull request, so the poller runs at its
 // pending interval; before the merge the watch answers with merged pending
 // and the three phases done; after the merge and the run, with the release
-// there but CircleCI silent, released stays pending; CircleCI's green
-// statuses during the wait make it ready with every phase.
+// there but CircleCI silent, released stays pending, as it does while
+// CircleCI's statuses are pending; its green statuses during the wait make
+// it ready with every phase. The statuses are read as the inventory App: the
+// fake refuses them to a person's token.
 func TestWatchRepositoryFollowsACreationToReadiness(t *testing.T) {
 	st := newStack(t)
 	c := st.as(t, aliceToken)
@@ -110,9 +114,13 @@ func TestWatchRepositoryFollowsACreationToReadiness(t *testing.T) {
 	}
 	st.ghs.repos.publish(shinyService, firstTag)
 	w = st.watch(t, c, pr, 0.3)
-	if w.Ready || w.Pending != tools.PhaseReleased || w.Failure != nil || names(w.Phases) != "created scaffolded declared merged setUp" ||
+	if w.Ready || w.Pending != tools.PhaseReleased || w.PendingReason != "" || w.Failure != nil || names(w.Phases) != throughSetUp ||
 		w.Release == nil || w.Release.Tag != firstTag || w.Release.URL != shinyURL+"/releases/tag/"+firstTag || len(w.Findings) != 1 || w.Findings[0].Kind != reconcile.FindingDefaultIcon {
 		t.Fatalf("before CircleCI reported: %+v release=%+v", w, w.Release)
+	}
+	st.ghs.repos.report(shinyService, statePending, circleBuild)
+	if w = st.watch(t, c, pr, 0.3); w.Ready || w.Pending != tools.PhaseReleased || w.PendingReason != "" || w.Failure != nil {
+		t.Fatalf("CircleCI pending: %+v", w)
 	}
 
 	go func() {
@@ -181,12 +189,38 @@ func TestWatchRepositoryReportsARedRelease(t *testing.T) {
 		Findings: []reconcile.Finding{{Kind: reconcile.FindingRedRelease, Message: red, Fix: firstTag + " is a dead tag"}}})
 	st.ghs.repos.publish(shinyService, firstTag)
 	w := st.watch(t, c, pr, 0.3)
-	if w.Ready || w.Failure == nil || w.Failure.Phase != tools.PhaseReleased || w.Failure.Reason != red || names(w.Phases) != "created scaffolded declared merged setUp" || w.Release == nil {
+	if w.Ready || w.Failure == nil || w.Failure.Phase != tools.PhaseReleased || w.Failure.Reason != red || names(w.Phases) != throughSetUp || w.Release == nil {
 		t.Fatalf("the reconciler's red release: %+v failure=%+v", w, w.Failure)
 	}
 	st.ghs.repos.report(shinyService, stateFailure, circleBuild)
 	w = st.watch(t, c, pr, 0.3)
 	if w.Failure == nil || w.Failure.Phase != tools.PhaseReleased || w.Failure.Reason != "the CircleCI statuses on "+firstTag+" are failure: "+circleBuild+" ("+stateFailure+")" {
 		t.Fatalf("CircleCI's red status: %+v", w.Failure)
+	}
+}
+
+// TestWatchRepositoryReportsARefusedRead: the inventory App's installation
+// does not cover the repository: GitHub refuses the statuses read with 403,
+// and the watch reports the released phase pending with the refusal — a fact
+// about the phase, never the tool's error; once the App reaches the
+// repository, the green statuses make it ready.
+func TestWatchRepositoryReportsARefusedRead(t *testing.T) {
+	st := newStack(t)
+	c := st.as(t, aliceToken)
+	created, prURL := st.createShiny(t, c)
+	pr := created.PullRequest.Number
+	st.ghs.files.merge(pr)
+	st.reported(t, pr, prURL, reconcile.StepResult{Step: reconcile.StepRelease, Verdict: reconcile.VerdictRepaired, Summary: "trigger the missed tag build for " + firstTag})
+	st.ghs.repos.publish(shinyService, firstTag)
+	st.ghs.repos.report(shinyService, stateSuccess, circleBuild, circlePush)
+	st.ghs.repos.installed(shinyService, false)
+	w := st.watch(t, c, pr, 0.3)
+	if w.Ready || w.Failure != nil || w.Pending != tools.PhaseReleased || names(w.Phases) != throughSetUp ||
+		!strings.Contains(w.PendingReason, "read the statuses of "+org+"/"+shinyService+"@"+firstTag+" as the inventory App") || !strings.Contains(w.PendingReason, "403") {
+		t.Fatalf("a refused statuses read: %+v", w)
+	}
+	st.ghs.repos.installed(shinyService, true)
+	if w = st.watch(t, c, pr, 0.3); !w.Ready || w.PendingReason != "" {
+		t.Fatalf("after the App reaches the repository: %+v", w)
 	}
 }

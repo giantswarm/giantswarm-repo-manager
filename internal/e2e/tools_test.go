@@ -331,6 +331,9 @@ func TestSetLifecycleArchivedAndApproveChange(t *testing.T) {
 	if out.Ask == nil || !out.Ask.Delivered || out.Ask.ReviewID == "" {
 		t.Errorf("delivery: %+v", out.Ask)
 	}
+	if !out.PullRequest.AutoMerge || !pr.AutoMerge {
+		t.Errorf("auto-merge is armed as the author at opening: %+v fake=%v", out.PullRequest, pr.AutoMerge)
+	}
 
 	// The clicking member is carol — not in team-bumblebee: refused, no review.
 	text, isErr := call(t, st.as(t, carolToken), tools.ToolApproveChange, map[string]any{argMode: modeCommit, argPullRequest: pr.Number})
@@ -343,11 +346,44 @@ func TestSetLifecycleArchivedAndApproveChange(t *testing.T) {
 	if !isErr || !strings.Contains(text, alice+" opened "+org+"/github#") || !strings.Contains(text, "another member of "+team+" has to approve") || len(pr.Reviews) != 0 {
 		t.Errorf("alice's own approval: isError=%v %s reviews=%v", isErr, text, pr.Reviews)
 	}
-	// dave, a member who did not open it, lands the review.
+	// dave, a member who did not open it, lands the review; GitHub's
+	// auto-merge, armed at opening, merges the pull request on it.
 	var a tools.Approval
 	st.callJSON(t, st.as(t, daveToken), tools.ToolApproveChange, map[string]any{argMode: modeCommit, argPullRequest: pr.Number}, &a)
 	if !a.Member || a.Team != team || a.Author != alice || a.ReviewURL == "" || len(pr.Reviews) != 1 || pr.Reviews[0].User != dave || pr.Reviews[0].Event != "APPROVE" {
 		t.Errorf("dave's approval: %+v reviews=%v", a, pr.Reviews)
+	}
+	if !a.Merged || !pr.Merged || a.Message != fmt.Sprintf("Approved as %s and merged: %s/github#%d.", dave, org, pr.Number) {
+		t.Errorf("landing: %+v fake merged=%v", a, pr.Merged)
+	}
+}
+
+// TestApproveLandsAPullRequestWithoutAutoMerge: a pull request opened before
+// auto-merge was armed at opening is merged by the approver, as them, with
+// the squash titled after it; one whose checks still run is left to
+// auto-merge, armed by the approver; the answer says which in one sentence.
+func TestApproveLandsAPullRequestWithoutAutoMerge(t *testing.T) {
+	st := newStack(t)
+	st.ghs.teams[dave] = []string{team}
+	var out tools.Committed
+	st.callJSON(t, st.as(t, aliceToken), tools.ToolSetLifecycle, map[string]any{argMode: modeCommit, kRepository: repoPresent, argLifecycle: lifecycleArchived}, &out)
+	pr := st.ghs.files.pullRequests()[0]
+	st.ghs.files.disarmAutoMerge(pr.Number)
+
+	// Checks still running: not mergeable, so auto-merge is armed instead.
+	st.ghs.files.setChecksPending(pr.Number, true)
+	var a tools.Approval
+	st.callJSON(t, st.as(t, daveToken), tools.ToolApproveChange, map[string]any{argMode: modeCommit, argPullRequest: pr.Number}, &a)
+	if a.Merged || !a.AutoMerge || pr.Merged || !pr.AutoMerge || a.Message != fmt.Sprintf("Approved as %s; %s/github#%d merges by itself once its checks pass.", dave, org, pr.Number) {
+		t.Errorf("pending checks: %+v fake merged=%v autoMerge=%v", a, pr.Merged, pr.AutoMerge)
+	}
+
+	// A second pull request, checks done, no auto-merge: merged by the approver.
+	st.ghs.files.disarmAutoMerge(pr.Number)
+	st.ghs.files.setChecksPending(pr.Number, false)
+	st.callJSON(t, st.as(t, daveToken), tools.ToolApproveChange, map[string]any{argMode: modeCommit, argPullRequest: pr.Number}, &a)
+	if !a.Merged || a.AutoMerge || !pr.Merged || pr.MergeTitle != fmt.Sprintf("%s (#%d)", pr.Title, pr.Number) || a.Message != fmt.Sprintf("Approved as %s and merged: %s/github#%d.", dave, org, pr.Number) {
+		t.Errorf("merge by the approver: %+v fake merged=%v title=%q", a, pr.Merged, pr.MergeTitle)
 	}
 }
 

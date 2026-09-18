@@ -39,6 +39,8 @@ const (
 	kPublic        = "public"
 	kPath          = "path"
 	kType          = "type"
+	kMessage       = "message"
+	kData          = "data"
 	kGitHub        = "github"
 	kSHA           = "sha"
 	kObject        = "object"
@@ -78,6 +80,12 @@ type fakePullRequest struct {
 	Author  string
 	Files   map[string][]byte
 	Reviews []fakeReview
+	// AutoMerge is GitHub's auto-merge, armed through GraphQL; Merged is set
+	// by a merge call, or by an approving review while AutoMerge is armed —
+	// the way GitHub merges by itself. MergeTitle is the squash commit's.
+	AutoMerge  bool
+	Merged     bool
+	MergeTitle string
 }
 
 type fakeReview struct{ User, Event, Body string }
@@ -93,6 +101,9 @@ type fakeTeamFiles struct {
 	dispatches []map[string]any
 	// denied are the logins whose credential does not reach the repository.
 	denied map[string]bool
+	// checksPending marks pull requests whose checks still run: GitHub
+	// refuses to merge them (405) and lets auto-merge be armed.
+	checksPending map[int]bool
 }
 
 func newFakeTeamFiles() *fakeTeamFiles {
@@ -279,7 +290,36 @@ func (f *fakeTeamFiles) register(mux *http.ServeMux, g *fakeGitHub) {
 			return
 		}
 		pr.Reviews = append(pr.Reviews, fakeReview{User: login, Event: req.Event, Body: req.Body})
+		if req.Event == "APPROVE" && pr.AutoMerge && !f.checksPending[pr.Number] {
+			// GitHub merges an auto-merge pull request itself once the review is in.
+			pr.Merged = true
+		}
 		writeJSON(w, http.StatusOK, map[string]any{kID: len(pr.Reviews), kState: "APPROVED", kHTMLURL: fmt.Sprintf("https://github.com/%s/github/pull/%d#pullrequestreview-%d", org, pr.Number, len(pr.Reviews)), "user": map[string]any{kLogin: login}})
+	})
+	mux.HandleFunc("PUT "+base+"/pulls/{n}/merge", func(w http.ResponseWriter, r *http.Request) {
+		var req struct {
+			CommitTitle string `json:"commit_title"`
+			MergeMethod string `json:"merge_method"`
+		}
+		_ = json.NewDecoder(r.Body).Decode(&req)
+		f.mu.Lock()
+		defer f.mu.Unlock()
+		pr := f.pull(r)
+		switch {
+		case pr == nil:
+			ghMessage(w, http.StatusNotFound, "Not Found")
+		case pr.Merged:
+			ghMessage(w, http.StatusMethodNotAllowed, "Pull Request is not mergeable")
+		case f.checksPending[pr.Number]:
+			ghMessage(w, http.StatusMethodNotAllowed, "Required status check \"Repositories YAML\" is expected.")
+		case len(pr.Reviews) == 0:
+			ghMessage(w, http.StatusMethodNotAllowed, "At least 1 approving review is required by reviewers with write access.")
+		case req.MergeMethod != "squash":
+			ghMessage(w, http.StatusMethodNotAllowed, "Merge method not allowed")
+		default:
+			pr.Merged, pr.MergeTitle = true, req.CommitTitle
+			writeJSON(w, http.StatusOK, map[string]any{"sha": "merged00", "merged": true, kMessage: "Pull Request successfully merged"})
+		}
 	})
 	mux.HandleFunc("POST "+base+"/actions/workflows/{file}/dispatches", func(w http.ResponseWriter, r *http.Request) {
 		body, _ := io.ReadAll(r.Body)
@@ -300,8 +340,67 @@ func (f *fakeTeamFiles) pull(r *http.Request) *fakePullRequest {
 }
 
 func (f *fakeTeamFiles) pullJSON(pr *fakePullRequest) map[string]any {
-	return map[string]any{"number": pr.Number, "title": pr.Title, "body": pr.Body, kHTMLURL: fmt.Sprintf("https://github.com/%s/github/pull/%d", org, pr.Number),
-		"user": map[string]any{kLogin: pr.Author}, "head": map[string]any{kRef: pr.Head}, "created_at": time.Now().UTC().Format(time.RFC3339)}
+	out := map[string]any{"number": pr.Number, "node_id": pullNodeID(pr.Number), "title": pr.Title, "body": pr.Body, kHTMLURL: fmt.Sprintf("https://github.com/%s/github/pull/%d", org, pr.Number),
+		"user": map[string]any{kLogin: pr.Author}, "head": map[string]any{kRef: pr.Head}, "created_at": time.Now().UTC().Format(time.RFC3339),
+		"merged": pr.Merged, "mergeable": !pr.Merged, "mergeable_state": "blocked"}
+	if len(pr.Reviews) > 0 && !f.checksPending[pr.Number] {
+		out["mergeable_state"] = "clean"
+	}
+	if pr.AutoMerge {
+		out["auto_merge"] = map[string]any{"merge_method": "squash"}
+	}
+	return out
+}
+
+// pullNodeID is a pull request's GraphQL id in the fake.
+func pullNodeID(n int) string { return fmt.Sprintf("PR_%d", n) }
+
+// handleAutoMerge answers the enablePullRequestAutoMerge mutation the way
+// GitHub does: armed for a pull request that cannot be merged yet, refused
+// for one that could be merged right away ("clean status") or is merged.
+func (f *fakeTeamFiles) handleAutoMerge(w http.ResponseWriter, body []byte) {
+	var req struct {
+		Variables struct {
+			ID string `json:"id"`
+		} `json:"variables"`
+	}
+	_ = json.Unmarshal(body, &req)
+	n, _ := strconv.Atoi(strings.TrimPrefix(req.Variables.ID, "PR_"))
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	pr := f.pulls[n]
+	refuse := func(msg string) {
+		writeJSON(w, http.StatusOK, map[string]any{kData: nil, "errors": []map[string]any{{kMessage: msg, kType: "UNPROCESSABLE"}}})
+	}
+	switch {
+	case pr == nil:
+		refuse("Could not resolve to a node with the global id of '" + req.Variables.ID + "'")
+	case pr.Merged:
+		refuse("Pull request is in merged status")
+	case len(pr.Reviews) > 0 && !f.checksPending[pr.Number]:
+		refuse("Pull request is in clean status")
+	default:
+		pr.AutoMerge = true
+		writeJSON(w, http.StatusOK, map[string]any{kData: map[string]any{"enablePullRequestAutoMerge": map[string]any{"pullRequest": map[string]any{"number": n}}}})
+	}
+}
+
+// setChecksPending marks n's checks as still running (or done).
+func (f *fakeTeamFiles) setChecksPending(n int, pending bool) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.checksPending == nil {
+		f.checksPending = map[int]bool{}
+	}
+	f.checksPending[n] = pending
+}
+
+// disarmAutoMerge models a pull request opened before auto-merge was armed
+// at opening.
+func (f *fakeTeamFiles) disarmAutoMerge(n int) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.pulls[n].AutoMerge = false
 }
 
 // fakeGateway is klaus-gateway's team-review endpoint: it admits one bearer

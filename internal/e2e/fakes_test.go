@@ -1,11 +1,13 @@
 package e2e
 
 import (
+	"bytes"
 	"crypto/rand"
 	"crypto/rsa"
 	"crypto/x509"
 	"encoding/json"
 	"encoding/pem"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -54,7 +56,17 @@ func newFakeGitHub(t *testing.T, logins map[string]string) *fakeGitHub {
 	t.Helper()
 	g := &fakeGitHub{logins: logins, teams: map[string][]string{}, org: &fakeOrg{remaining: 5000, now: time.Now()}, files: newFakeTeamFiles(), actions: &fakeActions{}, repos: newFakeRepos(), roles: map[string]string{}}
 	mux := http.NewServeMux()
-	mux.HandleFunc("POST /api/v3/graphql", g.org.handle)
+	mux.HandleFunc("POST /api/v3/graphql", func(w http.ResponseWriter, r *http.Request) {
+		// The team-files fake takes the auto-merge mutation; the org fake
+		// answers every query.
+		body, _ := io.ReadAll(r.Body)
+		if strings.Contains(string(body), "enablePullRequestAutoMerge") {
+			g.files.handleAutoMerge(w, body)
+			return
+		}
+		r.Body = io.NopCloser(bytes.NewReader(body))
+		g.org.handle(w, r)
+	})
 	g.files.register(mux, g)
 	g.actions.register(mux, g)
 	g.repos.register(mux, g)
@@ -123,7 +135,7 @@ func bearer(r *http.Request) string {
 
 // ghMessage is GitHub's error body shape.
 func ghMessage(w http.ResponseWriter, status int, msg string) {
-	writeJSON(w, status, map[string]any{"message": msg})
+	writeJSON(w, status, map[string]any{kMessage: msg})
 }
 
 func writeJSON(w http.ResponseWriter, status int, v any) {

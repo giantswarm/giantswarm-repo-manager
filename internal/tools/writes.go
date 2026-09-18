@@ -58,6 +58,10 @@ type Plan struct {
 	Notice *PlannedMessage `json:"notice,omitempty"`
 
 	change teamfiles.Change
+	// kind is the change the pull request makes, as the reconciler classifies
+	// it (archived, deprecated, transferred, changed): the record's expected
+	// run is marked with it.
+	kind string
 }
 
 // PlannedPullRequest is the pull request before it exists.
@@ -86,7 +90,15 @@ type Committed struct {
 	PullRequest *teamfiles.PullRequest `json:"pullRequest"`
 	Ask         *Delivery              `json:"ask,omitempty"`
 	Notice      *Delivery              `json:"notice,omitempty"`
+	// PendingRun is the record's expectation of the reconciler run that
+	// follows the pull request's merge: the poller reads its artifact within
+	// the pending interval. Nil when the mark could not be stored.
+	PendingRun *inventory.PendingRun `json:"pendingRun,omitempty"`
 }
+
+// pendingRunSentence closes the description of every write that opens a
+// pull request: what the record shows until the run of the merge reports.
+const pendingRunSentence = " The record shows setup.pendingRun until the reconciler run of the merged pull request has reported (get_repository)."
 
 // Delivery is what became of an ask or notice.
 type Delivery struct {
@@ -241,8 +253,52 @@ func (t *tools) commit(ctx context.Context, p *person, pl *Plan) (*Committed, er
 	if pl.Notice != nil {
 		out.Notice = t.deliver(ctx, pl.Notice, pr, false)
 	}
+	if pl.kind != "" {
+		out.PendingRun = t.expectRun(ctx, p, pl.Repository, pl.kind, pr)
+	}
 	t.d.Log.Info("pull request opened", "tool", pl.change.Title, "pr", pr.URL, "as", pr.Author)
 	return out, nil
+}
+
+// expectRun marks the record of repository (owner/name) as expecting the
+// reconciler run that follows the merge of pull request pr, a team-file
+// change of kind by the person, the way an Align now marks a dispatch: the
+// poller reads the run's artifact within its pending interval, and a run
+// that does not report within the window leaves the finding
+// reconcile-run-missing, worded for the kind. A repository the inventory
+// has not seen yet gets its record built first. Nil, with a log line, when
+// the mark could not be stored — the pull request stands either way.
+func (t *tools) expectRun(ctx context.Context, p *person, repository, kind string, pr *teamfiles.PullRequest) *inventory.PendingRun {
+	if t.d.Inventory == nil || t.d.Collector == nil {
+		return nil
+	}
+	rec, err := t.d.Inventory.Get(ctx, repository)
+	if errors.Is(err, inventory.ErrNotFound) {
+		rec, err = t.d.Collector.Refresh(ctx, repository, nil, inventory.SourceRefresh)
+	}
+	if err != nil {
+		t.d.Log.Error("pending run not stored: record unreadable", "repository", repository, "error", err)
+		return nil
+	}
+	rec.Opened(time.Now().UTC(), p.login, kind, inventory.ChangePullRequest{Number: pr.Number, URL: pr.URL})
+	if err := t.putExpectedRun(ctx, rec); err != nil {
+		t.d.Log.Error("pending run not stored", "repository", repository, "error", err)
+		return nil
+	}
+	return rec.Setup.PendingRun
+}
+
+// putExpectedRun stores rec, whose pending run was just marked, and wakes the
+// reconciler poller: the run's artifact is looked for at once and then every
+// pending interval, not at the poller's next tick.
+func (t *tools) putExpectedRun(ctx context.Context, rec *inventory.Record) error {
+	if err := t.d.Inventory.Put(ctx, rec); err != nil {
+		return err
+	}
+	if t.d.Collector != nil {
+		t.d.Collector.WakeReconciler()
+	}
+	return nil
 }
 
 // deliver posts a planned message; a failure is reported, not fatal — the
@@ -305,7 +361,7 @@ func (t *tools) updateRepository() WriteTool {
 		Description: "Change the configuration of a declared repository: its team-file entry is replaced by the entry you pass " +
 			"(the whole entry — name, componentType, gen and every other field as it should read afterwards). The entry is validated against " +
 			"the repositories schema (not the creation rules, which apply to new repositories only); the reconciler applies the change after " +
-			"the team's review. Use set_lifecycle to deprecate or archive and transfer_repository to move a repository to another team.",
+			"the team's review. Use set_lifecycle to deprecate or archive and transfer_repository to move a repository to another team." + pendingRunSentence,
 		Options: []mcp.ToolOption{
 			mcp.WithString(argRepository, mcp.Required(), mcp.Description("Repository name, with or without the org.")),
 			mcp.WithObject(argEntry, mcp.Required(), mcp.Description("The entry as it should read in the team file afterwards (the full entry, not a patch)."), mcp.AdditionalProperties(true)),
@@ -379,7 +435,7 @@ func (t *tools) replacePlan(ctx context.Context, tf *teamfiles.TeamFile, name st
 	if err != nil {
 		return nil, err
 	}
-	pl := &Plan{Repository: t.org() + "/" + name, Team: tf.Team, Problems: problems, change: teamfiles.Change{Files: map[string][]byte{tf.Path: content}}}
+	pl := &Plan{Repository: t.org() + "/" + name, Team: tf.Team, Problems: problems, change: teamfiles.Change{Files: map[string][]byte{tf.Path: content}}, kind: inventory.ChangeChanged}
 	pl.Before, _ = before.YAML()
 	pl.Entry, _ = after.YAML()
 	return pl, nil
@@ -399,7 +455,7 @@ func (t *tools) transferRepository() WriteTool {
 		Name: ToolTransferRepository,
 		Description: "Move a declared repository to another team: its entry leaves the giving team's file and enters the receiving team's " +
 			"file in one pull request that names both teams. The ask goes to the receiving team's channel (its member approves), the giving team " +
-			"gets a notice in its standup channel. The reconciler then re-applies permissions, CODEOWNERS and the catalog mapping for the new owner.",
+			"gets a notice in its standup channel. The reconciler then re-applies permissions, CODEOWNERS and the catalog mapping for the new owner." + pendingRunSentence,
 		Options: []mcp.ToolOption{
 			mcp.WithString(argRepository, mcp.Required(), mcp.Description("Repository name, with or without the org.")),
 			mcp.WithString(argToTeam, mcp.Required(), mcp.Description("The receiving team's slug (team-planeteers, …).")),
@@ -463,7 +519,7 @@ func (t *tools) planTransfer(ctx context.Context, repo teamfiles.Repo, as string
 		return nil, fmt.Errorf("insert into %s: %w", dst.Path, err)
 	}
 	pl := &Plan{Repository: t.org() + "/" + name, Team: to, FromTeam: from.Team, Problems: problems,
-		change: teamfiles.Change{Files: map[string][]byte{from.Path: without, dst.Path: with}}}
+		change: teamfiles.Change{Files: map[string][]byte{from.Path: without, dst.Path: with}}, kind: inventory.ChangeTransferred}
 	pl.Entry, _ = d.YAML()
 	reason, _ := args[argReason].(string)
 	pl.finish(repo, as, "reposetup/transfer-"+name, fmt.Sprintf("chore(repositories): transfer %s from %s to %s", name, from.Team, to),
@@ -502,7 +558,7 @@ func (t *tools) setLifecycle() WriteTool {
 		Name: ToolSetLifecycle,
 		Description: "Deprecate or archive a declared repository by setting lifecycle in its team-file entry. deprecated: security-only Renovate " +
 			"and a catalog flag. archived: the reconciler archives the repository on GitHub and unfollows it on CircleCI; the entry stays as the " +
-			"record. Deletion is not expressible. The ask goes to the owning team's channel; a member's Approve (or an approving review on GitHub) lands it.",
+			"record. Deletion is not expressible. The ask goes to the owning team's channel; a member's Approve (or an approving review on GitHub) lands it." + pendingRunSentence,
 		Options: []mcp.ToolOption{
 			mcp.WithString(argRepository, mcp.Required(), mcp.Description("Repository name, with or without the org.")),
 			mcp.WithString(argLifecycle, mcp.Required(), mcp.Enum(teamfiles.LifecycleDeprecated, teamfiles.LifecycleArchived), mcp.Description("deprecated or archived.")),
@@ -555,8 +611,10 @@ func (t *tools) planLifecycle(ctx context.Context, repo teamfiles.Repo, as strin
 	}
 	reason, _ := args[argReason].(string)
 	effect := "security-only Renovate updates and the catalog's deprecation flag"
+	pl.kind = inventory.ChangeDeprecated
 	if lc == teamfiles.LifecycleArchived {
 		effect = "the reconciler archives the repository on GitHub and unfollows it on CircleCI; the entry stays in the team file as the record"
+		pl.kind = inventory.ChangeArchived
 	}
 	pl.finish(repo, as, "reposetup/"+lc+"-"+name, fmt.Sprintf("chore(repositories): %s %s (%s)", verb(lc), name, tf.Team),
 		fmt.Sprintf("## Problem\n\n`%s/%s` is to be %s.\n\n## Solution\n\n`lifecycle: %s` in `%s` — %s.\n\n%s\n\nOpened by giantswarm-repo-manager (`%s`) as the caller.",

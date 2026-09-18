@@ -90,11 +90,16 @@ type Committed struct {
 
 // Delivery is what became of an ask or notice.
 type Delivery struct {
-	Team      string `json:"team"`
-	Channel   string `json:"channel,omitempty"`
-	Delivered bool   `json:"delivered"`
-	ReviewID  string `json:"reviewId,omitempty"`
-	Error     string `json:"error,omitempty"`
+	Team string `json:"team"`
+	// Channel is where the gateway posted (Posted.Channel): the debug
+	// channel under reviews.debugChannel, else the policy channel.
+	Channel string `json:"channel,omitempty"`
+	// IntendedChannel is the policy channel, present only when a debug
+	// redirect sent the message somewhere else.
+	IntendedChannel string `json:"intendedChannel,omitempty"`
+	Delivered       bool   `json:"delivered"`
+	ReviewID        string `json:"reviewId,omitempty"`
+	Error           string `json:"error,omitempty"`
 }
 
 // planner renders a write's plan with the repository read as whom the call
@@ -266,6 +271,12 @@ func (t *tools) deliver(ctx context.Context, m *PlannedMessage, pr *teamfiles.Pu
 	}
 	d.Delivered = true
 	d.ReviewID = posted.ID
+	if posted.Channel != "" && posted.Channel != d.Channel {
+		d.IntendedChannel = d.Channel
+	}
+	if posted.Channel != "" {
+		d.Channel = posted.Channel
+	}
 	return d
 }
 

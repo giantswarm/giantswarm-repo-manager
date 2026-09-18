@@ -298,7 +298,8 @@ func TestTransferNamesBothTeams(t *testing.T) {
 	}
 	asks, notices := st.gw.posted()
 	if len(asks) != 1 || asks[0][kChannel] != planeteersChannel || asks[0]["team"] != teamPlaneteers || len(notices) != 1 || notices[0][kChannel] != bumblebeeStandup ||
-		out.Ask == nil || !out.Ask.Delivered || out.Notice == nil || !out.Notice.Delivered {
+		out.Ask == nil || !out.Ask.Delivered || out.Ask.Channel != planeteersChannel || out.Ask.IntendedChannel != "" ||
+		out.Notice == nil || !out.Notice.Delivered || out.Notice.Channel != bumblebeeStandup || out.Notice.IntendedChannel != "" {
 		t.Errorf("asks=%v notices=%v out=%+v", asks, notices, out)
 	}
 }
@@ -330,7 +331,8 @@ func TestDebugChannelReceivesEveryAskAndNotice(t *testing.T) {
 	if notice[kChannel] != debugChannelID || notice["team"] != team || !strings.HasSuffix(noticeText, " (for "+bumblebeeStandup+")") {
 		t.Errorf("notice: %v", notice)
 	}
-	if out.Ask == nil || !out.Ask.Delivered || out.Ask.Channel != planeteersChannel || out.Notice == nil || !out.Notice.Delivered || out.Notice.Channel != bumblebeeStandup {
+	if out.Ask == nil || !out.Ask.Delivered || out.Ask.Channel != debugChannelID || out.Ask.IntendedChannel != planeteersChannel ||
+		out.Notice == nil || !out.Notice.Delivered || out.Notice.Channel != debugChannelID || out.Notice.IntendedChannel != bumblebeeStandup {
 		t.Errorf("answer: ask=%+v notice=%+v", out.Ask, out.Notice)
 	}
 }

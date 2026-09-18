@@ -9,6 +9,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- `set_lifecycle` takes `deleted`, the fourth lifecycle: the reconciler unfollows the repository on CircleCI and
+  deletes it on GitHub — code, issues, pull requests, releases and packages with it; an organization owner can restore
+  it on GitHub for 90 days — and the entry stays in the team file as the record of the deletion. A deletion needs
+  `confirm`, the repository's name as the person typed it (with or without the org), and is refused without it or
+  with another name; the pull request (`chore(repositories): delete <name> (<team>)`), the ask and the record's
+  expected run (`kind: deleted`) say what happens, and the team's standup channel hears "<person> deleted the repo
+  <name>" after the run. `list_repositories` filters `lifecycle: deleted`, and the boolean `archived` counts a
+  declared deletion among the repositories whose life is over (hidden by the page's default). devctl 8.67.0, whose
+  engine handles the lifecycle (giantswarm/giantswarm-repo-manager#87).
+
 ### Changed
 
 - `align_repository` on a declared repository that has not opted in is the opt-in, not a check: the answer's `mode` is `opt-in`, nothing is dispatched, and the tool opens the team-file pull request that sets `align: true` in the entry as the caller — nothing else in the entry changes, auto-merge is armed, the ask with the Approve button goes to the owning team's channel (a member other than the caller approves), the record marks the expected run — so that the reconciler's run of the merge aligns the repository. The answer carries `optIn.plan` (the entry before and after, the pull request, the ask) and, after the commit, `optIn.committed` (pull request, ask delivery, pending run); `then` and `warning` say what happens on the merge. An opted-in repository is dispatched as before (`align`), one without an entry is checked from the team alone (`check`). A field an edit adds to an entry (`align`, `lifecycle`) lands before the entry's `gen` block, where the team files keep it, instead of after it (giantswarm/giantswarm-repo-manager#85).

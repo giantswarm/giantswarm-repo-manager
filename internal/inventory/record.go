@@ -301,6 +301,7 @@ const (
 	// ChangeTransferred: the entry moved from another team's file (FromTeam).
 	ChangeTransferred = "transferred"
 	ChangeArchived    = "archived"
+	ChangeDeleted     = "deleted"
 	ChangeDeprecated  = "deprecated"
 	// ChangeChanged: any other edit of the entry.
 	ChangeChanged = "changed"
@@ -319,7 +320,7 @@ func (ch *Change) PersonMade() bool {
 		return false
 	}
 	switch ch.Kind {
-	case ChangeCreated, ChangeAdded, ChangeTransferred, ChangeArchived, ChangeDeprecated, ChangeChanged:
+	case ChangeCreated, ChangeAdded, ChangeTransferred, ChangeArchived, ChangeDeleted, ChangeDeprecated, ChangeChanged:
 		return true
 	}
 	return false
@@ -499,6 +500,8 @@ func PullRequestNoun(kind string) string {
 		return "declaration"
 	case ChangeArchived:
 		return "archive"
+	case ChangeDeleted:
+		return "deletion"
 	case ChangeDeprecated:
 		return "deprecation"
 	case ChangeTransferred:
@@ -515,7 +518,7 @@ func (r *Record) Dispatched(now time.Time, by string) {
 }
 
 // Opened marks a team-file pull request pr of kind (created, archived,
-// deprecated, transferred, changed) opened by login at now: setup.pendingRun
+// deleted, deprecated, transferred, changed) opened by login at now: setup.pendingRun
 // expects the reconciler run that follows the merge — without a deadline
 // while the pull request is open, within the pending window once it has
 // merged (Merged) — until the run's artifact or the window's end.

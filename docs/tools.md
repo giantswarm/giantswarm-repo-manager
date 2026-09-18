@@ -169,7 +169,7 @@ Read-only. The inventory of the org's repositories from the store: one row per r
 {
   "properties": {
     "archived": {
-      "description": "Only repositories that are archived — declared archived or archived on GitHub (true) — or only those that are not (false). Independent of lifecycle.",
+      "description": "Only repositories whose life is over — declared archived or deleted, or archived on GitHub (true) — or only those that are not (false). Independent of lifecycle.",
       "type": "boolean"
     },
     "arm64": {
@@ -199,7 +199,7 @@ Read-only. The inventory of the org's repositories from the store: one row per r
       "type": "number"
     },
     "lifecycle": {
-      "description": "Only repositories with this lifecycle: active (none declared, and not archived on GitHub), deprecated (declared), archived (declared archived, or archived on GitHub); another value is matched against the declared lifecycle.",
+      "description": "Only repositories with this lifecycle: active (none declared, and not archived on GitHub), deprecated (declared), archived (declared archived, or archived on GitHub), deleted (declared; the repository is gone or about to be); another value is matched against the declared lifecycle.",
       "type": "string"
     },
     "limit": {
@@ -287,20 +287,25 @@ Rebuild one repository's inventory record now from GitHub, CircleCI and the team
 
 ## `set_lifecycle`
 
-WRITES (as you, with your own GitHub token through the App giantswarm-repo-manager). Deprecate or archive a declared repository by setting lifecycle in its team-file entry. deprecated: security-only Renovate and a catalog flag. archived: the reconciler archives the repository on GitHub and unfollows it on CircleCI; the entry stays as the record. An entry without `align: true` gets it beside the lifecycle — the change opts the repository in to alignment, else the reconciler would record the lifecycle and apply nothing — and the ask says so. Deletion is not expressible. The ask goes to the owning team's channel; a member's Approve (or an approving review on GitHub) lands it. The record shows setup.pendingRun until the reconciler run of the merged pull request has reported (get_repository). Every write takes dryRun and mode: dryRun: true returns the rendered change and writes nothing; mode: "commit" opens the team-file pull request as you and may take up to a minute (its writes run on GitHub within the call) — wait for the one answer. mode: "apply" is refused for every write tool (a repository without its declaration is drift), and mode is required unless dryRun is true.
+WRITES (as you, with your own GitHub token through the App giantswarm-repo-manager). Deprecate, archive or delete a declared repository by setting lifecycle in its team-file entry. deprecated: security-only Renovate and a catalog flag. archived: the reconciler archives the repository on GitHub and unfollows it on CircleCI; the entry stays as the record. deleted: the reconciler unfollows the repository on CircleCI and deletes it on GitHub — code, issues, pull requests, releases and packages with it (an organization owner can restore it on GitHub for 90 days); the entry stays as the record of the deletion; needs confirm, the repository's name typed by the person, and is refused without it. An entry without `align: true` gets it beside the lifecycle — the change opts the repository in to alignment, else the reconciler would record the lifecycle and apply nothing — and the ask says so. The ask goes to the owning team's channel; a member's Approve (or an approving review on GitHub) lands it. The record shows setup.pendingRun until the reconciler run of the merged pull request has reported (get_repository). Every write takes dryRun and mode: dryRun: true returns the rendered change and writes nothing; mode: "commit" opens the team-file pull request as you and may take up to a minute (its writes run on GitHub within the call) — wait for the one answer. mode: "apply" is refused for every write tool (a repository without its declaration is drift), and mode is required unless dryRun is true.
 
 ```json
 {
   "properties": {
+    "confirm": {
+      "description": "For deleted: the repository's name, with or without the org, as the person typed it. Refused when absent or another name.",
+      "type": "string"
+    },
     "dryRun": {
       "description": "Render the change and write nothing (default false).",
       "type": "boolean"
     },
     "lifecycle": {
-      "description": "deprecated or archived.",
+      "description": "deprecated, archived or deleted.",
       "enum": [
         "deprecated",
-        "archived"
+        "archived",
+        "deleted"
       ],
       "type": "string"
     },

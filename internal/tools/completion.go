@@ -73,7 +73,7 @@ type Completion struct {
 
 // Completions renders what a run tells the team, in order: the sentence
 // about the change when a person made one — created, added, transferred,
-// archived or deprecated the repository — then one sentence per failed step
+// archived, deleted or deprecated the repository — then one sentence per failed step
 // and per finding of that person's run, each with what to do. A run nobody's
 // change is behind — an Align now, the schedule, an artifact without a
 // change block — yields nothing, findings and failures included: the
@@ -141,6 +141,8 @@ func changeSentence(rec *inventory.Record) string {
 		return fmt.Sprintf("%s transferred the repo %s%s%s to %s", by, name, describe(rec.Declaration), from, team)
 	case inventory.ChangeArchived:
 		return fmt.Sprintf("%s archived the repo %s", by, name)
+	case inventory.ChangeDeleted:
+		return fmt.Sprintf("%s deleted the repo %s", by, name)
 	case inventory.ChangeDeprecated:
 		return fmt.Sprintf("%s deprecated the repo %s", by, name)
 	}

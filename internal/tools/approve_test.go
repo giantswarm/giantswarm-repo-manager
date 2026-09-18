@@ -8,6 +8,21 @@ import (
 	"github.com/giantswarm/giantswarm-repo-manager/internal/teamfiles"
 )
 
+// The approval's sentence for the channel says what became of the pull
+// request: merged, left to auto-merge, or neither and why.
+func TestApprovalOutcomeIsOneSentence(t *testing.T) {
+	d := decision{repo: teamfiles.Repo{Owner: "giantswarm", Name: "github", Ref: "main"}, number: 6119, team: testTeam, author: testAuthor}
+	for want, l := range map[string]teamfiles.Landing{
+		"Approved as carol and merged: giantswarm/github#6119.":                                                                              {Merged: true},
+		"Approved as carol; giantswarm/github#6119 merges by itself once its checks pass.":                                                   {AutoMerge: true},
+		"Approved as carol; giantswarm/github#6119 is not merged: merging giantswarm/github#6119 failed: 403 Forbidden. Merge it on GitHub.": {Reason: "merging giantswarm/github#6119 failed: 403 Forbidden."},
+	} {
+		if got := d.outcome("carol", l); got != want {
+			t.Errorf("outcome(%+v):\n got %q\nwant %q", l, got, want)
+		}
+	}
+}
+
 // testAuthor opened the pull request under test.
 const testAuthor = "alice"
 

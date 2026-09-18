@@ -217,6 +217,18 @@ func (t *tools) commit(ctx context.Context, p *person, pl *Plan) (*Committed, er
 	if err != nil {
 		return nil, err
 	}
+	// The team's approval is the last thing the change waits for: with
+	// auto-merge armed as the author, GitHub merges the pull request the
+	// moment a member's review lands and its checks are green — from the
+	// Slack button or from GitHub alike. A refusal (the repository does not
+	// allow it) leaves the landing to approve_change.
+	if !pr.AutoMerge {
+		if err := p.repo.EnableAutoMerge(ctx, pr.NodeID); err != nil {
+			t.d.Log.Warn("auto-merge not armed", "pr", pr.URL, "error", err)
+		} else {
+			pr.AutoMerge = true
+		}
+	}
 	out := &Committed{PullRequest: pr}
 	if pl.Ask != nil {
 		out.Ask = t.deliver(ctx, pl.Ask, pr, true)
@@ -561,14 +573,23 @@ type Approval struct {
 	Teams     []string `json:"teams,omitempty"`
 	Member    bool     `json:"member"`
 	ReviewURL string   `json:"reviewUrl,omitempty"`
+	// Merged says the approval landed the pull request; AutoMerge that GitHub
+	// merges it by itself once its checks are green. Neither: Message says
+	// why, and the pull request is merged on GitHub by hand.
+	Merged    bool `json:"merged"`
+	AutoMerge bool `json:"autoMerge"`
+	// Message is the approval's outcome in one sentence, for the channel the
+	// Approve button was clicked in.
+	Message string `json:"message,omitempty"`
 }
 
 func (t *tools) approveChange() WriteTool {
 	return WriteTool{
 		Name: ToolApproveChange,
 		Description: "Approve a team-file pull request as you, after this server has checked on GitHub that you are a member of the team " +
-			"the change belongs to (the owning team; for a transfer the receiving team). The Approve button of a Slack ask calls this tool as the " +
-			"clicking member; a member may also call it directly, and approving on GitHub is equivalent. A non-member is refused, and so is the " +
+			"the change belongs to (the owning team; for a transfer the receiving team), and land it: merged as you when GitHub lets it, else left " +
+			"to GitHub's auto-merge (armed if it was not) — the answer says which, or why neither. The Approve button of a Slack ask calls this tool " +
+			"as the clicking member; a member may also call it directly, and approving on GitHub is equivalent. A non-member is refused, and so is the " +
 			"person who opened the pull request: GitHub does not accept an author's approval of their own pull request, another member has to approve.",
 		Options: []mcp.ToolOption{
 			mcp.WithNumber(argPullRequest, mcp.Required(), mcp.Description("The pull request number in the team-files repository (giantswarm/github).")),
@@ -616,8 +637,24 @@ func (t *tools) approve(ctx context.Context, args map[string]any, submit bool) (
 		return nil, err
 	}
 	a.ReviewURL = url
-	t.d.Log.Info("pull request approved", "pr", n, "team", d.team, "as", p.login)
+	landing := p.repo.Land(ctx, n)
+	a.Merged, a.AutoMerge, a.Message = landing.Merged, landing.AutoMerge, d.outcome(p.login, landing)
+	t.d.Log.Info("pull request approved", "pr", n, "team", d.team, "as", p.login, "merged", a.Merged, "autoMerge", a.AutoMerge, "reason", landing.Reason)
 	return a, nil
+}
+
+// outcome is the approval's one sentence for the channel: approved as whom,
+// and what became of the pull request.
+func (d decision) outcome(login string, l teamfiles.Landing) string {
+	pr := fmt.Sprintf("%s/%s#%d", d.repo.Owner, d.repo.Name, d.number)
+	switch {
+	case l.Merged:
+		return fmt.Sprintf("Approved as %s and merged: %s.", login, pr)
+	case l.AutoMerge:
+		return fmt.Sprintf("Approved as %s; %s merges by itself once its checks pass.", login, pr)
+	default:
+		return fmt.Sprintf("Approved as %s; %s is not merged: %s Merge it on GitHub.", login, pr, strings.TrimSuffix(l.Reason, ".")+".")
+	}
 }
 
 // decision is what a pull request's approval turns on: the team whose member

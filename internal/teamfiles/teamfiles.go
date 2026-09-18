@@ -267,6 +267,19 @@ type PullRequest struct {
 	// Existing says the pull request was open already for this change's
 	// branch and is reported, not opened again.
 	Existing bool `json:"existing,omitempty"`
+	// AutoMerge says GitHub merges the pull request by itself once it has
+	// its approving review and its checks are green.
+	AutoMerge bool `json:"autoMerge"`
+	// NodeID is the pull request's GraphQL id; auto-merge is GraphQL-only.
+	NodeID string `json:"-"`
+}
+
+// Landing is what became of a pull request after its approval: merged by the
+// approver, left to GitHub to merge by itself, or neither — Reason says why.
+type Landing struct {
+	Merged    bool   `json:"merged"`
+	AutoMerge bool   `json:"autoMerge"`
+	Reason    string `json:"reason,omitempty"`
 }
 
 // OpenPullRequest creates the branch off Ref with one commit carrying every
@@ -315,7 +328,7 @@ func (r Repo) OpenPullRequest(ctx context.Context, ch Change) (*PullRequest, err
 	if err != nil {
 		return nil, fmt.Errorf("%s: open pull request: %w", r.Slug(), err)
 	}
-	return &PullRequest{Number: pr.GetNumber(), URL: pr.GetHTMLURL(), Branch: ch.Branch, Title: ch.Title, Author: pr.GetUser().GetLogin()}, nil
+	return &PullRequest{Number: pr.GetNumber(), URL: pr.GetHTMLURL(), Branch: ch.Branch, Title: ch.Title, Author: pr.GetUser().GetLogin(), NodeID: pr.GetNodeID()}, nil
 }
 
 // openFor is the open pull request from branch — a change committed once
@@ -332,7 +345,78 @@ func (r Repo) openFor(ctx context.Context, branch string) (*PullRequest, error) 
 		return nil, fmt.Errorf("%s: branch %s exists already without an open pull request — delete the branch and run again", r.Slug(), branch)
 	}
 	pr := prs[0]
-	return &PullRequest{Number: pr.GetNumber(), URL: pr.GetHTMLURL(), Branch: branch, Title: pr.GetTitle(), Author: pr.GetUser().GetLogin(), Existing: true}, nil
+	return &PullRequest{Number: pr.GetNumber(), URL: pr.GetHTMLURL(), Branch: branch, Title: pr.GetTitle(), Author: pr.GetUser().GetLogin(), Existing: true,
+		AutoMerge: pr.GetAutoMerge() != nil, NodeID: pr.GetNodeID()}, nil
+}
+
+// EnableAutoMerge asks GitHub to merge the pull request by itself — a squash,
+// the repository's one merge method — once it has its approving review and
+// green checks, as Client. GitHub refuses it for a pull request that could
+// be merged right away (nothing left to wait for) and for a repository whose
+// settings do not allow auto-merge; both come back as the error.
+func (r Repo) EnableAutoMerge(ctx context.Context, nodeID string) error {
+	if nodeID == "" {
+		return fmt.Errorf("%s: enable auto-merge: the pull request's node id is unknown", r.Slug())
+	}
+	const mutation = "mutation($id: ID!) { enablePullRequestAutoMerge(input: {pullRequestId: $id, mergeMethod: SQUASH}) { pullRequest { number } } }"
+	req, err := r.Client.NewRequest(ctx, http.MethodPost, "graphql", map[string]any{"query": mutation, "variables": map[string]any{"id": nodeID}})
+	if err != nil {
+		return fmt.Errorf("%s: enable auto-merge: %w", r.Slug(), err)
+	}
+	var out struct {
+		Errors []struct {
+			Message string `json:"message"`
+		} `json:"errors"`
+	}
+	if _, err := r.Client.Do(req, &out); err != nil {
+		return fmt.Errorf("%s: enable auto-merge: %w", r.Slug(), err)
+	}
+	if len(out.Errors) > 0 {
+		return fmt.Errorf("%s: enable auto-merge: %s", r.Slug(), out.Errors[0].Message)
+	}
+	return nil
+}
+
+// Land brings the approved pull request home as Client: merged (a squash
+// titled after it) when GitHub lets it — the review is in, the checks are
+// green, the branch is current — or left to GitHub's auto-merge, armed here
+// when it was not, for a pull request GitHub will not merge yet. A pull
+// request merged already, or one auto-merge already waits on, is reported as
+// it is. The Landing says which; its Reason, when it is neither, is what
+// GitHub said, for a person to act on.
+func (r Repo) Land(ctx context.Context, number int) Landing {
+	pr, _, err := r.Client.PullRequests.Get(ctx, r.Owner, r.Name, number)
+	if err != nil {
+		return Landing{Reason: fmt.Sprintf("%s#%d could not be read: %v", r.Owner+"/"+r.Name, number, err)}
+	}
+	switch {
+	case pr.GetMerged():
+		return Landing{Merged: true}
+	case pr.GetAutoMerge() != nil:
+		return Landing{AutoMerge: true}
+	}
+	title := fmt.Sprintf("%s (#%d)", pr.GetTitle(), number)
+	if _, _, err := r.Client.PullRequests.Merge(ctx, r.Owner, r.Name, number, "", &github.PullRequestOptions{MergeMethod: "squash", CommitTitle: title}); err == nil {
+		return Landing{Merged: true}
+	} else if !notMergeableYet(err) {
+		return Landing{Reason: fmt.Sprintf("merging %s#%d failed: %v", r.Owner+"/"+r.Name, number, err)}
+	}
+	if err := r.EnableAutoMerge(ctx, pr.GetNodeID()); err != nil {
+		return Landing{Reason: fmt.Sprintf("%s#%d cannot be merged yet and auto-merge could not be armed: %v", r.Owner+"/"+r.Name, number, err)}
+	}
+	return Landing{AutoMerge: true}
+}
+
+// notMergeableYet says whether a merge refusal is GitHub's "not now" — checks
+// still running, a branch behind its base, a protection not yet satisfied
+// (405) or a head that moved (409) — as opposed to a merge that will never go
+// through with this credential.
+func notMergeableYet(err error) bool {
+	var ghErr *github.ErrorResponse
+	if !errors.As(err, &ghErr) || ghErr.Response == nil {
+		return false
+	}
+	return ghErr.Response.StatusCode == http.StatusMethodNotAllowed || ghErr.Response.StatusCode == http.StatusConflict
 }
 
 // ChangedTeamFiles lists the teams whose files a pull request touches.

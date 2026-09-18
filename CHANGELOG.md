@@ -9,6 +9,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- The team's approval lands the change. Every pull request the write tools open (`update_repository`, `transfer_repository`, `set_lifecycle`) is armed for GitHub's auto-merge as the author (a squash, the team-files repository's one merge method), so it merges the moment a member's approving review is in and its checks are green — from the Slack Approve button or from GitHub alike (`pullRequest.autoMerge` in the answer). `approve_change` then lands the pull request it approved: merged as the approver when GitHub lets it, else left to auto-merge, armed if it was not; the answer carries `merged`, `autoMerge` and a one-sentence `message` for the channel the button was clicked in — "Approved as <login> and merged: giantswarm/github#N.", "…merges by itself once its checks pass.", or why neither happened and that it is merged on GitHub by hand.
+
 ### Changed
 
 - `approve_change` refuses the person who opened the pull request before GitHub does, in words the person can act on: "<login> opened giantswarm/github#N, and GitHub does not accept an author's approval of their own pull request; another member of <team> has to approve" — the asker's own click on the Slack Approve button now reads that instead of GitHub's `Can not approve your own pull request`. The answer carries the pull request's `author`.

@@ -10,12 +10,14 @@ import (
 	"github.com/giantswarm/giantswarm-repo-manager/internal/teamfiles"
 )
 
-// Lifecycle filter values: the team-file schema's (deprecated, archived) and
-// active, the state of a repository without a declared lifecycle.
+// Lifecycle filter values: the team-file schema's (deprecated, archived,
+// deleted) and active, the state of a repository without a declared
+// lifecycle.
 const (
 	LifecycleActive     = "active"
 	LifecycleDeprecated = teamfiles.LifecycleDeprecated
 	LifecycleArchived   = teamfiles.LifecycleArchived
+	LifecycleDeleted    = teamfiles.LifecycleDeleted
 )
 
 // Where a listing's teams came from.
@@ -157,7 +159,7 @@ func (f *listFilter) matches(r *inventory.Record, period time.Duration, now time
 	if f.lifecycle != "" && !matchesLifecycle(r, f.lifecycle) {
 		return false
 	}
-	if f.archived != nil && archived(r) != *f.archived {
+	if f.archived != nil && over(r) != *f.archived {
 		return false
 	}
 	if f.inactive > 0 && r.Reality != nil && r.Reality.LastPersonCommit != nil && now.Sub(r.Reality.LastPersonCommit.Date) < f.inactive {
@@ -212,6 +214,13 @@ func declaredLifecycle(r *inventory.Record) string {
 // archived says the repository is archived: declared so, or so on GitHub.
 func archived(r *inventory.Record) bool {
 	return strings.EqualFold(declaredLifecycle(r), LifecycleArchived) || (r.Reality != nil && r.Reality.IsArchived)
+}
+
+// over says the repository's life is over: archived, or declared deleted.
+// The boolean archived filter hides both by default; the lifecycle filter
+// tells them apart.
+func over(r *inventory.Record) bool {
+	return archived(r) || strings.EqualFold(declaredLifecycle(r), LifecycleDeleted)
 }
 
 // renovateState is the row's Renovate state: missing without a config,

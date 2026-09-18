@@ -72,6 +72,7 @@ func TestCompletionText(t *testing.T) {
 		{name: "transferred", rec: record(transfer, okStep), want: "alice transferred the repo bumblebee-repo (app, go) from team-planeteers to team-bumblebee"},
 		{name: "transferred without fromTeam", rec: record(transferUnknownFrom, okStep), want: "alice transferred the repo bumblebee-repo (app, go) to team-bumblebee"},
 		{name: "archived", rec: record(change(inventory.ChangeArchived), okStep), want: "alice archived the repo bumblebee-repo"},
+		{name: "deleted", rec: record(change(inventory.ChangeDeleted), okStep), want: "alice deleted the repo bumblebee-repo"},
 		{name: "deprecated", rec: record(change(inventory.ChangeDeprecated), okStep), want: "alice deprecated the repo bumblebee-repo"},
 		{name: "changed converged: silent", rec: record(change(inventory.ChangeChanged), okStep)},
 		{name: "dispatched converged: silent", rec: record(change(inventory.ChangeDispatched), okStep)},

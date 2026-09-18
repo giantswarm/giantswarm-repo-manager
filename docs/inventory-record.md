@@ -64,7 +64,7 @@ whose Approve re-renders and lands it. A pull request mergeable again — re-ren
 `workflowRun {id, url, attempt, event, trigger, devctl}`, `finishedAt` and `change {kind, by, pullRequest {number, url},
 fromTeam}` — the reconciler's classification of the team-file change the run followed: `kind` is `created` (the
 repository is younger than its pull request), `added` (an existing repository declared), `transferred` (`fromTeam` names
-the giving team), `archived`, `deprecated`, `changed` (any other edit), `dispatched` (an Align now) or `nightly`; `by` is
+the giving team), `archived`, `deleted`, `deprecated`, `changed` (any other edit), `dispatched` (an Align now) or `nightly`; `by` is
 the pull request's author or the dispatching person (absent for the schedule). The poller stores the result unchanged as
 `lastRun.result`, with `workflowRun.url`, `finishedAt` and the change block as `lastRun.change`. The change block is what
 the message to the team's standup channel is rendered from (README, "Asks and messages go through Swarmgeist").
@@ -79,7 +79,7 @@ the message to the team's standup channel is rendered from (README, "Asks and me
     "team": "team-bumblebee",
     "file": "repositories/team-bumblebee.yaml",
     "componentType": "service",
-    "lifecycle": "",                    // deprecated | archived when set
+    "lifecycle": "",                    // deprecated | archived | deleted when set
     "language": "go",
     "flavours": ["app"],
     "entry": "- name: present-service\n  ...",   // the entry as the team file carries it
@@ -138,7 +138,7 @@ the message to the team's standup channel is rendered from (README, "Asks and me
     "checkedAt": "…",
     "checkError": "",                   // why checks is missing (no read identity, …); a refused entry has checks = the engine's Refused result
     "lastRun": {"result": {"…": "reconcile.Result"}, "runUrl": "…", "timestamp": "…", "runId": 1, "attempt": 1,
-                "change": {"kind": "created", "by": "alice", "pullRequest": {"number": 4711, "url": "…"}}},  // kind: created | added | transferred (+fromTeam) | archived | deprecated | changed | dispatched | nightly
+                "change": {"kind": "created", "by": "alice", "pullRequest": {"number": 4711, "url": "…"}}},  // kind: created | added | transferred (+fromTeam) | archived | deleted | deprecated | changed | dispatched | nightly
     "pendingRun": {"dispatchedAt": "…", "by": "alice", "kind": "created", "pullRequest": {"number": 4711, "url": "…"},   // a run expected: kind dispatched (an Align now) or the pull request's kind
                    "mergedAt": "…", "conflictsSince": "…"},   // the merge, once read; the pull request found conflicting with its base (mergeable: false), until it is re-rendered
     "missingRun": {"dispatchedAt": "…", "by": "alice", "kind": "dispatched", "noticedAt": "…", "runsUrl": "…"}   // one that did not report in 15 min

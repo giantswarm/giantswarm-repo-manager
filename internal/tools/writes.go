@@ -32,6 +32,9 @@ const (
 	argLifecycle   = "lifecycle"
 	argPullRequest = "pullRequest"
 	argReason      = "reason"
+	// argConfirm is the repository's name typed by the person: what a
+	// deletion needs beside the lifecycle.
+	argConfirm = "confirm"
 )
 
 // marker is the machine-readable line every pull request this server opens
@@ -571,15 +574,18 @@ func decides(team, as string) string {
 func (t *tools) setLifecycle() WriteTool {
 	return WriteTool{
 		Name: ToolSetLifecycle,
-		Description: "Deprecate or archive a declared repository by setting lifecycle in its team-file entry. deprecated: security-only Renovate " +
+		Description: "Deprecate, archive or delete a declared repository by setting lifecycle in its team-file entry. deprecated: security-only Renovate " +
 			"and a catalog flag. archived: the reconciler archives the repository on GitHub and unfollows it on CircleCI; the entry stays as the " +
-			"record. An entry without " + alignTrue + " gets it beside the lifecycle — the change opts the repository in to alignment, else the reconciler " +
-			"would record the lifecycle and apply nothing — and the ask says so. Deletion is not expressible. The ask goes to the owning team's channel; " +
+			"record. deleted: the reconciler unfollows the repository on CircleCI and deletes it on GitHub — code, issues, pull requests, releases and " +
+			"packages with it (an organization owner can restore it on GitHub for 90 days); the entry stays as the record of the deletion; needs confirm, " +
+			"the repository's name typed by the person, and is refused without it. An entry without " + alignTrue + " gets it beside the lifecycle — the change opts the repository in to alignment, else the reconciler " +
+			"would record the lifecycle and apply nothing — and the ask says so. The ask goes to the owning team's channel; " +
 			"a member's Approve (or an approving review on GitHub) lands it." + pendingRunSentence,
 		Options: []mcp.ToolOption{
 			mcp.WithString(argRepository, mcp.Required(), mcp.Description("Repository name, with or without the org.")),
-			mcp.WithString(argLifecycle, mcp.Required(), mcp.Enum(teamfiles.LifecycleDeprecated, teamfiles.LifecycleArchived), mcp.Description("deprecated or archived.")),
+			mcp.WithString(argLifecycle, mcp.Required(), mcp.Enum(teamfiles.LifecycleDeprecated, teamfiles.LifecycleArchived, teamfiles.LifecycleDeleted), mcp.Description("deprecated, archived or deleted.")),
 			mcp.WithString(argReason, mcp.Description("Why, for the pull request body and the ask.")),
+			mcp.WithString(argConfirm, mcp.Description("For deleted: the repository's name, with or without the org, as the person typed it. Refused when absent or another name.")),
 		},
 		DryRun: func(ctx context.Context, args map[string]any) (any, error) {
 			pn, err := t.planner(ctx)
@@ -608,8 +614,14 @@ func (t *tools) planLifecycle(ctx context.Context, repo teamfiles.Repo, as strin
 		return nil, err
 	}
 	lc, _ := args[argLifecycle].(string)
-	if lc != teamfiles.LifecycleDeprecated && lc != teamfiles.LifecycleArchived {
-		return nil, fmt.Errorf("%s must be %s or %s", argLifecycle, teamfiles.LifecycleDeprecated, teamfiles.LifecycleArchived)
+	switch lc {
+	case teamfiles.LifecycleDeprecated, teamfiles.LifecycleArchived:
+	case teamfiles.LifecycleDeleted:
+		if err := t.confirmed(name, args); err != nil {
+			return nil, err
+		}
+	default:
+		return nil, fmt.Errorf("%s must be %s, %s or %s", argLifecycle, teamfiles.LifecycleDeprecated, teamfiles.LifecycleArchived, teamfiles.LifecycleDeleted)
 	}
 	tf, before, err := t.entryFor(ctx, repo, name, "")
 	if err != nil {
@@ -641,12 +653,8 @@ func (t *tools) planLifecycle(ctx context.Context, repo teamfiles.Repo, as strin
 		return nil, err
 	}
 	reason, _ := args[argReason].(string)
-	effect := "security-only Renovate updates and the catalog's deprecation flag"
-	pl.kind = inventory.ChangeDeprecated
-	if lc == teamfiles.LifecycleArchived {
-		effect = "the reconciler archives the repository on GitHub and unfollows it on CircleCI; the entry stays in the team file as the record"
-		pl.kind = inventory.ChangeArchived
-	}
+	effect, kind := lifecycleEffect(lc)
+	pl.kind = kind
 	pl.finish(repo, as, "reposetup/"+lc+"-"+name, fmt.Sprintf("chore(repositories): %s %s (%s)", verb(lc), name, tf.Team),
 		fmt.Sprintf("## Problem\n\n`%s/%s` is to be %s.\n\n## Solution\n\n%s in `%s` — %s.%s\n\n%s\n\nOpened by giantswarm-repo-manager (`%s`) as the caller.",
 			t.org(), name, lc, change, tf.Path, effect, optsIn, reasonLine(reason), ToolSetLifecycle))
@@ -654,9 +662,39 @@ func (t *tools) planLifecycle(ctx context.Context, repo teamfiles.Repo, as strin
 	return pl, nil
 }
 
+// confirmed checks a deletion's confirmation: the repository's name, with or
+// without the org, as the person typed it. Anything else refuses the
+// deletion with why — an agent cannot reach it by paraphrase.
+func (t *tools) confirmed(name string, args map[string]any) error {
+	typed := stringArg(args, argConfirm)
+	if typed == "" {
+		return fmt.Errorf("deleting %s/%s needs %s: the repository's name, typed by the person", t.org(), name, argConfirm)
+	}
+	if !strings.EqualFold(strings.TrimPrefix(typed, t.org()+"/"), name) {
+		return fmt.Errorf("%s %q does not name %s/%s: the deletion is refused", argConfirm, typed, t.org(), name)
+	}
+	return nil
+}
+
+// lifecycleEffect is what the reconciler does with a lifecycle, for the pull
+// request body, and the change kind the record's expected run is marked with.
+func lifecycleEffect(lifecycle string) (effect, kind string) {
+	switch lifecycle {
+	case teamfiles.LifecycleArchived:
+		return "the reconciler archives the repository on GitHub and unfollows it on CircleCI; the entry stays in the team file as the record", inventory.ChangeArchived
+	case teamfiles.LifecycleDeleted:
+		return "the reconciler unfollows the repository on CircleCI and deletes it on GitHub — code, issues, pull requests, releases and packages with it; " +
+			"an organization owner can restore it on GitHub for 90 days; the entry stays in the team file as the record of the deletion", inventory.ChangeDeleted
+	}
+	return "security-only Renovate updates and the catalog's deprecation flag", inventory.ChangeDeprecated
+}
+
 func verb(lifecycle string) string {
-	if lifecycle == teamfiles.LifecycleArchived {
+	switch lifecycle {
+	case teamfiles.LifecycleArchived:
 		return "archive"
+	case teamfiles.LifecycleDeleted:
+		return "delete"
 	}
 	return "deprecate"
 }

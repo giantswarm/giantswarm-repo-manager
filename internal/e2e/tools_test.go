@@ -358,6 +358,45 @@ func TestDebugChannelReceivesEveryAskAndNotice(t *testing.T) {
 	}
 }
 
+// TestSetLifecycleDeletedNeedsTheTypedName: a deletion is refused without
+// the repository's name as confirm (and with another name), opens no pull
+// request then; with the name it opens the pull request with lifecycle:
+// deleted and the opt-in, posts the ask and marks the record's expected run
+// as a deletion.
+func TestSetLifecycleDeletedNeedsTheTypedName(t *testing.T) {
+	st := newStack(t)
+	c := st.as(t, aliceToken)
+	for _, confirm := range []string{"", "other-service"} {
+		args := map[string]any{argDryRun: true, kRepository: repoPresent, argLifecycle: lifecycleDeleted}
+		if confirm != "" {
+			args[argConfirm] = confirm
+		}
+		text, isErr := call(t, c, tools.ToolSetLifecycle, args)
+		if !isErr || !strings.Contains(text, argConfirm) || !strings.Contains(text, org+"/"+repoPresent) {
+			t.Errorf("confirm %q: want the refusal naming confirm and the repository, got isErr=%v %q", confirm, isErr, text)
+		}
+	}
+	if n := len(st.ghs.files.pullRequests()); n != 0 {
+		t.Fatalf("a refused deletion opened %d pull request(s)", n)
+	}
+	var out tools.Committed
+	st.callJSON(t, c, tools.ToolSetLifecycle, map[string]any{argMode: modeCommit, kRepository: repoPresent, argLifecycle: lifecycleDeleted, argConfirm: org + "/" + repoPresent, argReason: "retired"}, &out)
+	pr := st.ghs.files.pullRequests()[0]
+	file := string(pr.Files["repositories/"+team+".yaml"])
+	if !strings.Contains(file, "  lifecycle: deleted\n  align: true\n") || !strings.Contains(file, "- name: "+repoLegacy) ||
+		!strings.Contains(pr.Title, "delete "+repoPresent) || !strings.Contains(pr.Body, "deletes it on GitHub") || !strings.Contains(pr.Body, "record of the deletion") {
+		t.Errorf("delete pull request %q\n%s\n%s", pr.Title, pr.Body, file)
+	}
+	if p := out.PendingRun; p == nil || p.Kind != inventory.ChangeDeleted || !p.Follows(pr.Number) || p.By != alice {
+		t.Fatalf("the deletion's pending run: %+v", p)
+	}
+	asks, _ := st.gw.posted()
+	if len(asks) != 1 || !strings.Contains(asks[0]["text"].(string), alice+" asks to delete `"+org+"/"+repoPresent+"` (owned by "+team+")") ||
+		!strings.Contains(asks[0]["text"].(string), "Reason: retired.") || !strings.Contains(asks[0]["text"].(string), "A member of "+team+" other than "+alice+" approves.") {
+		t.Fatalf("ask: %v", asks)
+	}
+}
+
 // TestSetLifecycleArchivedOpensThePullRequestAndPostsTheAsk, then
 // approve_change refuses the outsider and the asker, and lands another
 // member's review.

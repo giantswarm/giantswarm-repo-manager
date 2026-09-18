@@ -171,3 +171,20 @@ func TestRenovatePeriodDefaults(t *testing.T) {
 		t.Errorf("configured: %s", p)
 	}
 }
+
+// A declared deletion is over (the boolean archived filter hides it with the
+// archived) and has the lifecycle deleted; it is not archived.
+func TestDeletedIsOverNotArchived(t *testing.T) {
+	deleted := &inventory.Record{Repository: "giantswarm/deleted-service", Declaration: &inventory.Declaration{Team: fxTeamA, Lifecycle: LifecycleDeleted}}
+	if archived(deleted) || !over(deleted) {
+		t.Errorf("declared deleted: archived=%v over=%v, want false/true", archived(deleted), over(deleted))
+	}
+	if !matchesLifecycle(deleted, LifecycleDeleted) || matchesLifecycle(deleted, LifecycleArchived) || matchesLifecycle(deleted, LifecycleActive) {
+		t.Errorf("declared deleted matches: deleted=%v archived=%v active=%v", matchesLifecycle(deleted, LifecycleDeleted), matchesLifecycle(deleted, LifecycleArchived), matchesLifecycle(deleted, LifecycleActive))
+	}
+	hide := false
+	f := &listFilter{archived: &hide}
+	if f.matches(deleted, time.Hour, time.Now()) {
+		t.Errorf("archived=false should hide a declared deletion")
+	}
+}

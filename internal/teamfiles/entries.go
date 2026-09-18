@@ -30,10 +30,12 @@ const (
 	FieldGen = "gen"
 )
 
-// Lifecycle values (the schema's; the reconciler acts on them, PRD D5).
+// Lifecycle values (the schema's; the reconciler acts on them): deprecated
+// and archived per PRD D5, deleted per the deletion decision of 2026-09-18.
 const (
 	LifecycleDeprecated = "deprecated"
 	LifecycleArchived   = "archived"
+	LifecycleDeleted    = "deleted"
 )
 
 // entryRange locates entry name in file: the byte offsets of its lines

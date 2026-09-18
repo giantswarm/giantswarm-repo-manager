@@ -47,6 +47,8 @@ const (
 	// lifecycleArchived and lifecycleDeprecated are set_lifecycle's values.
 	lifecycleArchived   = "archived"
 	lifecycleDeprecated = "deprecated"
+	lifecycleDeleted    = "deleted"
+	argConfirm          = "confirm"
 	renovateLogin       = "renovate"
 )
 

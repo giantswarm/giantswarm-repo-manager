@@ -3,9 +3,12 @@ package collect
 import (
 	"archive/zip"
 	"bytes"
+	"context"
 	"errors"
 	"strings"
+	"sync/atomic"
 	"testing"
+	"time"
 )
 
 // The reconciler workflow writes workflowRun.id and attempt as strings
@@ -99,5 +102,82 @@ func TestDecodeArtifactChange(t *testing.T) {
 	}
 	if r.Change != nil {
 		t.Errorf("an artifact without a change block: %+v", r.Change)
+	}
+}
+
+// A wake between two ticks makes the poller read at once, and the pending
+// cadence applies from that read on: the interval is chosen from the poll
+// the wake caused, not from the tick before the mark.
+func TestPollLoopWakeReadsAtOnce(t *testing.T) {
+	const interval, pendingInterval = 10 * time.Second, 50 * time.Millisecond
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	polls := make(chan time.Time, 8)
+	var pending atomic.Bool
+	wake := make(chan struct{}, 1)
+	go pollLoop(ctx, interval, pendingInterval, wake, func(context.Context) bool {
+		polls <- time.Now()
+		return pending.Load()
+	})
+	nextPoll(t, polls, time.Second) // the poll at start, nothing pending
+	pending.Store(true)
+	woken := time.Now()
+	wake <- struct{}{}
+	second := nextPoll(t, polls, interval)
+	if d := second.Sub(woken); d >= pendingInterval {
+		t.Fatalf("read %v after the wake, want at once", d)
+	}
+	third := nextPoll(t, polls, interval)
+	if d := third.Sub(second); d < pendingInterval || d >= interval/2 {
+		t.Fatalf("%v between the reads after the wake, want the pending interval %v", d, pendingInterval)
+	}
+}
+
+// Without a wake or a pending run the reads keep the interval: the second
+// read waits the full interval, and the loop ends with its context.
+func TestPollLoopIntervalWithoutPending(t *testing.T) {
+	const interval, pendingInterval = 200 * time.Millisecond, 10 * time.Millisecond
+	ctx, cancel := context.WithCancel(context.Background())
+	polls := make(chan time.Time, 8)
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		pollLoop(ctx, interval, pendingInterval, make(chan struct{}), func(context.Context) bool {
+			polls <- time.Now()
+			return false
+		})
+	}()
+	first := nextPoll(t, polls, time.Second)
+	second := nextPoll(t, polls, 10*time.Second)
+	if d := second.Sub(first); d < interval {
+		t.Fatalf("%v between the reads, want at least the interval %v", d, interval)
+	}
+	cancel()
+	select {
+	case <-done:
+	case <-time.After(time.Second):
+		t.Fatal("the loop did not end with its context")
+	}
+}
+
+// WakeReconciler never blocks: wakes that arrive before the poller reads
+// fold into the one waiting.
+func TestWakeReconcilerNeverBlocks(t *testing.T) {
+	c := &Collector{wake: make(chan struct{}, 1)}
+	c.WakeReconciler()
+	c.WakeReconciler()
+	if len(c.wake) != 1 {
+		t.Fatalf("%d wakes buffered, want 1", len(c.wake))
+	}
+}
+
+func nextPoll(t *testing.T, polls <-chan time.Time, within time.Duration) time.Time {
+	t.Helper()
+	select {
+	case at := <-polls:
+		return at
+	case <-time.After(within):
+		t.Fatalf("no read within %v", within)
+		return time.Time{}
 	}
 }

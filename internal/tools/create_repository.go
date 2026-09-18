@@ -511,11 +511,24 @@ func (t *tools) expectRun(ctx context.Context, p *person, name string, pr *teamf
 		return nil
 	}
 	rec.Created(time.Now().UTC(), p.login, inventory.ChangePullRequest{Number: pr.Number, URL: pr.URL})
-	if err := t.d.Inventory.Put(ctx, rec); err != nil {
+	if err := t.putExpectedRun(ctx, rec); err != nil {
 		t.d.Log.Error("pending run not stored", "repository", key, "error", err)
 		return nil
 	}
 	return rec.Setup.PendingRun
+}
+
+// putExpectedRun stores rec, whose pending run was just marked, and wakes the
+// reconciler poller: the run's artifact is looked for at once and then every
+// pending interval, not at the poller's next tick.
+func (t *tools) putExpectedRun(ctx context.Context, rec *inventory.Record) error {
+	if err := t.d.Inventory.Put(ctx, rec); err != nil {
+		return err
+	}
+	if t.d.Collector != nil {
+		t.d.Collector.WakeReconciler()
+	}
+	return nil
 }
 
 // repositoryGetter adapts the App installation client to the engine's

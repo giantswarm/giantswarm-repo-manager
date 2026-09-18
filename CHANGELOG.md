@@ -29,6 +29,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- `watch_repository` also returns as soon as a phase completes that was not complete when the call started, with `changed: true` — the caller narrates the new phase and calls again, so a merge 80 s into a two-minute wait is told within a poll interval rather than when the wait runs out. Ready and a failure end the call as before, `timeout` stays the upper bound, and a call that ends ready, failed or on its timeout without a new phase carries `changed: false` (giantswarm/giantswarm-repo-manager#73).
 - `approve_change` refuses the person who opened the pull request before GitHub does, in words the person can act on: "<login> opened giantswarm/github#N, and GitHub does not accept an author's approval of their own pull request; another member of <team> has to approve" — the asker's own click on the Slack Approve button now reads that instead of GitHub's `Can not approve your own pull request`. The answer carries the pull request's `author`.
 - An ask closes with who decides — "A member of <team> other than <asker> approves." — the reason reads "Reason: …", and the pull request URL travels only as the message's link (the gateway's *Open PR* button, the notice's *Open PR* line) instead of once more in the text.
 

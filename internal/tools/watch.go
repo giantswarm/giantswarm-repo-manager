@@ -54,12 +54,17 @@ const (
 )
 
 // Watch is watch_repository's result: the phases done so far with when each
-// was reached, and whether the repository is ready, still pending or failed.
+// was reached, whether a phase was reached during the call, and whether the
+// repository is ready, still pending or failed.
 type Watch struct {
 	// Repository and PullRequest are the URLs on GitHub.
 	Repository  string  `json:"repository"`
 	PullRequest string  `json:"pullRequest,omitempty"`
 	Phases      []Phase `json:"phases"`
+	// Changed says a phase was reached during the call that was not done
+	// when it started; the call returns as soon as one is. False when the
+	// call ended ready, failed or on its timeout without a new phase.
+	Changed bool `json:"changed"`
 	// Ready says every phase is done without a failure.
 	Ready bool `json:"ready"`
 	// Pending names the phase still waited for when the call's timeout ran
@@ -106,6 +111,7 @@ type WatchRelease struct {
 func (t *tools) registerWatch(s *mcpserver.MCPServer) {
 	s.AddTool(mcp.NewTool(ToolWatchRepository,
 		mcp.WithDescription("Read-only. Follow a new repository to readiness after create_repository, and return when it is ready, when a phase fails, "+
+			"as soon as a phase completes that was not complete when the call started (changed is true — narrate it and call again), "+
 			"or when timeout runs out — with the phases reached either way, each with its timestamp and the seconds since the phase before: "+
 			"created (the repository exists), scaffolded (its default branch carries the scaffold commit), declared (the declaration pull request is open), "+
 			"merged, setUp (the reconciler run of that pull request has reported: a failed step or a refused entry fails the phase, the run's other findings are "+
@@ -147,8 +153,9 @@ func (d Deps) watchSettle() time.Duration {
 	return DefaultWatchSettle
 }
 
-// watch reads the phases until the repository is ready, a phase fails or
-// the timeout runs out.
+// watch reads the phases until the repository is ready, a phase fails, a
+// phase completes that was not complete at the start, or the timeout runs
+// out.
 func (t *tools) watch(ctx context.Context, args map[string]any) (*Watch, error) {
 	if t.d.Inventory == nil {
 		return nil, errors.New("inventory store not configured (VALKEY_ADDR): the setUp phase is read from the record")
@@ -172,17 +179,24 @@ func (t *tools) watch(ctx context.Context, args map[string]any) (*Watch, error) 
 	w := &watcher{t: t, p: p, name: name, number: pr, out: &Watch{Phases: []Phase{}}}
 	start := time.Now()
 	deadline := start.Add(time.Duration(timeout * float64(time.Second)))
-	for {
-		if err := w.advance(ctx); err != nil {
-			return nil, err
-		}
+	if err := w.advance(ctx); err != nil {
+		return nil, err
+	}
+	// The phases are done in order and stay done: one more than at the
+	// start is the change the call returns on.
+	known := len(w.out.Phases)
+	for !w.out.Ready && w.out.Failure == nil && !w.out.Changed {
 		remaining := time.Until(deadline)
-		if w.out.Ready || w.out.Failure != nil || remaining <= 0 {
+		if remaining <= 0 {
 			break
 		}
 		if err := sleep(ctx, min(t.d.watchInterval(), remaining)); err != nil {
 			return nil, err
 		}
+		if err := w.advance(ctx); err != nil {
+			return nil, err
+		}
+		w.out.Changed = len(w.out.Phases) > known
 	}
 	w.out.Waited = int(time.Since(start).Round(time.Second) / time.Second)
 	return w.out, nil

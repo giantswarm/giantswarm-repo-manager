@@ -135,7 +135,7 @@ func bearer(r *http.Request) string {
 
 // ghMessage is GitHub's error body shape.
 func ghMessage(w http.ResponseWriter, status int, msg string) {
-	writeJSON(w, status, map[string]any{"message": msg})
+	writeJSON(w, status, map[string]any{kMessage: msg})
 }
 
 func writeJSON(w http.ResponseWriter, status int, v any) {

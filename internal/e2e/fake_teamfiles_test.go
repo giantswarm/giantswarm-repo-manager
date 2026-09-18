@@ -39,6 +39,7 @@ const (
 	kPublic        = "public"
 	kPath          = "path"
 	kType          = "type"
+	kMessage       = "message"
 	kGitHub        = "github"
 	kSHA           = "sha"
 	kObject        = "object"
@@ -316,7 +317,7 @@ func (f *fakeTeamFiles) register(mux *http.ServeMux, g *fakeGitHub) {
 			ghMessage(w, http.StatusMethodNotAllowed, "Merge method not allowed")
 		default:
 			pr.Merged, pr.MergeTitle = true, req.CommitTitle
-			writeJSON(w, http.StatusOK, map[string]any{"sha": "merged00", "merged": true, "message": "Pull Request successfully merged"})
+			writeJSON(w, http.StatusOK, map[string]any{"sha": "merged00", "merged": true, kMessage: "Pull Request successfully merged"})
 		}
 	})
 	mux.HandleFunc("POST "+base+"/actions/workflows/{file}/dispatches", func(w http.ResponseWriter, r *http.Request) {
@@ -368,7 +369,7 @@ func (f *fakeTeamFiles) handleAutoMerge(w http.ResponseWriter, body []byte) {
 	defer f.mu.Unlock()
 	pr := f.pulls[n]
 	refuse := func(msg string) {
-		writeJSON(w, http.StatusOK, map[string]any{"data": nil, "errors": []map[string]any{{"message": msg, kType: "UNPROCESSABLE"}}})
+		writeJSON(w, http.StatusOK, map[string]any{"data": nil, "errors": []map[string]any{{kMessage: msg, kType: "UNPROCESSABLE"}}})
 	}
 	switch {
 	case pr == nil:

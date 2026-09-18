@@ -141,7 +141,7 @@ func (o *fakeOrg) handle(w http.ResponseWriter, r *http.Request) {
 			data["repository"] = n
 		} else {
 			data["repository"] = nil
-			errs = append(errs, map[string]any{"message": fmt.Sprintf("Could not resolve to a Repository with the name '%s/%s'.", org, name), kType: "NOT_FOUND", kPath: []string{kRepository}})
+			errs = append(errs, map[string]any{kMessage: fmt.Sprintf("Could not resolve to a Repository with the name '%s/%s'.", org, name), kType: "NOT_FOUND", kPath: []string{kRepository}})
 		}
 	default:
 		for _, m := range historyAlias.FindAllStringSubmatch(req.Query, -1) {

@@ -10,14 +10,22 @@ import (
 	"github.com/giantswarm/giantswarm-repo-manager/internal/inventory"
 )
 
+// Test constants of this package's CircleCI derivations.
+const (
+	stateSuccess = "success"
+	releaseJob   = "ci/circleci: push-to-registries-release"
+)
+
 // TestFillClientlessSteps: the engine's circleci and release steps, skipped
 // for want of a CircleCI client, are written from the record — the head's
-// statuses and the reconciler's last run — the way the reconciler's run
-// would report them; every other step, and a step skipped for another
-// reason, stays as the engine left it; converged follows.
+// statuses, the tag commit's statuses and the reconciler's last run — as the
+// answers to "does CircleCI build it" and "did the release build"; every
+// other step, and a step skipped for another reason, stays as the engine
+// left it; converged follows.
 func TestFillClientlessSteps(t *testing.T) {
 	const (
 		slug       = "giantswarm/x"
+		tag        = "v1.2.0"
 		buildsMain = "CircleCI builds main"
 		createKey  = "create a deploy key"
 		enableSW   = "enable setup workflows"
@@ -33,17 +41,23 @@ func TestFillClientlessSteps(t *testing.T) {
 		return res
 	}
 	skipCircle := reconcile.StepResult{Step: reconcile.StepCircleCI, Verdict: reconcile.VerdictSkipped, Summary: noCircleCIClient}
-	skipRelease := reconcile.StepResult{Step: reconcile.StepRelease, Verdict: reconcile.VerdictSkipped, Summary: "release v1.2.0: no CircleCI client to verify the pipeline"}
+	skipRelease := reconcile.StepResult{Step: reconcile.StepRelease, Verdict: reconcile.VerdictSkipped, Summary: "release " + tag + ": no CircleCI client to verify the pipeline"}
 	run := func(mode reconcile.Mode, steps ...reconcile.StepResult) *inventory.LastRun {
 		return &inventory.LastRun{Timestamp: ran, RunURL: "https://example.test/run/1", Result: reconcile.Result{Mode: mode, Steps: steps}}
 	}
-	record := func(cc *inventory.CircleCI, last *inventory.LastRun) *inventory.Record {
-		return &inventory.Record{Repository: slug, Name: "x", Reality: &inventory.Reality{DefaultBranch: "main"}, CircleCI: cc, Setup: inventory.Setup{LastRun: last}}
+	release := func(t string, build *inventory.HeadStatus, truncated bool) *inventory.Release {
+		return &inventory.Release{Tag: t, PublishedAt: built.Add(-time.Hour), Build: build, BuildTruncated: truncated}
+	}
+	record := func(cc *inventory.CircleCI, rel *inventory.Release, last *inventory.LastRun) *inventory.Record {
+		return &inventory.Record{Repository: slug, Name: "x", Reality: &inventory.Reality{DefaultBranch: "main", LatestRelease: rel}, CircleCI: cc, Setup: inventory.Setup{LastRun: last}}
 	}
 	statuses := &inventory.CircleCI{Followed: true, Head: head, Source: inventory.CircleCISourceStatuses, Unknown: []string{inventory.CircleCIFactSetupWorkflows}}
 	none := &inventory.CircleCI{Source: inventory.CircleCISourceStatuses, Unknown: []string{inventory.CircleCIFactSetupWorkflows}}
 	truncated := &inventory.CircleCI{Source: inventory.CircleCISourceStatuses, Unknown: []string{inventory.CircleCIFactSetupWorkflows, inventory.CircleCIFactFollowed}}
 	both := &inventory.CircleCI{Followed: true, SetupWorkflows: &yes, Head: head, Source: inventory.CircleCISourceBoth}
+	green := &inventory.HeadStatus{State: stateSuccess, Contexts: []string{releaseJob}, At: built}
+	red := &inventory.HeadStatus{State: "failure", Contexts: []string{releaseJob}, At: built}
+	running := &inventory.HeadStatus{State: "pending", Contexts: []string{"ci/circleci: go-build", releaseJob}, At: built}
 
 	type want struct {
 		verdict   reconcile.Verdict
@@ -60,37 +74,45 @@ func TestFillClientlessSteps(t *testing.T) {
 		want    want
 		untouch bool
 	}{
-		{"circleci: statuses alone — built, settings unchecked", engine(skipCircle), record(statuses, nil), reconcile.StepCircleCI,
-			want{reconcile.VerdictReported, []string{"CircleCI builds main: success (2 jobs, 2026-09-18T08:00:00Z)"}, nil, []reconcile.FindingKind{reconcile.FindingUnchecked}, true}, false},
-		{"circleci: no statuses, no run — not built, the engine's plan", engine(skipCircle), record(none, nil), reconcile.StepCircleCI,
+		{"circleci: the head builds — ok, no finding about settings", engine(skipCircle), record(statuses, nil, nil), reconcile.StepCircleCI,
+			want{reconcile.VerdictOK, []string{"CircleCI builds main: success (2 jobs, 2026-09-18T08:00:00Z)"}, nil, nil, true}, false},
+		{"circleci: no statuses, no run — not built, the engine's plan", engine(skipCircle), record(none, nil, nil), reconcile.StepCircleCI,
 			want{reconcile.VerdictDrift, []string{"no CircleCI status on main's head", "does not build giantswarm/x"}, []string{"follow giantswarm/x", enableSW, createKey}, nil, false}, false},
-		{"circleci: statuses truncated, no run — followed unknown", engine(skipCircle), record(truncated, nil), reconcile.StepCircleCI,
+		{"circleci: statuses truncated, no run — followed unknown", engine(skipCircle), record(truncated, nil, nil), reconcile.StepCircleCI,
 			want{reconcile.VerdictReported, []string{"truncated"}, nil, []reconcile.FindingKind{reconcile.FindingUnchecked}, true}, false},
-		{"circleci: the reconciler's run converged", engine(skipCircle), record(both, run(reconcile.ModeCheck, reconcile.StepResult{Step: reconcile.StepCircleCI, Verdict: reconcile.VerdictOK, Summary: convergedCircleCI})), reconcile.StepCircleCI,
-			want{reconcile.VerdictOK, []string{convergedCircleCI, "reconciler run of 2026-09-17T22:17:00Z", buildsMain}, nil, nil, true}, false},
-		{"circleci: the reconciler's run repaired — the state holds", engine(skipCircle), record(both, run(reconcile.ModeRepair, reconcile.StepResult{Step: reconcile.StepCircleCI, Verdict: reconcile.VerdictRepaired, Changes: []string{enableSW}})), reconcile.StepCircleCI,
+		{"circleci: the reconciler's run converged", engine(skipCircle), record(both, nil, run(reconcile.ModeCheck, reconcile.StepResult{Step: reconcile.StepCircleCI, Verdict: reconcile.VerdictOK, Summary: convergedCircleCI})), reconcile.StepCircleCI,
+			want{reconcile.VerdictOK, []string{buildsMain, convergedCircleCI, "reconciler run of 2026-09-17T22:17:00Z"}, nil, nil, true}, false},
+		{"circleci: the reconciler's run repaired — the state holds", engine(skipCircle), record(both, nil, run(reconcile.ModeRepair, reconcile.StepResult{Step: reconcile.StepCircleCI, Verdict: reconcile.VerdictRepaired, Changes: []string{enableSW}})), reconcile.StepCircleCI,
 			want{reconcile.VerdictOK, []string{convergedCircleCI}, nil, nil, true}, false},
-		{"circleci: the reconciler's check found drift — its plan", engine(skipCircle), record(statuses, run(reconcile.ModeCheck, reconcile.StepResult{Step: reconcile.StepCircleCI, Verdict: reconcile.VerdictDrift, Changes: []string{enableSW, createKey}})), reconcile.StepCircleCI,
-			want{reconcile.VerdictDrift, []string{"drift found by the reconciler run of 2026-09-17T22:17:00Z", buildsMain}, []string{enableSW, createKey}, nil, false}, false},
-		{"circleci: the reconciler's step failed", engine(skipCircle), record(statuses, run(reconcile.ModeCheck, reconcile.StepResult{Step: reconcile.StepCircleCI, Verdict: reconcile.VerdictFailed, Summary: "api error: GET /api/v2/project/gh/giantswarm/x/settings: 502"})), reconcile.StepCircleCI,
+		{"circleci: the reconciler's check found drift — its plan", engine(skipCircle), record(statuses, nil, run(reconcile.ModeCheck, reconcile.StepResult{Step: reconcile.StepCircleCI, Verdict: reconcile.VerdictDrift, Changes: []string{enableSW, createKey}})), reconcile.StepCircleCI,
+			want{reconcile.VerdictDrift, []string{buildsMain, "drift found by the reconciler run of 2026-09-17T22:17:00Z"}, []string{enableSW, createKey}, nil, false}, false},
+		{"circleci: the reconciler's step failed", engine(skipCircle), record(statuses, nil, run(reconcile.ModeCheck, reconcile.StepResult{Step: reconcile.StepCircleCI, Verdict: reconcile.VerdictFailed, Summary: "api error: GET /api/v2/project/gh/giantswarm/x/settings: 502"})), reconcile.StepCircleCI,
 			want{reconcile.VerdictFailed, []string{"the reconciler's circleci step failed: api error", buildsMain}, nil, nil, false}, false},
-		{"circleci: a run that skipped the step is no run", engine(skipCircle), record(statuses, run(reconcile.ModeCheck, reconcile.StepResult{Step: reconcile.StepCircleCI, Verdict: reconcile.VerdictSkipped, Summary: noCircleCIClient})), reconcile.StepCircleCI,
-			want{reconcile.VerdictReported, []string{buildsMain}, nil, []reconcile.FindingKind{reconcile.FindingUnchecked}, true}, false},
-		{"release: no run — unchecked, the tag named", engine(skipRelease), record(statuses, nil), reconcile.StepRelease,
-			want{reconcile.VerdictReported, []string{"release v1.2.0: not verified by a reconciler run yet"}, nil, []reconcile.FindingKind{reconcile.FindingUnchecked}, true}, false},
-		{"release: the run built this tag", engine(skipRelease), record(statuses, run(reconcile.ModeCheck, reconcile.StepResult{Step: reconcile.StepRelease, Verdict: reconcile.VerdictOK, Summary: "release v1.2.0 built: pipeline 991, workflows build"})), reconcile.StepRelease,
+		{"circleci: a run that skipped the step is no run", engine(skipCircle), record(statuses, nil, run(reconcile.ModeCheck, reconcile.StepResult{Step: reconcile.StepCircleCI, Verdict: reconcile.VerdictSkipped, Summary: noCircleCIClient})), reconcile.StepCircleCI,
+			want{reconcile.VerdictOK, []string{buildsMain}, nil, nil, true}, false},
+		{"release: the tag commit built green", engine(skipRelease), record(statuses, release(tag, green, false), nil), reconcile.StepRelease,
+			want{reconcile.VerdictOK, []string{"release v1.2.0 built: CircleCI success (1 job, 2026-09-18T08:00:00Z)"}, nil, nil, true}, false},
+		{"release: the tag commit's pipeline is red", engine(skipRelease), record(statuses, release(tag, red, false), nil), reconcile.StepRelease,
+			want{reconcile.VerdictReported, []string{"release v1.2.0: CircleCI failure"}, nil, []reconcile.FindingKind{reconcile.FindingRedRelease}, true}, false},
+		{"release: the tag commit's pipeline is running", engine(skipRelease), record(statuses, release(tag, running, false), nil), reconcile.StepRelease,
+			want{reconcile.VerdictOK, []string{"release v1.2.0: CircleCI pipeline running (2 jobs"}, nil, nil, true}, false},
+		{"release: no status on the tag commit, no run — the missed build", engine(skipRelease), record(statuses, release(tag, nil, false), nil), reconcile.StepRelease,
+			want{reconcile.VerdictDrift, []string{"no CircleCI status on v1.2.0's commit: the tag was not built"}, []string{triggerTag}, nil, false}, false},
+		{"release: no status yet, the run built this tag", engine(skipRelease), record(statuses, release(tag, nil, false), run(reconcile.ModeCheck, reconcile.StepResult{Step: reconcile.StepRelease, Verdict: reconcile.VerdictOK, Summary: "release v1.2.0 built: pipeline 991, workflows build"})), reconcile.StepRelease,
 			want{reconcile.VerdictOK, []string{"release v1.2.0 built: pipeline 991", "reconciler run of 2026-09-17T22:17:00Z"}, nil, nil, true}, false},
-		{"release: the run planned the missed build of this tag", engine(skipRelease), record(statuses, run(reconcile.ModeCheck, reconcile.StepResult{Step: reconcile.StepRelease, Verdict: reconcile.VerdictDrift, Changes: []string{triggerTag}})), reconcile.StepRelease,
-			want{reconcile.VerdictDrift, []string{"release v1.2.0 (reconciler run of"}, []string{triggerTag}, nil, false}, false},
-		{"release: the run triggered the missed build — ok until the next run", engine(skipRelease), record(statuses, run(reconcile.ModeRepair, reconcile.StepResult{Step: reconcile.StepRelease, Verdict: reconcile.VerdictRepaired, Changes: []string{triggerTag}})), reconcile.StepRelease,
+		{"release: no status yet, the run triggered the missed build — ok until the statuses report", engine(skipRelease), record(statuses, release(tag, nil, false), run(reconcile.ModeRepair, reconcile.StepResult{Step: reconcile.StepRelease, Verdict: reconcile.VerdictRepaired, Changes: []string{triggerTag}})), reconcile.StepRelease,
 			want{reconcile.VerdictOK, []string{"release v1.2.0: build triggered by the reconciler"}, []string{triggerTag}, nil, true}, false},
-		{"release: the run reported this tag red", engine(skipRelease), record(statuses, run(reconcile.ModeCheck, reconcile.StepResult{Step: reconcile.StepRelease, Verdict: reconcile.VerdictReported, Findings: []reconcile.Finding{{Kind: reconcile.FindingRedRelease, Message: "the tag pipeline of v1.2.0 failed", Fix: "the next tag"}}})), reconcile.StepRelease,
-			want{reconcile.VerdictReported, []string{"release v1.2.0 (reconciler run of"}, nil, []reconcile.FindingKind{reconcile.FindingRedRelease}, true}, false},
-		{"release: the run verified an older tag — this one is unchecked", engine(skipRelease), record(statuses, run(reconcile.ModeCheck, reconcile.StepResult{Step: reconcile.StepRelease, Verdict: reconcile.VerdictOK, Summary: "release v1.1.0 built: pipeline 900, workflows build"})), reconcile.StepRelease,
-			want{reconcile.VerdictReported, []string{"release v1.2.0: not verified"}, nil, []reconcile.FindingKind{reconcile.FindingUnchecked}, true}, false},
-		{"a step skipped for another reason stays", engine(reconcile.StepResult{Step: reconcile.StepCircleCI, Verdict: reconcile.VerdictSkipped, Summary: "lifecycle: archived"}), record(statuses, nil), reconcile.StepCircleCI,
+		{"release: the statuses win over an older run's verdict", engine(skipRelease), record(statuses, release(tag, green, false), run(reconcile.ModeCheck, reconcile.StepResult{Step: reconcile.StepRelease, Verdict: reconcile.VerdictDrift, Changes: []string{triggerTag}})), reconcile.StepRelease,
+			want{reconcile.VerdictOK, []string{"release v1.2.0 built: CircleCI success"}, nil, nil, true}, false},
+		{"release: the run verified an older tag, no status — the missed build", engine(skipRelease), record(statuses, release(tag, nil, false), run(reconcile.ModeCheck, reconcile.StepResult{Step: reconcile.StepRelease, Verdict: reconcile.VerdictOK, Summary: "release v1.1.0 built: pipeline 900, workflows build"})), reconcile.StepRelease,
+			want{reconcile.VerdictDrift, []string{"the tag was not built"}, []string{triggerTag}, nil, false}, false},
+		{"release: the tag commit's statuses were truncated", engine(skipRelease), record(statuses, release(tag, nil, true), nil), reconcile.StepRelease,
+			want{reconcile.VerdictReported, []string{"truncated"}, nil, []reconcile.FindingKind{reconcile.FindingUnchecked}, true}, false},
+		{"release: the inventory read another latest release", engine(skipRelease), record(statuses, release("v1.3.0", green, false), nil), reconcile.StepRelease,
+			want{reconcile.VerdictReported, []string{"release v1.2.0: not the latest release the inventory read (v1.3.0)"}, nil, []reconcile.FindingKind{reconcile.FindingUnchecked}, true}, false},
+		{"a step skipped for another reason stays", engine(reconcile.StepResult{Step: reconcile.StepCircleCI, Verdict: reconcile.VerdictSkipped, Summary: "lifecycle: archived"}), record(statuses, nil, nil), reconcile.StepCircleCI,
 			want{reconcile.VerdictSkipped, []string{"lifecycle: archived"}, nil, nil, true}, true},
-		{"a step the engine checked stays", engine(reconcile.StepResult{Step: reconcile.StepCircleCI, Verdict: reconcile.VerdictOK, Summary: convergedCircleCI}), record(none, nil), reconcile.StepCircleCI,
+		{"a step the engine checked stays", engine(reconcile.StepResult{Step: reconcile.StepCircleCI, Verdict: reconcile.VerdictOK, Summary: convergedCircleCI}), record(none, nil, nil), reconcile.StepCircleCI,
 			want{reconcile.VerdictOK, []string{convergedCircleCI}, nil, nil, true}, true},
 	}
 	for _, tc := range cases {

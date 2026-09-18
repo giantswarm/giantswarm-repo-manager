@@ -28,6 +28,10 @@ const (
 	argRepository = "repository"
 	argUndeclared = "undeclared"
 	argFinding    = "finding"
+	argOrb        = "orb"
+	argARM64      = "arm64"
+	argChinaPush  = "chinaPush"
+	argSigning    = "signing"
 	argLimit      = "limit"
 	argScope      = "scope"
 	argSearch     = "search"
@@ -70,11 +74,11 @@ const DefaultRenovateActive = 180 * 24 * time.Hour
 func (t *tools) registerInventory(s *mcpserver.MCPServer) {
 	s.AddTool(mcp.NewTool(ToolListRepositories,
 		mcp.WithDescription("Read-only. The inventory of the org's repositories from the store: one row per repository with team, lifecycle, "+
-			"visibility, archived (on GitHub), fork, Renovate state, finding kinds, set-up state and record age, sorted by repository name, plus the last sweep's summary. "+
+			"visibility, archived (on GitHub), fork, Renovate state, finding kinds, CI facts (architect orb version, arm64 images, China push, cosign signing), set-up state and record age, sorted by repository name, plus the last sweep's summary. "+
 			"Scope per caller: mine (the teams you belong to on GitHub, read as you), team (the team "+
 			"argument, or your teams), unassigned (on GitHub without a declaration), all. Filters as on the Repositories page: search, team (in every scope: "+
 			"under mine one of your teams — another selects no rows and note says so; none under all: undeclared), renovate, visibility, fork, lifecycle, archived, "+
-			"inactiveDays, finding. get_repository has the full record."),
+			"inactiveDays, finding, orb, arm64, chinaPush, signing. get_repository has the full record."),
 		mcp.WithReadOnlyHintAnnotation(true),
 		mcp.WithString(argScope, mcp.Enum(ScopeMine, ScopeTeam, ScopeUnassigned, ScopeAll), mcp.Description("mine | team | unassigned | all (default all).")),
 		mcp.WithString(argTeam, mcp.Description("Only repositories declared by this team (slug: team-bumblebee). Under all, none: only undeclared repositories; under mine: one of your teams (another selects no rows, and note says so); under unassigned: ignored.")),
@@ -87,6 +91,10 @@ func (t *tools) registerInventory(s *mcpserver.MCPServer) {
 		mcp.WithBoolean(argArchived, mcp.Description("Only repositories that are archived — declared archived or archived on GitHub (true) — or only those that are not (false). Independent of lifecycle.")),
 		mcp.WithNumber(argInactive, mcp.Description("Only repositories whose last commit by a person is older than this many days (or that have none).")),
 		mcp.WithString(argFinding, mcp.Description("Only repositories with a finding of this kind (declared-but-gone, undeclared-on-github, entry-refused, gen-circleci-refused, default-icon, …).")),
+		mcp.WithString(argOrb, mcp.Description("Only repositories whose CircleCI pipeline pins this giantswarm/architect orb version, or one starting with it (10 selects every 10.x.y).")),
+		mcp.WithBoolean(argARM64, mcp.Description("Only repositories whose CircleCI pipeline builds linux/arm64 images (true) or builds images without it (false).")),
+		mcp.WithString(argChinaPush, mcp.Enum(inventory.ChinaPushSplit, inventory.ChinaPushInline, inventory.ChinaPushCustom, inventory.ChinaPushNone), mcp.Description("How the images reach the China registry: split (the in-China sync job), inline (the push job pushes there itself), custom (an overridden registry list), none (no image push).")),
+		mcp.WithString(argSigning, mcp.Enum(inventory.SigningSigned, inventory.SigningUnsigned, inventory.SigningUnknown, inventory.SigningNone), mcp.Description("Whether the pushed images and charts are signed with cosign: signed, unsigned (the record says why), unknown, none (nothing pushed).")),
 		mcp.WithNumber(argLimit, mcp.Description(fmt.Sprintf("Rows to return (default %d).", defaultLimit))),
 	), t.listRepositories)
 	s.AddTool(mcp.NewTool(ToolGetRepository,
@@ -124,8 +132,21 @@ type Row struct {
 	Renovate         string   `json:"renovate,omitempty"`
 	LastPersonCommit string   `json:"lastPersonCommit,omitempty"`
 	Findings         []string `json:"findings,omitempty"`
-	Setup            RowSetup `json:"setup"`
-	Age              string   `json:"age"`
+	// CI is what the repository's CircleCI configuration says; absent
+	// without one.
+	CI    *RowCI   `json:"ci,omitempty"`
+	Setup RowSetup `json:"setup"`
+	Age   string   `json:"age"`
+}
+
+// RowCI is the CI facts in one line: the architect orb version, arm64
+// images (absent when the configuration does not say), the China push and
+// the signing.
+type RowCI struct {
+	Orb       string `json:"orb,omitempty"`
+	ARM64     *bool  `json:"arm64,omitempty"`
+	ChinaPush string `json:"chinaPush"`
+	Signing   string `json:"signing"`
 }
 
 // RowSetup is the set-up state in one line.
@@ -232,6 +253,9 @@ func row(r *inventory.Record, period time.Duration, now time.Time) Row {
 	}
 	for _, f := range r.Findings {
 		row.Findings = append(row.Findings, f.Kind)
+	}
+	if ci := r.CI; ci != nil {
+		row.CI = &RowCI{Orb: ci.Orb, ARM64: ci.ARM64, ChinaPush: ci.ChinaPush, Signing: ci.Signing}
 	}
 	if r.Setup.Checks != nil {
 		c := r.Setup.Checks.Converged

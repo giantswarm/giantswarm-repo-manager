@@ -390,10 +390,8 @@ func (c *Collector) runChecks(ctx context.Context, records []*inventory.Record, 
 			r.Setup.CheckError = err.Error()
 			return
 		}
-		// The engine's own circleci step is a source of the record's CircleCI
-		// state when the runner has a client; what it could not check for want
-		// of one comes from the record's other sources.
-		engineCircleCI(r.CircleCI, res)
+		// The engine has no CircleCI client here: its circleci and release
+		// steps come from the record's own sources instead.
 		fillClientlessSteps(res, r)
 		at := c.now()
 		r.Setup.Checks, r.Setup.CheckedAt, r.Setup.CheckError = res, &at, ""
@@ -427,6 +425,7 @@ func (c *Collector) build(name string, node *repoNode, src *sources, old *invent
 	}
 	if node != nil {
 		rec.Reality, rec.Renovate = c.reality(node, src)
+		rec.CI = ciFacts(node, rec.Reality)
 	}
 	rec.Catalog.Present = src.catalog[name]
 	if team, ok := src.mapping[name]; ok {
@@ -461,12 +460,13 @@ func (c *Collector) reality(n *repoNode, src *sources) (*inventory.Reality, inve
 	}
 	if n.LatestRelease != nil {
 		r.LatestRelease = &inventory.Release{Tag: n.LatestRelease.TagName, PublishedAt: n.LatestRelease.PublishedAt}
+		r.LatestRelease.Build, r.LatestRelease.BuildTruncated = releaseBuild(n.LatestRelease.TagCommit)
 	}
 	if n.DefaultBranchRef != nil {
 		r.DefaultBranch = n.DefaultBranchRef.Name
 	}
 	r.Has = inventory.Presence{
-		Dependabot: n.Dependabot != nil, CircleCI: n.CircleCI != nil, Dockerfile: n.Dockerfile != nil, Helm: n.Helm != nil, Readme: n.Readme != nil,
+		Dependabot: n.Dependabot != nil, CircleCI: n.CIConfig != nil || n.CIWorkflows != nil, Dockerfile: n.Dockerfile != nil, Helm: n.Helm != nil, Readme: n.Readme != nil,
 		Workflows:  n.Workflows != nil && len(n.Workflows.Entries) > 0,
 		Codeowners: n.Codeowners != nil || n.CodeownersGh != nil || n.CodeownersDocs != nil,
 	}
@@ -623,7 +623,9 @@ fragment RepoFields on Repository {
   name url description visibility isArchived isFork isTemplate isEmpty createdAt pushedAt
   primaryLanguage { name }
   repositoryTopics(first: 20) { nodes { topic { name } } }
-  latestRelease { tagName publishedAt }
+  latestRelease { tagName publishedAt tagCommit { statusCheckRollup { state contexts(first: 40) {
+    pageInfo { hasNextPage } nodes { ... on StatusContext { context state createdAt } }
+  } } } }
   openIssues: issues(states: OPEN) { totalCount }
   oldestIssues: issues(states: OPEN, first: 5, orderBy: {field: CREATED_AT, direction: ASC}) { nodes { number title } }
   openPRs: pullRequests(states: OPEN, first: 40, orderBy: {field: CREATED_AT, direction: ASC}) {
@@ -642,7 +644,9 @@ fragment RepoFields on Repository {
   renovate4: object(expression: "HEAD:.renovaterc") { ... on Blob { text } }
   renovate5: object(expression: "HEAD:.renovaterc.json") { ... on Blob { text } }
   dependabot: object(expression: "HEAD:.github/dependabot.yml") { id }
-  circleci: object(expression: "HEAD:.circleci/config.yml") { id }
+  ciConfig: object(expression: "HEAD:.circleci/config.yml") { ... on Blob { text } }
+  ciWorkflows: object(expression: "HEAD:.circleci/workflows.yml") { ... on Blob { text } }
+  ciCustom: object(expression: "HEAD:.circleci/custom.yml") { ... on Blob { text } }
   workflows: object(expression: "HEAD:.github/workflows") { ... on Tree { entries { name } } }
   readme: object(expression: "HEAD:README.md") { id }
   dockerfile: object(expression: "HEAD:Dockerfile") { id }
@@ -692,8 +696,9 @@ type repoNode struct {
 		} `json:"nodes"`
 	} `json:"repositoryTopics"`
 	LatestRelease *struct {
-		TagName     string    `json:"tagName"`
-		PublishedAt time.Time `json:"publishedAt"`
+		TagName     string         `json:"tagName"`
+		PublishedAt time.Time      `json:"publishedAt"`
+		TagCommit   *tagCommitNode `json:"tagCommit"`
 	} `json:"latestRelease"`
 	OpenIssues struct {
 		TotalCount int `json:"totalCount"`
@@ -722,7 +727,9 @@ type repoNode struct {
 	Renovate4      *blob   `json:"renovate4"`
 	Renovate5      *blob   `json:"renovate5"`
 	Dependabot     *idNode `json:"dependabot"`
-	CircleCI       *idNode `json:"circleci"`
+	CIConfig       *blob   `json:"ciConfig"`
+	CIWorkflows    *blob   `json:"ciWorkflows"`
+	CICustom       *blob   `json:"ciCustom"`
 	Workflows      *struct {
 		Entries []struct {
 			Name string `json:"name"`
@@ -731,6 +738,12 @@ type repoNode struct {
 	Readme     *idNode `json:"readme"`
 	Dockerfile *idNode `json:"dockerfile"`
 	Helm       *idNode `json:"helm"`
+}
+
+// tagCommitNode is a release's tag commit: its status rollup says whether
+// CircleCI built the tag.
+type tagCommitNode struct {
+	StatusCheckRollup *statusRollup `json:"statusCheckRollup"`
 }
 
 // branchTarget is the default branch's head commit: its recent history (the

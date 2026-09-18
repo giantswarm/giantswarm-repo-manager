@@ -132,7 +132,7 @@ WRITES (as you, with your own GitHub token through the App giantswarm-repo-manag
 
 ## `get_info`
 
-Read-only. Report the service version and how this call is authenticated: the caller (the GitHub login and id GET /user answered for the bearer muster put on the call — the person's own user token through the App giantswarm-repo-manager) and the authorization server pinned for it; whether your credential reaches the team files (teamFiles.readable); the identity of the unattended inventory reads (the read-only App giantswarm-repo-manager-inventory, or not configured) and the inventory store; where the inventory's CircleCI facts come from (circleci.source: the commit statuses and the reconciler's run artifact, plus the engine's own read-only check when a CircleCI token is configured — circleci.configured);the team-review endpoint (reviews.configured, and reviews.debugChannel when one channel receives every ask and notice instead of the teams' channels); the engine (devctl reposetup package) and the write modes. Call first.
+Read-only. Report the service version and how this call is authenticated: the caller (the GitHub login and id GET /user answered for the bearer muster put on the call — the person's own user token through the App giantswarm-repo-manager) and the authorization server pinned for it; whether your credential reaches the team files (teamFiles.readable); the identity of the unattended inventory reads (the read-only App giantswarm-repo-manager-inventory, or not configured) and the inventory store; where the inventory's CircleCI facts come from (commit statuses and the reconciler's run artifact — this server holds no CircleCI token); the team-review endpoint (reviews.configured, and reviews.debugChannel when one channel receives every ask and notice instead of the teams' channels); the engine (devctl reposetup package) and the write modes. Call first.
 
 ```json
 {
@@ -163,7 +163,7 @@ Read-only. The full inventory record of one repository: declaration, GitHub real
 
 ## `list_repositories`
 
-Read-only. The inventory of the org's repositories from the store: one row per repository with team, lifecycle, visibility, archived (on GitHub), fork, Renovate state, finding kinds, set-up state and record age, sorted by repository name, plus the last sweep's summary. Scope per caller: mine (the teams you belong to on GitHub, read as you), team (the team argument, or your teams), unassigned (on GitHub without a declaration), all. Filters as on the Repositories page: search, team (in every scope: under mine one of your teams — another selects no rows and note says so; none under all: undeclared), renovate, visibility, fork, lifecycle, archived, inactiveDays, finding. get_repository has the full record.
+Read-only. The inventory of the org's repositories from the store: one row per repository with team, lifecycle, visibility, archived (on GitHub), fork, Renovate state, finding kinds, CI facts (architect orb version, arm64 images, China push, cosign signing), set-up state and record age, sorted by repository name, plus the last sweep's summary. Scope per caller: mine (the teams you belong to on GitHub, read as you), team (the team argument, or your teams), unassigned (on GitHub without a declaration), all. Filters as on the Repositories page: search, team (in every scope: under mine one of your teams — another selects no rows and note says so; none under all: undeclared), renovate, visibility, fork, lifecycle, archived, inactiveDays, finding, orb, arm64, chinaPush, signing. get_repository has the full record.
 
 ```json
 {
@@ -171,6 +171,20 @@ Read-only. The inventory of the org's repositories from the store: one row per r
     "archived": {
       "description": "Only repositories that are archived — declared archived or archived on GitHub (true) — or only those that are not (false). Independent of lifecycle.",
       "type": "boolean"
+    },
+    "arm64": {
+      "description": "Only repositories whose CircleCI pipeline builds linux/arm64 images (true) or builds images without it (false).",
+      "type": "boolean"
+    },
+    "chinaPush": {
+      "description": "How the images reach the China registry: split (the in-China sync job), inline (the push job pushes there itself), custom (an overridden registry list), none (no image push).",
+      "enum": [
+        "split",
+        "inline",
+        "custom",
+        "none"
+      ],
+      "type": "string"
     },
     "finding": {
       "description": "Only repositories with a finding of this kind (declared-but-gone, undeclared-on-github, entry-refused, gen-circleci-refused, default-icon, …).",
@@ -191,6 +205,10 @@ Read-only. The inventory of the org's repositories from the store: one row per r
     "limit": {
       "description": "Rows to return (default 100).",
       "type": "number"
+    },
+    "orb": {
+      "description": "Only repositories whose CircleCI pipeline pins this giantswarm/architect orb version, or one starting with it (10 selects every 10.x.y).",
+      "type": "string"
     },
     "renovate": {
       "description": "Renovate state: configured (a renovate.json5), missing, active (a Renovate pull request or commit within the server's Renovate activity period, default 180 days), inactive.",
@@ -214,6 +232,16 @@ Read-only. The inventory of the org's repositories from the store: one row per r
     },
     "search": {
       "description": "Only repositories whose name or description contains this text (case-insensitive).",
+      "type": "string"
+    },
+    "signing": {
+      "description": "Whether the pushed images and charts are signed with cosign: signed, unsigned (the record says why), unknown, none (nothing pushed).",
+      "enum": [
+        "signed",
+        "unsigned",
+        "unknown",
+        "none"
+      ],
       "type": "string"
     },
     "team": {

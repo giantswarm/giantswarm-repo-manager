@@ -44,6 +44,10 @@ type listFilter struct {
 	archived   *bool
 	inactive   time.Duration
 	finding    string
+	orb        string
+	arm64      *bool
+	chinaPush  string
+	signing    string
 }
 
 func (t *tools) listFilter(ctx context.Context, args map[string]any) (*listFilter, error) {
@@ -85,6 +89,12 @@ func (t *tools) listFilter(ctx context.Context, args map[string]any) (*listFilte
 	f.search = strings.ToLower(stringArg(args, argSearch))
 	f.renovate = stringArg(args, argRenovate)
 	f.visibility = strings.ToLower(stringArg(args, argVisibility))
+	f.orb = stringArg(args, argOrb)
+	if v, ok := args[argARM64].(bool); ok {
+		f.arm64 = &v
+	}
+	f.chinaPush = stringArg(args, argChinaPush)
+	f.signing = stringArg(args, argSigning)
 	if v, ok := args[argFork].(bool); ok {
 		f.fork = &v
 	}
@@ -156,7 +166,25 @@ func (f *listFilter) matches(r *inventory.Record, period time.Duration, now time
 	if f.finding != "" && !hasFinding(r, f.finding) {
 		return false
 	}
+	if f.orb != "" && (r.CI == nil || !orbMatches(r.CI.Orb, f.orb)) {
+		return false
+	}
+	if f.arm64 != nil && (r.CI == nil || r.CI.ARM64 == nil || *r.CI.ARM64 != *f.arm64) {
+		return false
+	}
+	if f.chinaPush != "" && (r.CI == nil || r.CI.ChinaPush != f.chinaPush) {
+		return false
+	}
+	if f.signing != "" && (r.CI == nil || r.CI.Signing != f.signing) {
+		return false
+	}
 	return true
+}
+
+// orbMatches says whether the pinned orb version is want, or starts with it
+// at a version boundary: 10 matches 10.5.0 and not 100.0.0.
+func orbMatches(have, want string) bool {
+	return have == want || strings.HasPrefix(have, want+".")
 }
 
 // matchesLifecycle: archived is declared archived or archived on GitHub;

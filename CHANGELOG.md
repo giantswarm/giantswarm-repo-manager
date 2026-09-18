@@ -11,6 +11,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- `approve_change` refuses the person who opened the pull request before GitHub does, in words the person can act on: "<login> opened giantswarm/github#N, and GitHub does not accept an author's approval of their own pull request; another member of <team> has to approve" — the asker's own click on the Slack Approve button now reads that instead of GitHub's `Can not approve your own pull request`. The answer carries the pull request's `author`.
+- An ask closes with who decides — "A member of <team> other than <asker> approves." — the reason reads "Reason: …", and the pull request URL travels only as the message's link (the gateway's *Open PR* button, the notice's *Open PR* line) instead of once more in the text.
+
 - `reconcile_repository` is `align_repository` (*Align now*). Its description warns what an alignment changes on the repository — merge settings, wiki and projects, team permissions, branch protection with `enforce_admins` and the required checks, the CircleCI follow, a CODEOWNERS pull request, description and visibility, lifecycle, catalog, a missed release build — and that it runs as the caller. The answer (dry run and commit) carries `mode` (`align` when the owning team has opted in, `check` otherwise), `optedIn`, `team`, the `planned` changes of the inventory's last check per step with `checkedAt`, and a `warning` paragraph for the person to read before confirming. The policy file's opt-in key is `alignOptIn` (was `repairOptIn`); a file with the old key reads as not opted in (giantswarm/giantswarm-repo-manager#46).
 
 ### Added

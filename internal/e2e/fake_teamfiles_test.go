@@ -91,10 +91,15 @@ type fakePullRequest struct {
 	Merged     bool
 	MergedAt   time.Time
 	MergeTitle string
+	// Closed is a pull request closed without a merge.
+	Closed bool
 }
 
 // merge marks the pull request merged now.
-func (pr *fakePullRequest) merge() { pr.Merged, pr.MergedAt = true, time.Now() }
+func (pr *fakePullRequest) merge() { pr.mergeAt(time.Now()) }
+
+// mergeAt marks the pull request merged at.
+func (pr *fakePullRequest) mergeAt(at time.Time) { pr.Merged, pr.MergedAt = true, at }
 
 type fakeReview struct{ User, Event, Body string }
 
@@ -355,6 +360,9 @@ func (f *fakeTeamFiles) pullJSON(pr *fakePullRequest) map[string]any {
 	if pr.Merged {
 		out[kState], out["merged_at"] = "closed", pr.MergedAt.UTC().Format(time.RFC3339)
 	}
+	if pr.Closed {
+		out[kState] = "closed"
+	}
 	if len(pr.Reviews) > 0 && !f.checksPending[pr.Number] {
 		out["mergeable_state"] = "clean"
 	}
@@ -402,6 +410,20 @@ func (f *fakeTeamFiles) merge(n int) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.pulls[n].merge()
+}
+
+// mergeAt marks n merged at — the clock the poller reads.
+func (f *fakeTeamFiles) mergeAt(n int, at time.Time) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.pulls[n].mergeAt(at)
+}
+
+// close closes n without a merge.
+func (f *fakeTeamFiles) close(n int) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.pulls[n].Closed = true
 }
 
 // setChecksPending marks n's checks as still running (or done).

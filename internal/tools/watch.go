@@ -364,7 +364,9 @@ func (w *watcher) merged(ctx context.Context) (outcome, error) {
 
 // setUp: the record's last run is the one of the pull request. Its failed
 // steps fail the phase, so does a refused entry (the entry step's
-// findings); the other findings are carried for the person.
+// findings); the other findings are carried for the person. A run the
+// poller gave up as missing after the merge fails the phase; one it still
+// expects keeps it pending.
 func (w *watcher) setUp(ctx context.Context) (outcome, error) {
 	rec, err := w.t.d.Inventory.Get(ctx, w.org()+"/"+w.name)
 	switch {
@@ -376,7 +378,13 @@ func (w *watcher) setUp(ctx context.Context) (outcome, error) {
 	if rec.Declaration != nil {
 		w.flavours = rec.Declaration.Flavours
 	}
-	if m := rec.Setup.MissingRun; m != nil && m.Follows(w.number) {
+	if p := rec.Setup.PendingRun; p.Follows(w.number) && p.MergedAt == nil && w.t.d.Collector != nil {
+		// The pull request merged (the phase before this one) and the poller
+		// has not read the merge yet: wake it, so the run is looked for at
+		// the pending cadence rather than from the poller's next tick.
+		w.t.d.Collector.WakeReconciler()
+	}
+	if m := rec.Setup.MissingRun; m != nil && m.Follows(w.number) && m.MergedAt != nil {
 		return failed(rec.MissingRunFinding().Message), nil
 	}
 	run := rec.Setup.LastRun

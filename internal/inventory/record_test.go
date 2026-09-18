@@ -96,20 +96,35 @@ func TestOpenedExpectsTheRunAndTheMissingFindingNamesTheKind(t *testing.T) {
 	for kind, noun := range map[string]string{ChangeCreated: "declaration", ChangeArchived: "archive", ChangeDeprecated: "deprecation", ChangeTransferred: "transfer", ChangeChanged: "change"} {
 		r := &Record{Repository: repoX, Setup: Setup{MissingRun: &MissingRun{}}}
 		r.Opened(now, "alice", kind, pr)
-		if p := r.Setup.PendingRun; p == nil || p.Kind != kind || !p.Follows(7) || p.By != "alice" || r.Setup.MissingRun != nil {
+		if p := r.Setup.PendingRun; p == nil || p.Kind != kind || !p.Follows(7) || p.By != "alice" || r.Setup.MissingRun != nil || !p.AwaitedFrom().IsZero() {
 			t.Fatalf("%s: pending run %+v, missing run %+v", kind, p, r.Setup.MissingRun)
 		}
-		r.RunMissing(now.Add(16*time.Minute), runs)
+		merged := now.Add(20 * time.Minute)
+		r.Merged(merged)
+		if from := r.Setup.PendingRun.AwaitedFrom(); !from.Equal(merged) {
+			t.Fatalf("%s: awaited from %s, want the merge %s", kind, from, merged)
+		}
+		r.RunMissing(merged.Add(16*time.Minute), runs)
 		f := r.MissingRunFinding()
 		if f == nil || f.Kind != FindingReconcileRunMissing || r.Setup.PendingRun != nil ||
-			!strings.Contains(f.Message, "whose "+noun+" pull request "+pr.URL+" alice opened at 2026-09-18T14:29:31Z") || !strings.Contains(f.Fix, "merge it") || !strings.Contains(f.Fix, runs) {
+			!strings.Contains(f.Message, "whose "+noun+" pull request "+pr.URL+" alice opened at 2026-09-18T14:29:31Z was merged at 2026-09-18T14:49:31Z, had not reported by 2026-09-18T15:05:31Z") ||
+			!strings.Contains(f.Fix, "follows the pull request's merge") || !strings.Contains(f.Fix, runs) {
 			t.Errorf("%s: finding %+v", kind, f)
 		}
 	}
 	r := &Record{Repository: repoX}
 	r.Dispatched(now, "alice")
+	if from := r.Setup.PendingRun.AwaitedFrom(); !from.Equal(now) {
+		t.Errorf("dispatch: awaited from %s, want the dispatch %s", from, now)
+	}
 	r.RunMissing(now.Add(16*time.Minute), runs)
 	if f := r.MissingRunFinding(); f == nil || !strings.Contains(f.Message, "alice dispatched at 2026-09-18T14:29:31Z") || strings.Contains(f.Message, "pull request") {
 		t.Errorf("dispatch: finding %+v", f)
+	}
+	r = &Record{Repository: repoX}
+	r.Opened(now, "alice", ChangeCreated, pr)
+	r.Closed()
+	if r.Setup.PendingRun != nil || r.Setup.MissingRun != nil || len(r.Findings) != 0 {
+		t.Errorf("closed without a merge: %+v findings %+v", r.Setup, r.Findings)
 	}
 }

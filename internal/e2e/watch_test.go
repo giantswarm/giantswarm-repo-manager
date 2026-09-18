@@ -101,9 +101,9 @@ func names(ps []tools.Phase) string {
 }
 
 // TestWatchRepositoryFollowsACreationToReadiness: the creation leaves the
-// record expecting the run of its pull request, so the poller runs at its
-// pending interval; before the merge the watch answers with merged pending
-// and the three phases done; a merge arriving mid-call ends the call within
+// record expecting the run of its pull request — without a deadline while
+// the pull request is open, so the poller does not hurry; before the merge
+// the watch answers with merged pending and the three phases done; a merge arriving mid-call ends the call within
 // a poll interval with the merged phase and changed, setUp pending; after
 // the run, with the release there but CircleCI silent, released stays
 // pending, as it does while CircleCI's statuses are pending — a call that
@@ -122,8 +122,8 @@ func TestWatchRepositoryFollowsACreationToReadiness(t *testing.T) {
 	if rec := st.record(t, shinyService); !rec.Setup.PendingRun.Follows(pr) || rec.Reality == nil {
 		t.Fatalf("record after the creation: %+v", rec.Setup)
 	}
-	if p := st.poll(t); p.Pending != 1 {
-		t.Errorf("poll while the creation's run is expected: %+v", p)
+	if p := st.poll(t); p.Pending != 0 || p.Missing != 0 {
+		t.Errorf("poll while the pull request is open: %+v", p)
 	}
 	if text, isErr := call(t, c, tools.ToolWatchRepository, map[string]any{kRepository: shinyService, argPullRequest: 99999}); !isErr || !strings.Contains(text, "#99999 does not exist") {
 		t.Errorf("an unknown pull request: %v %s", isErr, text)
@@ -261,28 +261,88 @@ func TestWatchRepositoryReportsAFailedStep(t *testing.T) {
 	}
 }
 
-// TestWatchRepositoryReportsAMissingRun: the pull request merged and no run
-// reported within the pending window: the poller gives the creation's run
-// up with the finding reconcile-run-missing, worded for a creation, and the
-// setUp phase fails with it.
-func TestWatchRepositoryReportsAMissingRun(t *testing.T) {
+// TestWatchRepositoryAwaitsTheRunFromTheMerge: the pending window counts
+// from the merge, not from the opening. A pull request open for twenty
+// minutes leaves the record expecting its run without a finding and the
+// watch pending on merged; the poller reads the merge from the pull
+// request and the window starts there; no run within it is given up with
+// the finding reconcile-run-missing, worded for a creation with the merge
+// time, and the setUp phase fails with it; the run's late artifact clears
+// the finding and the watch goes on.
+func TestWatchRepositoryAwaitsTheRunFromTheMerge(t *testing.T) {
 	st := newStack(t)
 	c := st.as(t, aliceToken)
 	created, prURL := st.createShiny(t, c)
 	pr := created.PullRequest.Number
-	st.ghs.files.merge(pr)
-	st.advance(16 * time.Minute)
-	if p := st.poll(t); p.Missing != 1 {
-		t.Fatalf("poll past the window: %+v", p)
+	st.advance(20 * time.Minute)
+	if p := st.poll(t); p.Pending != 0 || p.Missing != 0 {
+		t.Fatalf("poll with the pull request open for 20 minutes: %+v", p)
+	}
+	if rec := st.record(t, shinyService); !rec.Setup.PendingRun.Follows(pr) || rec.Setup.PendingRun.MergedAt != nil || rec.Setup.MissingRun != nil || hasKind(rec, inventory.FindingReconcileRunMissing) {
+		t.Fatalf("record with the pull request open: %+v findings %+v", rec.Setup, rec.Findings)
+	}
+	if w := st.watch(t, c, pr, 0.3); w.Failure != nil || w.Pending != tools.PhaseMerged || names(w.Phases) != "created scaffolded declared" {
+		t.Fatalf("watch with the pull request open: %+v failure=%+v", w, w.Failure)
+	}
+
+	merged := st.now().UTC().Truncate(time.Second)
+	st.ghs.files.mergeAt(pr, merged)
+	if p := st.poll(t); p.Pending != 1 || p.Missing != 0 {
+		t.Fatalf("poll after the merge: %+v", p)
+	}
+	if rec := st.record(t, shinyService); !rec.Setup.PendingRun.Follows(pr) || rec.Setup.PendingRun.MergedAt == nil || !rec.Setup.PendingRun.MergedAt.Equal(merged) {
+		t.Fatalf("record after the merge: %+v", rec.Setup.PendingRun)
+	}
+	if w := st.watch(t, c, pr, 0.3); w.Failure != nil || w.Pending != tools.PhaseSetUp || names(w.Phases) != throughMerged {
+		t.Fatalf("watch after the merge: %+v failure=%+v", w, w.Failure)
+	}
+	st.advance(14 * time.Minute)
+	if p := st.poll(t); p.Pending != 1 || p.Missing != 0 {
+		t.Fatalf("poll 14 minutes after the merge: %+v", p)
+	}
+	st.advance(2 * time.Minute)
+	if p := st.poll(t); p.Pending != 0 || p.Missing != 1 {
+		t.Fatalf("poll past the window from the merge: %+v", p)
 	}
 	rec := st.record(t, shinyService)
 	f := rec.MissingRunFinding()
-	if f == nil || !strings.Contains(f.Message, prURL) || !strings.Contains(f.Message, alice+" opened") || !strings.Contains(f.Fix, "merge it") || !hasKind(rec, inventory.FindingReconcileRunMissing) {
+	if f == nil || !strings.Contains(f.Message, prURL) || !strings.Contains(f.Message, alice+" opened") || !strings.Contains(f.Message, "was merged at "+merged.Format(time.RFC3339)) ||
+		!strings.Contains(f.Fix, "follows the pull request's merge") || !strings.Contains(f.Fix, "/actions/workflows/"+reconcilerWorkflow) || !hasKind(rec, inventory.FindingReconcileRunMissing) {
 		t.Fatalf("the missing run's finding: %+v (%+v)", f, rec.Findings)
 	}
 	w := st.watch(t, c, pr, 0.3)
 	if w.Ready || w.Failure == nil || w.Failure.Phase != tools.PhaseSetUp || w.Failure.Reason != f.Message || names(w.Phases) != throughMerged {
 		t.Fatalf("a missing run: %+v failure=%+v", w, w.Failure)
+	}
+
+	// The run reports after all: the finding goes, the watch goes on.
+	st.reported(t, pr, prURL, reconcile.StepResult{Step: reconcile.StepCircleCI, Verdict: reconcile.VerdictRepaired, Summary: "followed"})
+	if rec := st.record(t, shinyService); rec.Setup.MissingRun != nil || rec.Setup.PendingRun != nil || hasKind(rec, inventory.FindingReconcileRunMissing) {
+		t.Fatalf("record after the late run: %+v findings %+v", rec.Setup, rec.Findings)
+	}
+	if w = st.watch(t, c, pr, 0.3); w.Failure != nil || w.Pending != tools.PhaseReleased || names(w.Phases) != throughSetUp {
+		t.Fatalf("watch after the late run: %+v failure=%+v", w, w.Failure)
+	}
+}
+
+// TestWatchRepositoryForgetsTheRunOfAClosedPullRequest: a pull request
+// closed without a merge is followed by no run — the poller drops the mark
+// without a finding; the watch fails on merged, as before.
+func TestWatchRepositoryForgetsTheRunOfAClosedPullRequest(t *testing.T) {
+	st := newStack(t)
+	c := st.as(t, aliceToken)
+	created, prURL := st.createShiny(t, c)
+	pr := created.PullRequest.Number
+	st.ghs.files.close(pr)
+	st.advance(20 * time.Minute)
+	if p := st.poll(t); p.Pending != 0 || p.Missing != 0 {
+		t.Fatalf("poll with the pull request closed: %+v", p)
+	}
+	if rec := st.record(t, shinyService); rec.Setup.PendingRun != nil || rec.Setup.MissingRun != nil || hasKind(rec, inventory.FindingReconcileRunMissing) {
+		t.Fatalf("record with the pull request closed: %+v findings %+v", rec.Setup, rec.Findings)
+	}
+	if w := st.watch(t, c, pr, 0.3); w.Failure == nil || w.Failure.Phase != tools.PhaseMerged || !strings.Contains(w.Failure.Reason, prURL+" was closed without being merged") {
+		t.Fatalf("watch with the pull request closed: %+v failure=%+v", w, w.Failure)
 	}
 }
 

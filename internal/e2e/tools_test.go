@@ -320,7 +320,7 @@ func TestSetLifecycleArchivedAndApproveChange(t *testing.T) {
 		t.Errorf("archive pull request %q\n%s", pr.Title, file)
 	}
 	asks, _ := st.gw.posted()
-	if len(asks) != 1 || asks[0][kChannel] != bumblebeeChannel || !strings.Contains(asks[0]["text"].(string), alice+" asks to archive") || !strings.Contains(asks[0]["text"].(string), "Reason: superseded") ||
+	if len(asks) != 1 || asks[0][kChannel] != bumblebeeChannel || !strings.Contains(asks[0]["text"].(string), alice+" asks to archive") || !strings.Contains(asks[0]["text"].(string), "Reason: superseded. A member of") ||
 		!strings.Contains(asks[0]["text"].(string), "A member of "+team+" other than "+alice+" approves.") || strings.Contains(asks[0]["text"].(string), "https://") || !strings.HasSuffix(asks[0]["link"].(string), fmt.Sprintf("/pull/%d", pr.Number)) {
 		t.Fatalf("ask: %v", asks)
 	}

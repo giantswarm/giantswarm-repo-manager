@@ -452,11 +452,17 @@ func (t *tools) planTransfer(ctx context.Context, repo teamfiles.Repo, as string
 	return pl, nil
 }
 
+// reasonSuffix is the asker's reason as a sentence of the ask, so that what
+// follows it — who decides — starts a sentence of its own.
 func reasonSuffix(reason string) string {
-	if strings.TrimSpace(reason) == "" {
+	reason = strings.TrimSpace(reason)
+	if reason == "" {
 		return ""
 	}
-	return " Reason: " + strings.TrimSpace(reason)
+	if !strings.HasSuffix(reason, ".") && !strings.HasSuffix(reason, "!") && !strings.HasSuffix(reason, "?") {
+		reason += "."
+	}
+	return " Reason: " + reason
 }
 
 // decides closes an ask with who may approve it: a member of the deciding

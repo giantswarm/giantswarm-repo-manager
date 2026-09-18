@@ -52,8 +52,11 @@ func TestAskNamesWhoDecides(t *testing.T) {
 	if got, want := decides(testTeam, testAuthor), " A member of team-bumblebee other than alice approves."; got != want {
 		t.Errorf("decides: %q, want %q", got, want)
 	}
-	if got, want := reasonSuffix("  just a test repo "), " Reason: just a test repo"; got != want {
+	if got, want := reasonSuffix("  just a test repo "), " Reason: just a test repo."; got != want {
 		t.Errorf("reasonSuffix: %q, want %q", got, want)
+	}
+	if got, want := reasonSuffix("superseded by the new service."), " Reason: superseded by the new service."; got != want {
+		t.Errorf("reasonSuffix(sentence): %q, want %q", got, want)
 	}
 	if got := reasonSuffix("  "); got != "" {
 		t.Errorf("reasonSuffix(blank): %q, want empty", got)

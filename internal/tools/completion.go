@@ -17,16 +17,27 @@ import (
 // as the unattended identity — one sentence about the change when a person
 // made one, one per failed step and per finding of that person's run; nothing
 // when the run has nothing to tell, and nothing at all for a run nobody's
-// change is behind (an Align now, the schedule). Nothing to approve.
+// change is behind (an Align now, the schedule). Nothing to approve. Every
+// way out logs why: a record without a declaration — the team files do not
+// name the repository, read again after the run — has no team to tell and
+// stays silent under the team the artifact names.
 func (ts *Tools) Reconciled(ctx context.Context, rec *inventory.Record) {
 	t := ts.t
-	if rec == nil || rec.Declaration == nil || rec.Setup.LastRun == nil {
+	if rec == nil || rec.Setup.LastRun == nil {
+		t.d.Log.Warn("reconciler run: completion hook called without a run")
+		return
+	}
+	run := rec.Setup.LastRun
+	if rec.Declaration == nil {
+		t.d.Log.Info("reconciler run: nothing to tell the team", "repository", rec.Repository, "team", run.Result.Team, "change", changeKind(run),
+			"reason", "the team files do not declare the repository")
 		return
 	}
 	team := rec.Declaration.Team
 	msgs := Completions(rec)
 	if len(msgs) == 0 {
-		t.d.Log.Info("reconciler run: nothing to tell the team", "repository", rec.Repository, "team", team, "change", changeKind(rec.Setup.LastRun))
+		t.d.Log.Info("reconciler run: nothing to tell the team", "repository", rec.Repository, "team", team, "change", changeKind(run),
+			"reason", "the run is not behind a person's change or has nothing to report")
 		return
 	}
 	if t.d.Review == nil {
@@ -73,7 +84,7 @@ type Completion struct {
 // the platform's to fix, not the team's, and stays on the record too.
 func Completions(rec *inventory.Record) []Completion {
 	run := rec.Setup.LastRun
-	if !personMade(run.Change) {
+	if !run.Change.PersonMade() {
 		return nil
 	}
 	var out []Completion
@@ -103,22 +114,6 @@ func CompletionText(rec *inventory.Record) string {
 		lines = append(lines, m.Text)
 	}
 	return strings.Join(lines, "\n")
-}
-
-// personMade says whether a person's team-file change is behind the run: one
-// of the kinds the reconciler derives from a merged pull request. A Reconcile
-// now (`dispatched`), the schedule (`nightly`) and an artifact without a
-// change block are the reconciler's own runs.
-func personMade(ch *inventory.Change) bool {
-	if ch == nil {
-		return false
-	}
-	switch ch.Kind {
-	case inventory.ChangeCreated, inventory.ChangeAdded, inventory.ChangeTransferred,
-		inventory.ChangeArchived, inventory.ChangeDeprecated, inventory.ChangeChanged:
-		return true
-	}
-	return false
 }
 
 // changeSentence is the one sentence about the change for the team, empty

@@ -1,6 +1,10 @@
 package tools
 
 import (
+	"bytes"
+	"context"
+	"log/slog"
+	"strings"
 	"testing"
 
 	"github.com/giantswarm/devctl/v8/pkg/reposetup/reconcile"
@@ -9,6 +13,7 @@ import (
 )
 
 const (
+	testRepository  = "giantswarm/bumblebee-repo"
 	testRunURL      = "https://github.com/giantswarm/github/actions/runs/123"
 	testPRURL       = "https://github.com/giantswarm/github/pull/4711"
 	testService     = "service"
@@ -26,11 +31,11 @@ func record(change *inventory.Change, steps ...reconcile.StepResult) *inventory.
 		}
 	}
 	return &inventory.Record{
-		Repository:  "giantswarm/bumblebee-repo",
+		Repository:  testRepository,
 		Name:        "bumblebee-repo",
 		Declaration: &inventory.Declaration{Team: testTeam, ComponentType: testService, Language: "go", Flavours: []string{testFlavourApp}},
 		Setup: inventory.Setup{LastRun: &inventory.LastRun{
-			Result: reconcile.Result{Repository: "giantswarm/bumblebee-repo", Team: testTeam, Converged: converged, Steps: steps},
+			Result: reconcile.Result{Repository: testRepository, Team: testTeam, Converged: converged, Steps: steps},
 			RunURL: testRunURL, RunID: 123, Attempt: 1, Change: change}},
 	}
 }
@@ -134,5 +139,30 @@ func TestCompletionLinks(t *testing.T) {
 	}
 	if msgs := Completions(record(change(inventory.ChangeDispatched), okStep)); len(msgs) != 0 {
 		t.Errorf("nothing to tell should be no message: %+v", msgs)
+	}
+}
+
+// TestReconciledLogsWhyItStaysSilent: the hook names its reason on every way
+// out — a record the team files do not declare (the team from the artifact),
+// a run with nothing to tell — and posts nothing.
+func TestReconciledLogsWhyItStaysSilent(t *testing.T) {
+	var buf bytes.Buffer
+	ts := &Tools{t: &tools{d: Deps{Log: slog.New(slog.NewTextHandler(&buf, nil))}}}
+	undeclared := record(change(inventory.ChangeCreated), okStep)
+	undeclared.Declaration = nil
+	ts.Reconciled(context.Background(), undeclared)
+	if logged := buf.String(); !strings.Contains(logged, "nothing to tell the team") || !strings.Contains(logged, "do not declare") ||
+		!strings.Contains(logged, "team="+testTeam) || !strings.Contains(logged, "change=created") {
+		t.Errorf("undeclared record: %q", logged)
+	}
+	buf.Reset()
+	ts.Reconciled(context.Background(), record(change(inventory.ChangeNightly), findingStep))
+	if logged := buf.String(); !strings.Contains(logged, "nothing to tell the team") || !strings.Contains(logged, "change=nightly") || !strings.Contains(logged, "reason=") {
+		t.Errorf("nightly run: %q", logged)
+	}
+	buf.Reset()
+	ts.Reconciled(context.Background(), &inventory.Record{Repository: testRepository})
+	if logged := buf.String(); !strings.Contains(logged, "without a run") {
+		t.Errorf("record without a run: %q", logged)
 	}
 }

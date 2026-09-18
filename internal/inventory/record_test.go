@@ -61,3 +61,23 @@ func TestFindingsDeclaredGoneAndUndeclared(t *testing.T) {
 		t.Errorf("refused: %+v", refused.Findings)
 	}
 }
+
+// TestChangePersonMade: the kinds the reconciler derives from a merged pull
+// request are a person's change; an Align now, the schedule and a missing
+// block are the reconciler's own runs.
+func TestChangePersonMade(t *testing.T) {
+	for _, kind := range []string{ChangeCreated, ChangeAdded, ChangeTransferred, ChangeArchived, ChangeDeprecated, ChangeChanged} {
+		if !(&Change{Kind: kind}).PersonMade() {
+			t.Errorf("%s should be a person's change", kind)
+		}
+	}
+	for _, kind := range []string{ChangeDispatched, ChangeNightly, ""} {
+		if (&Change{Kind: kind}).PersonMade() {
+			t.Errorf("%q should be the reconciler's own run", kind)
+		}
+	}
+	var none *Change
+	if none.PersonMade() {
+		t.Error("an artifact without a change block should be the reconciler's own run")
+	}
+}

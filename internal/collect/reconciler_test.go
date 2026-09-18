@@ -9,6 +9,8 @@ import (
 	"sync/atomic"
 	"testing"
 	"time"
+
+	"github.com/giantswarm/giantswarm-repo-manager/internal/inventory"
 )
 
 // The reconciler workflow writes workflowRun.id and attempt as strings
@@ -179,5 +181,36 @@ func nextPoll(t *testing.T, polls <-chan time.Time, within time.Duration) time.T
 	case <-time.After(within):
 		t.Fatalf("no read within %v", within)
 		return time.Time{}
+	}
+}
+
+// TestPredates: sources read before a run behind a person's merged change
+// finished may miss that change and are read again; a read from after the
+// run, a run of the reconciler's own (an Align now, the schedule, no change
+// block) and a refresh without a run keep the cached read.
+func TestPredates(t *testing.T) {
+	finished := time.Date(2026, 9, 18, 13, 38, 49, 0, time.UTC)
+	before, after := finished.Add(-4*time.Minute), finished.Add(time.Second)
+	run := func(ch *inventory.Change) *inventory.LastRun {
+		return &inventory.LastRun{Timestamp: finished, Change: ch}
+	}
+	cases := []struct {
+		name string
+		at   time.Time
+		run  *inventory.LastRun
+		want bool
+	}{
+		{"created, read before the run", before, run(&inventory.Change{Kind: inventory.ChangeCreated}), true},
+		{"transferred, read before the run", before, run(&inventory.Change{Kind: inventory.ChangeTransferred}), true},
+		{"created, read after the run", after, run(&inventory.Change{Kind: inventory.ChangeCreated}), false},
+		{"an Align now, read before the run", before, run(&inventory.Change{Kind: inventory.ChangeDispatched}), false},
+		{"the schedule, read before the run", before, run(&inventory.Change{Kind: inventory.ChangeNightly}), false},
+		{"no change block, read before the run", before, run(nil), false},
+		{"no run", before, nil, false},
+	}
+	for _, c := range cases {
+		if got := predates(c.at, c.run); got != c.want {
+			t.Errorf("%s: predates=%v, want %v", c.name, got, c.want)
+		}
 	}
 }

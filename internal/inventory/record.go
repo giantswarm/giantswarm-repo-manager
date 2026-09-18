@@ -299,6 +299,21 @@ const (
 	ChangeNightly = "nightly"
 )
 
+// PersonMade says whether a person's team-file change is behind the run: one
+// of the kinds the reconciler derives from a merged pull request. An Align
+// now (dispatched), the schedule (nightly) and an artifact without a change
+// block are the reconciler's own runs.
+func (ch *Change) PersonMade() bool {
+	if ch == nil {
+		return false
+	}
+	switch ch.Kind {
+	case ChangeCreated, ChangeAdded, ChangeTransferred, ChangeArchived, ChangeDeprecated, ChangeChanged:
+		return true
+	}
+	return false
+}
+
 // PendingRun is an expected reconciler run that has not reported yet.
 type PendingRun struct {
 	// DispatchedAt is when the run was expected from: the dispatch of an

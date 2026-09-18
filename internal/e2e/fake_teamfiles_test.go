@@ -27,6 +27,9 @@ const (
 	bumblebeeStandup  = "C0STANDUPBEE"
 	planeteersChannel = "C0PLANETEERS"
 	planeteersStandup = "C0STANDUPPLA"
+	// The debug channel: a name reviews.channels resolves, like a team's.
+	debugChannelName = "repo-manager-debug"
+	debugChannelID   = "C0DEBUGROUND"
 
 	// Tool arguments and values the scenarios repeat.
 	argDryRun      = "dryRun"

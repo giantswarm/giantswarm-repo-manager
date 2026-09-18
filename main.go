@@ -49,10 +49,10 @@ type options struct {
 	githubAPIURL, githubAppPrivateKeyFile string
 	githubAppID, githubAppInstallationID  int64
 
-	teamFilesRepository, teamFilesRef             string
-	reconcilerWorkflow                            string
-	reconcilerPollInterval                        time.Duration
-	reviewsURL, reviewsTokenFile, reviewsChannels string
+	teamFilesRepository, teamFilesRef                                  string
+	reconcilerWorkflow                                                 string
+	reconcilerPollInterval                                             time.Duration
+	reviewsURL, reviewsTokenFile, reviewsChannels, reviewsDebugChannel string
 
 	oauthEnabled                           bool
 	oauthBaseURL, oauthAuthorizationServer string
@@ -84,6 +84,7 @@ func parseFlags(args []string) (*options, error) {
 	f.StringVar(&o.reviewsURL, "reviews-url", envOr("REVIEWS_URL", ""), "klaus-gateway's base URL for the team-review endpoint (POST /reviews, /notices); empty leaves the asks undelivered (REVIEWS_URL)")
 	f.StringVar(&o.reviewsTokenFile, "reviews-token-file", envOr("REVIEWS_TOKEN_FILE", "/var/run/secrets/klaus-gateway/token"), "Projected ServiceAccount token (audience klaus-gateway) sent to the team-review endpoint (REVIEWS_TOKEN_FILE)")
 	f.StringVar(&o.reviewsChannels, "reviews-channels", envOr("REVIEWS_CHANNELS", ""), "Comma-separated name=ID pairs mapping a policy file's slackChannel to its Slack channel ID (REVIEWS_CHANNELS)")
+	f.StringVar(&o.reviewsDebugChannel, "reviews-debug-channel", envOr("REVIEWS_DEBUG_CHANNEL", ""), "A channel that receives every ask and notice instead of the policy file's channel, the text naming that channel: a name reviews-channels resolves or a Slack channel ID; empty delivers to the policy file's channel (REVIEWS_DEBUG_CHANNEL)")
 	f.BoolVar(&o.oauthEnabled, "enable-oauth", envBool("OAUTH_ENABLED"), "Require a GitHub user token as the bearer of every MCP request — behind muster the person's own, through the App giantswarm-repo-manager — verified with GET /user; the caller and the token travel with the request (OAUTH_ENABLED)")
 	f.StringVar(&o.oauthBaseURL, "oauth-base-url", envOr("OAUTH_BASE_URL", ""), "URL muster reaches this server at, without the MCP path: the resource of its OAuth protected-resource metadata (OAUTH_BASE_URL)")
 	f.StringVar(&o.oauthAuthorizationServer, "oauth-authorization-server", envOr("OAUTH_AUTHORIZATION_SERVER", server.DefaultAuthorizationServer), "Issuer identity of the authorization server muster pins for this server, named in the protected-resource metadata (OAUTH_AUTHORIZATION_SERVER)")
@@ -108,10 +109,14 @@ func main() {
 
 // run wires the components and serves until ctx is done.
 func run(ctx context.Context, o *options, log *slog.Logger) error {
+	reviews, err := review.New(review.Config{BaseURL: o.reviewsURL, TokenFile: o.reviewsTokenFile, Channels: channelMap(o.reviewsChannels), DebugChannel: o.reviewsDebugChannel})
+	if err != nil {
+		return err
+	}
 	deps := tools.Deps{Version: version(), GitHubAPIURL: o.githubAPIURL, Log: log,
 		TeamFilesRepository: o.teamFilesRepository, TeamFilesRef: o.teamFilesRef, ReconcilerWorkflow: o.reconcilerWorkflow, SweepTeams: splitList(o.sweepTeams),
 		RenovateActive: time.Duration(o.renovateActiveDays) * 24 * time.Hour,
-		Review:         review.New(review.Config{BaseURL: o.reviewsURL, TokenFile: o.reviewsTokenFile, Channels: channelMap(o.reviewsChannels)})}
+		Review:         reviews}
 
 	var reader *gh.Reader
 	if o.githubAppID != 0 || o.githubAppInstallationID != 0 || o.githubAppPrivateKeyFile != "" {
@@ -197,7 +202,7 @@ func run(ctx context.Context, o *options, log *slog.Logger) error {
 		"inventory", o.valkeyAddr, "inventoryConnectTimeout", o.connectTimeout, "collector", deps.Collector != nil, "sweepInterval", o.sweepInterval,
 		"reconcilerPollInterval", o.reconcilerPollInterval, "reconcilerWorkflow", o.reconcilerWorkflow,
 		"engineChecks", o.sweepEngineChecks, "sweepTeams", o.sweepTeams,
-		"teamFiles", o.teamFilesRepository+"@"+o.teamFilesRef, "reviews", o.reviewsURL)
+		"teamFiles", o.teamFilesRepository+"@"+o.teamFilesRef, "reviews", o.reviewsURL, "reviewsDebugChannel", o.reviewsDebugChannel)
 	err = srv.Run(runCtx)
 	if cause := context.Cause(runCtx); cause != nil && !errors.Is(cause, context.Canceled) {
 		return cause

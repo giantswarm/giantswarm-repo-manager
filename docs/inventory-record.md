@@ -112,7 +112,7 @@ the message to the team's standup channel is rendered from (README, "Asks and me
   "catalog": {"present": true},         // giantswarm/github catalog/components.yaml
   "mapping": {"present": true, "team": "bumblebee"},   // management-cluster-bases apps-to-teams mapping
   "setup": {
-    "checks": { "…": "reconcile.Result in mode check — what devctl repo status prints" },
+    "checks": { "…": "reconcile.Result in mode check — what devctl repo status prints; its circleci and release steps come from the record's sources (the head's statuses, lastRun), the engine having no CircleCI client" },
     "checkedAt": "…",
     "checkError": "",                   // why checks is missing (no read identity, …); a refused entry has checks = the engine's Refused result
     "lastRun": {"result": {"…": "reconcile.Result"}, "runUrl": "…", "timestamp": "…", "runId": 1, "attempt": 1,

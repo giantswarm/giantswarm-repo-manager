@@ -373,6 +373,9 @@ func (c *Collector) runChecks(ctx context.Context, records []*inventory.Record, 
 			r.Setup.CheckError = err.Error()
 			return
 		}
+		// The engine has no CircleCI client here: its circleci and release
+		// steps come from the record's own sources instead.
+		fillClientlessSteps(res, r)
 		at := c.now()
 		r.Setup.Checks, r.Setup.CheckedAt, r.Setup.CheckError = res, &at, ""
 	})

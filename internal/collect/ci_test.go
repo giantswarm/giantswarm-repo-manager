@@ -145,7 +145,7 @@ workflows:
 	}{
 		{"pre-9 multiarch job: both platforms, inline China, orb predates signing", pre9, true, defaultPlatforms, &yes, inventory.ChinaPushInline, inventory.SigningUnsigned, "predates signing"},
 		{"pre-9 plain push with sign false: amd64 only, sign off", plainOld, true, "linux/amd64", &no, inventory.ChinaPushInline, inventory.SigningUnsigned, "sign: false on push"},
-		{"buildx without go-build and a registry override: platforms unknown, custom China", buildxNoGo, true, "", nil, inventory.ChinaPushCustom, inventory.SigningSigned, ""},
+		{"buildx without go-build and a registry override: the orb's default platforms, custom China", buildxNoGo, true, defaultPlatforms, &yes, inventory.ChinaPushCustom, inventory.SigningSigned, ""},
 		{"native per-architecture builds merged: both platforms, split China, signed", native, true, defaultPlatforms, &yes, inventory.ChinaPushSplit, inventory.SigningSigned, ""},
 		{"chart only on a dev orb: no image, signing unknown", chartOnly, true, "", nil, inventory.ChinaPushNone, inventory.SigningUnknown, "not a release"},
 		{"no architect orb, nothing pushed", noOrb, true, "", nil, inventory.ChinaPushNone, inventory.SigningNone, ""},

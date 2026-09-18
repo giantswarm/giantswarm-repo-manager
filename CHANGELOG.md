@@ -9,6 +9,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- `ci.platforms` / `ci.arm64`: an image push on orb 9 or newer without a `platforms` value and without a go-build job resolves to the orb's built-in default (`linux/amd64,linux/arm64`), the list `push-to-registries` falls back to when no `.platforms` file was written, instead of staying unknown.
+
 ### Added
 
 - The record's `ci` block — what the repository's CircleCI configuration on the default branch says, read with the repository (`.circleci/config.yml`, `workflows.yml`, `custom.yml`): `generated` (devctl's header), `orb` (the giantswarm/architect version pinned), `imagePush`/`chartPush`, `platforms` and `arm64` (the image platforms resolved the orb's way: the push job's `platforms`, the per-architecture build-image jobs it merges, go-build's list from orb 9, the legacy multiarch rule; absent when the configuration does not say), `chinaPush` (`split` with `split-china-push`/`sync-china-registry`, `inline`, `custom` with `registries-data`, `none`) and `signing` (`signed` for a public repository whose push jobs keep the orb's `sign: true` default since 8.2.0; `unsigned` with the reason — private repository, `sign: false`, an older orb; `unknown` without the orb or on a development version; `none` when nothing is pushed). `list_repositories` rows carry `ci` and take the filters `orb` (a version or its prefix), `arm64`, `chinaPush`, `signing` (giantswarm/giantswarm-repo-manager#78).

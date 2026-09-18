@@ -41,6 +41,7 @@ const (
 	kApp           = "app"
 	kPublic        = "public"
 	kPath          = "path"
+	kContent       = "content"
 	kType          = "type"
 	kMessage       = "message"
 	kData          = "data"
@@ -177,7 +178,7 @@ func (f *fakeTeamFiles) register(mux *http.ServeMux, g *fakeGitHub) {
 		defer f.mu.Unlock()
 		p := r.PathValue("path")
 		if c, ok := f.files[p]; ok {
-			writeJSON(w, http.StatusOK, map[string]any{kType: kFile, kName: path.Base(p), kPath: p, kSHA: "blob-" + p, "encoding": "base64", "content": base64.StdEncoding.EncodeToString(c)})
+			writeJSON(w, http.StatusOK, map[string]any{kType: kFile, kName: path.Base(p), kPath: p, kSHA: "blob-" + p, "encoding": "base64", kContent: base64.StdEncoding.EncodeToString(c)})
 			return
 		}
 		var dir []map[string]any

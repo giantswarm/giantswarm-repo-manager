@@ -152,7 +152,7 @@ func newStackWith(t *testing.T, debugChannel string) *stack {
 		t.Fatal(err)
 	}
 	ts := tools.New(tools.Deps{Version: testVersion, GitHubAPIURL: apiURL, AuthorizationServer: server.DefaultAuthorizationServer, App: app, Inventory: store, Collector: st.col, Log: log,
-		TeamFilesRepository: org + "/github", TeamFilesRef: mainBranch, SweepTeams: []string{team, teamPlaneteers}, WatchInterval: 20 * time.Millisecond,
+		TeamFilesRepository: org + "/github", TeamFilesRef: mainBranch, SweepTeams: []string{team, teamPlaneteers}, WatchInterval: 20 * time.Millisecond, WatchSettle: watchSettle,
 		Review:   reviews,
 		Scaffold: fakeScaffold{}})
 	st.col.OnReconciled(ts.Reconciled)

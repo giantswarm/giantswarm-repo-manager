@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strings"
 	"sync"
@@ -97,15 +98,27 @@ func (f *fakeRepos) publish(name, tag string) {
 }
 
 // report posts one commit status per context on the release's tag, all in
-// state, the way CircleCI reports its jobs.
+// state, the way CircleCI reports its jobs: a context reported before is
+// updated in place, the others stay.
 func (f *fakeRepos) report(name, state string, contexts ...string) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	r := f.repos[name]
-	r.statuses = nil
 	for _, c := range contexts {
-		r.statuses = append(r.statuses, fakeStatus{context: c, state: state, updatedAt: time.Now()})
+		st := fakeStatus{context: c, state: state, updatedAt: time.Now()}
+		if i := slices.IndexFunc(r.statuses, func(s fakeStatus) bool { return s.context == c }); i >= 0 {
+			r.statuses[i] = st
+			continue
+		}
+		r.statuses = append(r.statuses, st)
 	}
+}
+
+// put writes a file at the head of the default branch.
+func (f *fakeRepos) put(name, path, content string) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.repos[name].files[path] = content
 }
 
 // installed sets whether the inventory App's installation covers the
@@ -230,13 +243,25 @@ func (f *fakeRepos) register(mux *http.ServeMux, g *fakeGitHub) {
 		writeJSON(w, http.StatusOK, map[string]any{kState: state, "total_count": len(statuses), "statuses": statuses, kSHA: repo.head})
 	}))
 	mux.HandleFunc("GET /api/v3/repos/{owner}/{repo}/contents/{path...}", withRepo(func(w http.ResponseWriter, r *http.Request, repo *fakeRepo) {
-		if repo.empty || strings.Trim(r.PathValue("path"), "/") != "" {
+		path := strings.Trim(r.PathValue("path"), "/")
+		if repo.empty {
 			ghMessage(w, http.StatusNotFound, "Not Found")
+			return
+		}
+		if path != "" {
+			// One file at the head of the default branch, as GitHub serves it.
+			content, ok := repo.files[path]
+			if !ok {
+				ghMessage(w, http.StatusNotFound, "Not Found")
+				return
+			}
+			writeJSON(w, http.StatusOK, map[string]any{kType: kFile, kName: filepath.Base(path), kPath: path,
+				"encoding": "base64", kContent: base64.StdEncoding.EncodeToString([]byte(content))})
 			return
 		}
 		var listing []map[string]string
 		for p := range repo.files {
-			listing = append(listing, map[string]string{kType: "file", kName: p, "path": p})
+			listing = append(listing, map[string]string{kType: kFile, kName: p, kPath: p})
 		}
 		sort.Slice(listing, func(i, j int) bool { return listing[i][kName] < listing[j][kName] })
 		writeJSON(w, http.StatusOK, listing)

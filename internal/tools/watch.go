@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/giantswarm/devctl/v8/pkg/reposetup"
 	"github.com/giantswarm/devctl/v8/pkg/reposetup/reconcile"
 	"github.com/google/go-github/v92/github"
 	"github.com/mark3labs/mcp-go/mcp"
@@ -21,19 +22,28 @@ const ToolWatchRepository = "watch_repository"
 
 const argTimeout = "timeout"
 
-// The watch's bounds: how often GitHub is read, how long one call waits
-// without being told, and the most it may wait — under the MCPServer's
-// 180 s.
+// The watch's bounds: how often GitHub is read, how long the release's
+// statuses must stay unchanged before they count — CircleCI posts one status
+// per job as the job starts, 20–60 s apart, so a green set between two jobs
+// is not the pipeline's verdict — how long one call waits without being
+// told, and the most it may wait — under the MCPServer's 180 s.
 const (
 	DefaultWatchInterval = 5 * time.Second
+	DefaultWatchSettle   = 60 * time.Second
 	DefaultWatchTimeout  = 120
 	MaxWatchTimeout      = 150
 )
 
+// contextImagePush is the CircleCI job that pushes the image, reported on a
+// repository whose default branch carries a Dockerfile; a chart's jobs name
+// chart (build-chart, push-chart).
+const contextImagePush = "push-to-registries"
+
 // The phases of a new repository, in order: the repository exists, its
 // default branch carries the scaffold, the declaration pull request is open,
 // merged, the reconciler run of that pull request has reported, and the
-// first release exists with its CircleCI statuses green.
+// first release exists with its CircleCI statuses green, complete for the
+// declaration and settled.
 const (
 	PhaseCreated    = "created"
 	PhaseScaffolded = "scaffolded"
@@ -56,8 +66,9 @@ type Watch struct {
 	// out; empty when ready or failed.
 	Pending string `json:"pending,omitempty"`
 	// PendingReason says why the pending phase could not be decided on the
-	// last read — a read GitHub refused, or the statuses no identity reads;
-	// empty when the phase is simply not reached yet.
+	// last read — a read GitHub refused, the statuses no identity reads, or,
+	// once CircleCI reports on the release, the statuses reported and what
+	// is still awaited; empty when the phase is simply not reached yet.
 	PendingReason string `json:"pendingReason,omitempty"`
 	// Failure names the phase that failed and why; the phases before it are
 	// done.
@@ -98,11 +109,14 @@ func (t *tools) registerWatch(s *mcpserver.MCPServer) {
 			"or when timeout runs out — with the phases reached either way, each with its timestamp and the seconds since the phase before: "+
 			"created (the repository exists), scaffolded (its default branch carries the scaffold commit), declared (the declaration pull request is open), "+
 			"merged, setUp (the reconciler run of that pull request has reported: a failed step or a refused entry fails the phase, the run's other findings are "+
-			"carried as findings), released (the first release exists and the CircleCI statuses on its commit are green; a failing status fails the phase; while "+
-			"CircleCI has not reported on the release's commit — a repository the reconciler has only just followed — the reconciler run's release step decides: "+
-			"a failed step or a red-release finding fails the phase, anything else keeps waiting for the statuses). ready is true when every phase is done; "+
+			"carried as findings), released (the first release exists and the CircleCI statuses on its commit are green, complete and settled: CircleCI posts one status "+
+			"per job as the job starts, so a green set counts only once it holds the jobs the declaration implies — a chart job when the flavours produce a chart, "+
+			fmt.Sprintf("push-to-registries when the default branch carries a Dockerfile — and has not changed for %d s; a failing status fails the phase at once; ", int(DefaultWatchSettle.Seconds()))+
+			"while the statuses are pending, incomplete or settling, pendingReason lists the ones reported and what is awaited; while CircleCI has not reported "+
+			"on the release's commit at all — a repository the reconciler has only just followed — the reconciler run's release step decides: a failed step or a "+
+			"red-release finding fails the phase, anything else keeps waiting for the statuses). ready is true when every phase is done; "+
 			"pending names the phase still waited for when the timeout ran out — call again to keep following. Who reads what: the repository, its commits, "+
-			"the pull request and the release are read as you every few seconds; the commit statuses as the inventory App giantswarm-repo-manager-inventory, "+
+			"the pull request and the release are read as you every few seconds; the commit statuses and the Dockerfile as the inventory App giantswarm-repo-manager-inventory, "+
 			"the identity of the unattended reads (your token through the App giantswarm-repo-manager cannot read them) — without that App the reconciler "+
 			"run's release step alone decides the released phase and pendingReason says so. A read GitHub refuses (403) keeps its phase pending with the "+
 			"refusal in pendingReason; the call errors only on wrong arguments. Takes the repository and the pull request number create_repository's answer carries."),
@@ -122,6 +136,15 @@ func (d Deps) watchInterval() time.Duration {
 		return d.WatchInterval
 	}
 	return DefaultWatchInterval
+}
+
+// watchSettle is how long the release's statuses must stay unchanged before
+// the released phase is done.
+func (d Deps) watchSettle() time.Duration {
+	if d.WatchSettle > 0 {
+		return d.WatchSettle
+	}
+	return DefaultWatchSettle
 }
 
 // watch reads the phases until the repository is ready, a phase fails or
@@ -187,8 +210,14 @@ type watcher struct {
 	out    *Watch
 	// branch is the default branch, from the created phase.
 	branch string
+	// flavours are the declaration's, from the record read in the setUp
+	// phase: they say whether a chart job is expected on the release.
+	flavours []string
 	// run is the reconciler run, from the setUp phase.
 	run *inventory.LastRun
+	// dockerfile says whether the default branch carries a Dockerfile — the
+	// image push job's condition — once read; nil before.
+	dockerfile *bool
 }
 
 // outcome is what one read of a phase found: done at a time, failed for a
@@ -204,9 +233,10 @@ type outcome struct {
 func done(at time.Time) outcome    { return outcome{done: true, at: at} }
 func failed(reason string) outcome { return outcome{failed: true, reason: reason} }
 
-// unread is a phase left pending because a read was refused or no identity
-// makes it: a fact about the phase, never the tool's error.
-func unread(reason string) outcome { return outcome{reason: reason} }
+// undecided is a phase left pending with why it could not be decided: a read
+// refused, no identity that makes it, or the release's statuses still
+// awaited — a fact about the phase, never the tool's error.
+func undecided(reason string) outcome { return outcome{reason: reason} }
 
 var pending = outcome{}
 
@@ -253,7 +283,7 @@ func (w *watcher) created(ctx context.Context) (outcome, error) {
 	case notFound(resp, err):
 		return pending, nil
 	case err != nil:
-		return unread(fmt.Sprintf("read %s/%s as you: %v", w.org(), w.name, err)), nil
+		return undecided(fmt.Sprintf("read %s/%s as you: %v", w.org(), w.name, err)), nil
 	}
 	w.out.Repository, w.branch = repo.GetHTMLURL(), repo.GetDefaultBranch()
 	return done(repo.GetCreatedAt().Time), nil
@@ -268,7 +298,7 @@ func (w *watcher) scaffolded(ctx context.Context) (outcome, error) {
 		// An empty repository answers 409; a branch not yet pushed 404.
 		return pending, nil
 	case err != nil:
-		return unread(fmt.Sprintf("read the commits of %s/%s as you: %v", w.org(), w.name, err)), nil
+		return undecided(fmt.Sprintf("read the commits of %s/%s as you: %v", w.org(), w.name, err)), nil
 	case len(commits) == 0:
 		return pending, nil
 	}
@@ -285,7 +315,7 @@ func (w *watcher) pull(ctx context.Context) (*github.PullRequest, outcome, error
 	case notFound(resp, err):
 		return nil, pending, fmt.Errorf("%s/%s#%d does not exist: pass the pull request number create_repository answered", r.Owner, r.Name, w.number)
 	case err != nil:
-		return nil, unread(fmt.Sprintf("read %s/%s#%d as you: %v", r.Owner, r.Name, w.number, err)), nil
+		return nil, undecided(fmt.Sprintf("read %s/%s#%d as you: %v", r.Owner, r.Name, w.number, err)), nil
 	}
 	return pr, pending, nil
 }
@@ -329,6 +359,9 @@ func (w *watcher) setUp(ctx context.Context) (outcome, error) {
 	case err != nil:
 		return pending, err
 	}
+	if rec.Declaration != nil {
+		w.flavours = rec.Declaration.Flavours
+	}
 	if m := rec.Setup.MissingRun; m != nil && m.Follows(w.number) {
 		return failed(rec.MissingRunFinding().Message), nil
 	}
@@ -352,20 +385,21 @@ func (w *watcher) setUp(ctx context.Context) (outcome, error) {
 }
 
 // released: the first release exists (read as the caller) and the CircleCI
-// statuses on its commit are green — read as the inventory App, the identity
-// of the unattended reads: the caller's token through the App
-// giantswarm-repo-manager has no statuses permission. A failing status fails
-// the phase. Without any status yet, the reconciler run's release step
-// decides: failed, or a red-release finding, fails the phase; anything else
-// waits for the statuses. Without the inventory App the release step alone
-// decides, and the pending phase says so.
+// statuses on its commit are green, complete and settled — read as the
+// inventory App, the identity of the unattended reads: the caller's token
+// through the App giantswarm-repo-manager has no statuses permission. A
+// failing status fails the phase at once. Without any status yet, the
+// reconciler run's release step decides: failed, or a red-release finding,
+// fails the phase; anything else waits for the statuses. Without the
+// inventory App the release step alone decides, and the pending phase says
+// so.
 func (w *watcher) released(ctx context.Context) (outcome, error) {
 	rel, resp, err := w.p.gh.Repositories.GetLatestRelease(ctx, w.org(), w.name)
 	switch {
 	case notFound(resp, err):
 		return pending, nil
 	case err != nil:
-		return unread(fmt.Sprintf("read the releases of %s/%s as you: %v", w.org(), w.name, err)), nil
+		return undecided(fmt.Sprintf("read the releases of %s/%s as you: %v", w.org(), w.name, err)), nil
 	}
 	tag := rel.GetTagName()
 	w.out.Release = &WatchRelease{Tag: tag, URL: rel.GetHTMLURL()}
@@ -373,27 +407,96 @@ func (w *watcher) released(ctx context.Context) (outcome, error) {
 		if o := w.releaseStepVerdict(); o.failed {
 			return o, nil
 		}
-		return unread(fmt.Sprintf("the CircleCI statuses on %s are not read — %v; the reconciler run's release step alone decides", tag, ErrNoApp)), nil
+		return undecided(fmt.Sprintf("the CircleCI statuses on %s are not read — %v; the reconciler run's release step alone decides", tag, ErrNoApp)), nil
 	}
 	st, _, err := w.t.d.App.Installation().Repositories.GetCombinedStatus(ctx, w.org(), w.name, tag, &github.ListOptions{PerPage: 100})
 	if err != nil {
-		return unread(fmt.Sprintf("read the statuses of %s/%s@%s as the inventory App: %v", w.org(), w.name, tag, err)), nil
+		return undecided(fmt.Sprintf("read the statuses of %s/%s@%s as the inventory App: %v", w.org(), w.name, tag, err)), nil
 	}
-	switch {
-	case st.GetTotalCount() == 0:
+	if st.GetTotalCount() == 0 {
 		return w.releaseStepVerdict(), nil
-	case st.GetState() == "success":
-		return done(newestStatus(st)), nil
-	case st.GetState() == "pending":
-		return pending, nil
 	}
-	var red []string
+	return w.statusesVerdict(ctx, tag, st)
+}
+
+// statusesVerdict is the released phase once CircleCI has reported on the
+// release: a red status fails it at once; a pending status, a job the
+// declaration implies that has not reported, or a set younger than the
+// settle window keep it pending, with the statuses reported and what is
+// awaited as the reason.
+func (w *watcher) statusesVerdict(ctx context.Context, tag string, st *github.CombinedStatus) (outcome, error) {
+	var red, waiting, reported []string
 	for _, s := range st.Statuses {
-		if s.GetState() != "success" && s.GetState() != "pending" {
+		reported = append(reported, s.GetContext()+" ("+s.GetState()+")")
+		switch s.GetState() {
+		case "success":
+		case "pending":
+			waiting = append(waiting, s.GetContext())
+		default:
 			red = append(red, s.GetContext()+" ("+s.GetState()+")")
 		}
 	}
-	return failed(fmt.Sprintf("the CircleCI statuses on %s are %s: %s", tag, st.GetState(), strings.Join(red, ", "))), nil
+	if len(red) > 0 {
+		return failed(fmt.Sprintf("the CircleCI statuses on %s are %s: %s", tag, st.GetState(), strings.Join(red, ", "))), nil
+	}
+	line := fmt.Sprintf("the CircleCI statuses on %s: %s", tag, strings.Join(reported, ", "))
+	if len(waiting) > 0 {
+		return undecided(line + " — waiting for the pending ones"), nil
+	}
+	awaited, err := w.awaited(ctx, st)
+	switch {
+	case err != nil:
+		return undecided(fmt.Sprintf("%s — %v", line, err)), nil
+	case len(awaited) > 0:
+		return undecided(fmt.Sprintf("%s — awaiting %s", line, strings.Join(awaited, ", "))), nil
+	}
+	newest := newestStatus(st)
+	if age := time.Since(newest); age < w.t.d.watchSettle() {
+		return undecided(fmt.Sprintf("%s — green for %s, released once unchanged for %s (CircleCI posts a job's status as the job starts)",
+			line, age.Round(time.Second), w.t.d.watchSettle())), nil
+	}
+	return done(newest), nil
+}
+
+// awaited names the jobs the declaration implies that have not reported on
+// the release: a chart job (a context naming chart) when the flavours
+// produce a chart, the image push when the default branch carries a
+// Dockerfile.
+func (w *watcher) awaited(ctx context.Context, st *github.CombinedStatus) ([]string, error) {
+	has := func(sub string) bool {
+		for _, s := range st.Statuses {
+			if strings.Contains(s.GetContext(), sub) {
+				return true
+			}
+		}
+		return false
+	}
+	var out []string
+	if reposetup.HasChart(w.flavours) && !has("chart") {
+		out = append(out, "a chart job")
+	}
+	image, err := w.hasDockerfile(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if image && !has(contextImagePush) {
+		out = append(out, contextImagePush)
+	}
+	return out, nil
+}
+
+// hasDockerfile says whether the default branch carries a root Dockerfile,
+// read once as the inventory App.
+func (w *watcher) hasDockerfile(ctx context.Context) (bool, error) {
+	if w.dockerfile == nil {
+		_, _, resp, err := w.t.d.App.Installation().Repositories.GetContents(ctx, w.org(), w.name, "Dockerfile", &github.RepositoryContentGetOptions{Ref: w.branch})
+		if err != nil && !notFound(resp, err) {
+			return false, fmt.Errorf("read the Dockerfile of %s/%s as the inventory App: %w", w.org(), w.name, err)
+		}
+		has := err == nil
+		w.dockerfile = &has
+	}
+	return *w.dockerfile, nil
 }
 
 // releaseStepVerdict is the released phase while CircleCI has not reported:

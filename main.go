@@ -167,6 +167,7 @@ func run(ctx context.Context, o *options, log *slog.Logger) error {
 	ts := tools.New(deps)
 	if deps.Collector != nil {
 		deps.Collector.OnReconciled(ts.Reconciled)
+		deps.Collector.OnConflict(ts.Conflicted)
 	}
 	srv, err := server.New(cfg, ts.MCPServer(), log)
 	if err != nil {

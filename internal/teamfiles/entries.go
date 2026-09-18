@@ -2,6 +2,7 @@ package teamfiles
 
 import (
 	"bytes"
+	"errors"
 	"fmt"
 	"sort"
 	"strings"
@@ -91,6 +92,71 @@ func RemoveEntry(file []byte, name string) ([]byte, error) {
 		return nil, err
 	}
 	return append(append([]byte{}, file[:start]...), file[end:]...), nil
+}
+
+// rerenderFile re-applies a pull request's change of one team file to the
+// file as it reads now: the entries the pull request changes — different
+// from, or absent in, the file at the pull request's merge base (was) — are
+// taken from the pull request's version (want) and written into now, each
+// in place, at its alphabetical place when now lacks it, and out of now when
+// the pull request removes it. Every other byte of now stays. It returns the
+// file and the names of the entries applied.
+func rerenderFile(team string, was, want, now []byte) ([]byte, []string, error) {
+	if want == nil {
+		return nil, nil, errors.New("the pull request removes the file")
+	}
+	before, err := reposetup.ParseTeamFile(team, bytes.NewReader(was))
+	if err != nil {
+		return nil, nil, fmt.Errorf("at the merge base: %w", err)
+	}
+	after, err := reposetup.ParseTeamFile(team, bytes.NewReader(want))
+	if err != nil {
+		return nil, nil, fmt.Errorf("on the branch: %w", err)
+	}
+	current, err := reposetup.ParseTeamFile(team, bytes.NewReader(now))
+	if err != nil {
+		return nil, nil, fmt.Errorf("on the base: %w", err)
+	}
+	out := now
+	var names []string
+	for _, d := range after.Entries {
+		if declares(before, d) {
+			continue
+		}
+		if _, ok := current.Entry(d.Name); ok {
+			out, err = ReplaceEntry(out, d.Name, d)
+		} else {
+			out, err = reposetup.InsertEntry(team, out, d)
+		}
+		if err != nil {
+			return nil, nil, fmt.Errorf("%s: %w", d.Name, err)
+		}
+		names = append(names, d.Name)
+	}
+	for _, d := range before.Entries {
+		if _, kept := after.Entry(d.Name); kept {
+			continue
+		}
+		if _, ok := current.Entry(d.Name); ok {
+			if out, err = RemoveEntry(out, d.Name); err != nil {
+				return nil, nil, fmt.Errorf("%s: %w", d.Name, err)
+			}
+		}
+		names = append(names, d.Name)
+	}
+	return out, names, nil
+}
+
+// declares says whether tf carries d as it is: an entry of the same name
+// that renders the same.
+func declares(tf *reposetup.TeamFile, d reposetup.Declaration) bool {
+	e, ok := tf.Entry(d.Name)
+	if !ok {
+		return false
+	}
+	a, aerr := e.YAML()
+	b, berr := d.YAML()
+	return aerr == nil && berr == nil && a == b
 }
 
 // SetField returns d with the top-level scalar field set (added at the end

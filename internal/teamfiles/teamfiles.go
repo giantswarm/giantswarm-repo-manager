@@ -34,6 +34,11 @@ const (
 // ErrEntryNotFound says no team file declares the repository.
 var ErrEntryNotFound = errors.New("no team file declares the repository")
 
+// ErrFileNotFound says Ref has no such file (the error reads "<path> not
+// found in <ref>"), as opposed to a credential that does not reach the
+// repository (ErrNotReachable).
+var ErrFileNotFound = errors.New("not found in")
+
 // Repo is the repository that holds the team files, at Ref, as Client. As
 // names the client's identity for messages: the person's login, or empty for
 // the inventory App.
@@ -113,7 +118,7 @@ func (r Repo) readError(ctx context.Context, path string, resp *github.Response,
 		case !reachable:
 			return r.notReachable(resp.StatusCode)
 		case resp.StatusCode == http.StatusNotFound:
-			return fmt.Errorf("%s/%s: %s not found in %s", r.Owner, r.Name, path, r.Ref)
+			return fmt.Errorf("%s/%s: %s %w %s", r.Owner, r.Name, path, ErrFileNotFound, r.Ref)
 		}
 	}
 	return fmt.Errorf("%s: read %s: %w", r.Slug(), path, err)
@@ -298,28 +303,11 @@ func (r Repo) OpenPullRequest(ctx context.Context, ch Change) (*PullRequest, err
 	} else if resp == nil || resp.StatusCode != http.StatusNotFound {
 		return nil, fmt.Errorf("%s: read branch %s: %w", r.Slug(), ch.Branch, err)
 	}
-	paths := make([]string, 0, len(ch.Files))
-	for p := range ch.Files {
-		paths = append(paths, p)
-	}
-	sort.Strings(paths)
-	entries := make([]*github.TreeEntry, 0, len(paths))
-	for _, p := range paths {
-		entries = append(entries, &github.TreeEntry{Path: ptr(p), Mode: ptr("100644"), Type: ptr("blob"), Content: ptr(string(ch.Files[p]))})
-	}
-	tree, _, err := r.Client.Git.CreateTree(ctx, r.Owner, r.Name, base.GetObject().GetSHA(), entries)
+	sha, err := r.commit(ctx, base.GetObject().GetSHA(), ch)
 	if err != nil {
-		return nil, fmt.Errorf("%s: create tree: %w", r.Slug(), err)
+		return nil, err
 	}
-	commit, _, err := r.Client.Git.CreateCommit(ctx, r.Owner, r.Name, github.Commit{
-		Message: ptr(ch.Title),
-		Tree:    tree,
-		Parents: []*github.Commit{{SHA: ptr(base.GetObject().GetSHA())}},
-	}, nil)
-	if err != nil {
-		return nil, fmt.Errorf("%s: create commit: %w", r.Slug(), err)
-	}
-	if _, _, err := r.Client.Git.CreateRef(ctx, r.Owner, r.Name, github.CreateRef{Ref: "refs/heads/" + ch.Branch, SHA: commit.GetSHA()}); err != nil {
+	if _, _, err := r.Client.Git.CreateRef(ctx, r.Owner, r.Name, github.CreateRef{Ref: "refs/heads/" + ch.Branch, SHA: sha}); err != nil {
 		return nil, fmt.Errorf("%s: create branch %s: %w", r.Slug(), ch.Branch, err)
 	}
 	pr, _, err := r.Client.PullRequests.Create(ctx, r.Owner, r.Name, github.CreatePullRequest{
@@ -329,6 +317,33 @@ func (r Repo) OpenPullRequest(ctx context.Context, ch Change) (*PullRequest, err
 		return nil, fmt.Errorf("%s: open pull request: %w", r.Slug(), err)
 	}
 	return &PullRequest{Number: pr.GetNumber(), URL: pr.GetHTMLURL(), Branch: ch.Branch, Title: ch.Title, Author: pr.GetUser().GetLogin(), NodeID: pr.GetNodeID()}, nil
+}
+
+// commit creates one commit on top of base carrying every file of the
+// change, as Client, and returns its SHA; the message is the change's title.
+func (r Repo) commit(ctx context.Context, base string, ch Change) (string, error) {
+	paths := make([]string, 0, len(ch.Files))
+	for p := range ch.Files {
+		paths = append(paths, p)
+	}
+	sort.Strings(paths)
+	entries := make([]*github.TreeEntry, 0, len(paths))
+	for _, p := range paths {
+		entries = append(entries, &github.TreeEntry{Path: ptr(p), Mode: ptr("100644"), Type: ptr("blob"), Content: ptr(string(ch.Files[p]))})
+	}
+	tree, _, err := r.Client.Git.CreateTree(ctx, r.Owner, r.Name, base, entries)
+	if err != nil {
+		return "", fmt.Errorf("%s: create tree: %w", r.Slug(), err)
+	}
+	commit, _, err := r.Client.Git.CreateCommit(ctx, r.Owner, r.Name, github.Commit{
+		Message: ptr(ch.Title),
+		Tree:    tree,
+		Parents: []*github.Commit{{SHA: ptr(base)}},
+	}, nil)
+	if err != nil {
+		return "", fmt.Errorf("%s: create commit: %w", r.Slug(), err)
+	}
+	return commit.GetSHA(), nil
 }
 
 // openFor is the open pull request from branch — a change committed once
@@ -427,11 +442,16 @@ func (r Repo) ChangedTeamFiles(ctx context.Context, number int) ([]string, error
 	}
 	var teams []string
 	for _, f := range files {
-		if strings.HasPrefix(f.GetFilename(), reposetup.TeamFilesDir+"/") && strings.HasSuffix(f.GetFilename(), ".yaml") {
+		if isTeamFile(f.GetFilename()) {
 			teams = append(teams, reposetup.TeamOf(f.GetFilename()))
 		}
 	}
 	return teams, nil
+}
+
+// isTeamFile says whether path is a team file, repositories/<team>.yaml.
+func isTeamFile(path string) bool {
+	return strings.HasPrefix(path, reposetup.TeamFilesDir+"/") && strings.HasSuffix(path, ".yaml")
 }
 
 // Approve submits the approving review on a pull request as Client.

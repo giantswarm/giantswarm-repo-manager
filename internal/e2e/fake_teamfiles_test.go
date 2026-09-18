@@ -1,6 +1,7 @@
 package e2e
 
 import (
+	"bytes"
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
@@ -66,6 +67,9 @@ const (
 	kID            = "id"
 	modeApply      = "apply"
 	bob            = "bob"
+	// eventApprove is the review event of an approval; reviewApproved its state.
+	eventApprove   = "APPROVE"
+	reviewApproved = "APPROVED"
 )
 
 const planeteersFile = `# Planeteers' repositories.
@@ -95,20 +99,23 @@ type fakePullRequest struct {
 	Closed bool
 }
 
-// merge marks the pull request merged now.
-func (pr *fakePullRequest) merge() { pr.mergeAt(time.Now()) }
-
-// mergeAt marks the pull request merged at.
-func (pr *fakePullRequest) mergeAt(at time.Time) { pr.Merged, pr.MergedAt = true, at }
-
 type fakeReview struct{ User, Event, Body string }
 
+// headsPrefix is the git ref prefix of a branch.
+const headsPrefix = "heads/"
+
 type fakeTeamFiles struct {
-	mu         sync.Mutex
-	files      map[string][]byte // path → content at main
-	refs       map[string]string // heads/<branch> → sha
-	trees      map[string]map[string][]byte
-	commits    map[string]string // sha → tree sha
+	mu      sync.Mutex
+	files   map[string][]byte // path → content at main
+	refs    map[string]string // heads/<branch> → sha
+	trees   map[string]map[string][]byte
+	commits map[string]string // sha → tree sha
+	// parents is each commit's parent; snapshots the files at main per main
+	// commit — a branch's files are its commits laid over the main commit
+	// they descend from, and a merge base is that main commit. A merge lays
+	// the pull request's files on main and moves it to a new commit.
+	parents    map[string]string
+	snapshots  map[string]map[string][]byte
 	pulls      map[int]*fakePullRequest
 	next       int
 	dispatches []map[string]any
@@ -127,9 +134,97 @@ func newFakeTeamFiles() *fakeTeamFiles {
 			"repository-setup/" + team + ".yaml":           []byte("alignOptIn: true\nslackChannel: " + bumblebeeChannel + "\nstandupChannel: " + bumblebeeStandup + "\n"),
 			"repository-setup/" + teamPlaneteers + ".yaml": []byte("alignOptIn: false\nslackChannel: " + teamPlaneteers + "\nstandupChannel: standup-planeteers\n"),
 		},
-		refs: map[string]string{"heads/" + mainBranch: "base000"}, trees: map[string]map[string][]byte{}, commits: map[string]string{}, pulls: map[int]*fakePullRequest{}, next: 4711,
+		refs: map[string]string{headsPrefix + mainBranch: "base000"}, trees: map[string]map[string][]byte{}, commits: map[string]string{}, parents: map[string]string{}, pulls: map[int]*fakePullRequest{}, next: 4711,
 	}
+	f.snapshots = map[string]map[string][]byte{"base000": copyFiles(f.files)}
 	return f
+}
+
+func copyFiles(files map[string][]byte) map[string][]byte {
+	out := make(map[string][]byte, len(files))
+	for p, c := range files {
+		out[p] = c
+	}
+	return out
+}
+
+// viewAt is the repository's files at ref — main, a branch, a commit: a
+// branch's commits laid over the main commit they descend from. nil for a
+// ref the fake does not know.
+func (f *fakeTeamFiles) viewAt(ref string) map[string][]byte {
+	if ref == "" || ref == mainBranch {
+		return f.files
+	}
+	sha := ref
+	if s, ok := f.refs[headsPrefix+ref]; ok {
+		sha = s
+	}
+	if snap, ok := f.snapshots[sha]; ok {
+		return snap
+	}
+	tree, ok := f.commits[sha]
+	if !ok {
+		return nil
+	}
+	view := copyFiles(f.viewAt(f.parents[sha]))
+	for p, c := range f.trees[tree] {
+		view[p] = c
+	}
+	return view
+}
+
+// mergeBase is the main commit the commit descends from, and the paths its
+// commits since then touch.
+func (f *fakeTeamFiles) mergeBase(sha string) (string, []string) {
+	touched := map[string]bool{}
+	for {
+		if _, ok := f.snapshots[sha]; ok {
+			paths := make([]string, 0, len(touched))
+			for p := range touched {
+				paths = append(paths, p)
+			}
+			sort.Strings(paths)
+			return sha, paths
+		}
+		for p := range f.trees[f.commits[sha]] {
+			touched[p] = true
+		}
+		parent, ok := f.parents[sha]
+		if !ok {
+			return "", nil
+		}
+		sha = parent
+	}
+}
+
+// headFiles is what the pull request's branch changes: the tree of its head.
+func (f *fakeTeamFiles) headFiles(pr *fakePullRequest) map[string][]byte {
+	return f.trees[f.commits[f.refs[headsPrefix+pr.Head]]]
+}
+
+// conflicts says whether main moved under the pull request in a file it
+// changes — GitHub's mergeable: false for two changes to neighbouring
+// entries of one team file.
+func (f *fakeTeamFiles) conflicts(pr *fakePullRequest) bool {
+	base, _ := f.mergeBase(f.refs[headsPrefix+pr.Head])
+	for p := range f.headFiles(pr) {
+		if !bytes.Equal(f.files[p], f.snapshots[base][p]) {
+			return true
+		}
+	}
+	return false
+}
+
+// land merges the pull request at: its files land on main, which moves to a
+// new commit — the way GitHub's squash does.
+func (f *fakeTeamFiles) land(pr *fakePullRequest, at time.Time) {
+	pr.Merged, pr.MergedAt = true, at
+	for p, c := range f.headFiles(pr) {
+		f.files[p] = c
+	}
+	sha := fmt.Sprintf("main%03d", len(f.snapshots))
+	f.refs[headsPrefix+mainBranch] = sha
+	f.snapshots[sha] = copyFiles(f.files)
 }
 
 // deny makes the repository unreachable for login: every read as them
@@ -182,12 +277,13 @@ func (f *fakeTeamFiles) register(mux *http.ServeMux, g *fakeGitHub) {
 		f.mu.Lock()
 		defer f.mu.Unlock()
 		p := r.PathValue("path")
-		if c, ok := f.files[p]; ok {
+		view := f.viewAt(r.URL.Query().Get(kRef))
+		if c, ok := view[p]; ok {
 			writeJSON(w, http.StatusOK, map[string]any{kType: kFile, kName: path.Base(p), kPath: p, kSHA: "blob-" + p, "encoding": "base64", kContent: base64.StdEncoding.EncodeToString(c)})
 			return
 		}
 		var dir []map[string]any
-		for name := range f.files {
+		for name := range view {
 			if path.Dir(name) == p {
 				dir = append(dir, map[string]any{kType: kFile, kName: path.Base(name), kPath: name})
 			}
@@ -224,14 +320,69 @@ func (f *fakeTeamFiles) register(mux *http.ServeMux, g *fakeGitHub) {
 	})
 	mux.HandleFunc("POST "+base+"/git/commits", func(w http.ResponseWriter, r *http.Request) {
 		var req struct {
-			Tree string `json:"tree"`
+			Tree    string   `json:"tree"`
+			Parents []string `json:"parents"`
 		}
 		_ = json.NewDecoder(r.Body).Decode(&req)
 		f.mu.Lock()
 		defer f.mu.Unlock()
 		sha := fmt.Sprintf("commit%d", len(f.commits)+1)
 		f.commits[sha] = req.Tree
+		if len(req.Parents) > 0 {
+			f.parents[sha] = req.Parents[0]
+		}
 		writeJSON(w, http.StatusCreated, map[string]any{kSHA: sha})
+	})
+	// The force-push of a re-render: the branch moves to the new commit and
+	// the pull request changes what that commit changes.
+	mux.HandleFunc("PATCH "+base+"/git/refs/{ref...}", func(w http.ResponseWriter, r *http.Request) {
+		var req struct {
+			SHA   string `json:"sha"`
+			Force bool   `json:"force"`
+		}
+		_ = json.NewDecoder(r.Body).Decode(&req)
+		f.mu.Lock()
+		defer f.mu.Unlock()
+		ref := r.PathValue(kRef)
+		if _, ok := f.refs[ref]; !ok {
+			ghMessage(w, http.StatusUnprocessableEntity, "Reference does not exist")
+			return
+		}
+		if _, ok := f.commits[req.SHA]; !ok {
+			ghMessage(w, http.StatusUnprocessableEntity, "Object does not exist")
+			return
+		}
+		if !req.Force {
+			ghMessage(w, http.StatusUnprocessableEntity, "Update is not a fast forward")
+			return
+		}
+		f.refs[ref] = req.SHA
+		for _, pr := range f.pulls {
+			if headsPrefix+pr.Head == ref {
+				pr.Files = f.headFiles(pr)
+			}
+		}
+		writeJSON(w, http.StatusOK, map[string]any{kRef: "refs/" + ref, kObject: map[string]any{kSHA: req.SHA, kType: modeCommit}})
+	})
+	// The three-dot compare a re-render reads: the merge base of main and the
+	// head, and the files the head changes since it.
+	mux.HandleFunc("GET "+base+"/compare/{basehead}", func(w http.ResponseWriter, r *http.Request) {
+		_, head, ok := strings.Cut(r.PathValue("basehead"), "...")
+		f.mu.Lock()
+		defer f.mu.Unlock()
+		if sha, isBranch := f.refs[headsPrefix+head]; isBranch {
+			head = sha
+		}
+		mb, paths := f.mergeBase(head)
+		if !ok || mb == "" {
+			ghMessage(w, http.StatusNotFound, "Not Found")
+			return
+		}
+		files := make([]map[string]any, 0, len(paths))
+		for _, p := range paths {
+			files = append(files, map[string]any{"filename": p})
+		}
+		writeJSON(w, http.StatusOK, map[string]any{"merge_base_commit": map[string]any{kSHA: mb}, "files": files})
 	})
 	mux.HandleFunc("POST "+base+"/git/refs", func(w http.ResponseWriter, r *http.Request) {
 		var req struct{ Ref, SHA string }
@@ -251,7 +402,8 @@ func (f *fakeTeamFiles) register(mux *http.ServeMux, g *fakeGitHub) {
 		_ = json.NewDecoder(r.Body).Decode(&req)
 		f.mu.Lock()
 		defer f.mu.Unlock()
-		pr := &fakePullRequest{Number: f.next, Title: req.Title, Body: req.Body, Head: req.Head, Author: login, Files: f.trees[f.commits[f.refs["heads/"+req.Head]]]}
+		pr := &fakePullRequest{Number: f.next, Title: req.Title, Body: req.Body, Head: req.Head, Author: login}
+		pr.Files = f.headFiles(pr)
 		f.pulls[pr.Number] = pr
 		f.next++
 		writeJSON(w, http.StatusCreated, f.pullJSON(pr))
@@ -303,11 +455,29 @@ func (f *fakeTeamFiles) register(mux *http.ServeMux, g *fakeGitHub) {
 			return
 		}
 		pr.Reviews = append(pr.Reviews, fakeReview{User: login, Event: req.Event, Body: req.Body})
-		if req.Event == "APPROVE" && pr.AutoMerge && !f.checksPending[pr.Number] {
+		if req.Event == eventApprove && pr.AutoMerge && !f.checksPending[pr.Number] && !f.conflicts(pr) {
 			// GitHub merges an auto-merge pull request itself once the review is in.
-			pr.merge()
+			f.land(pr, time.Now())
 		}
-		writeJSON(w, http.StatusOK, map[string]any{kID: len(pr.Reviews), kState: "APPROVED", kHTMLURL: fmt.Sprintf("https://github.com/%s/github/pull/%d#pullrequestreview-%d", org, pr.Number, len(pr.Reviews)), "user": map[string]any{kLogin: login}})
+		writeJSON(w, http.StatusOK, map[string]any{kID: len(pr.Reviews), kState: reviewApproved, kHTMLURL: fmt.Sprintf("https://github.com/%s/github/pull/%d#pullrequestreview-%d", org, pr.Number, len(pr.Reviews)), kUser: map[string]any{kLogin: login}})
+	})
+	mux.HandleFunc("GET "+base+"/pulls/{n}/reviews", func(w http.ResponseWriter, r *http.Request) {
+		f.mu.Lock()
+		defer f.mu.Unlock()
+		pr := f.pull(r)
+		if pr == nil {
+			ghMessage(w, http.StatusNotFound, "Not Found")
+			return
+		}
+		out := []map[string]any{}
+		for i, rev := range pr.Reviews {
+			state := "COMMENTED"
+			if rev.Event == eventApprove {
+				state = reviewApproved
+			}
+			out = append(out, map[string]any{kID: i + 1, kState: state, kUser: map[string]any{kLogin: rev.User}})
+		}
+		writeJSON(w, http.StatusOK, out)
 	})
 	mux.HandleFunc("PUT "+base+"/pulls/{n}/merge", func(w http.ResponseWriter, r *http.Request) {
 		var req struct {
@@ -323,6 +493,8 @@ func (f *fakeTeamFiles) register(mux *http.ServeMux, g *fakeGitHub) {
 			ghMessage(w, http.StatusNotFound, "Not Found")
 		case pr.Merged:
 			ghMessage(w, http.StatusMethodNotAllowed, "Pull Request is not mergeable")
+		case f.conflicts(pr):
+			ghMessage(w, http.StatusMethodNotAllowed, "Pull Request is not mergeable")
 		case f.checksPending[pr.Number]:
 			ghMessage(w, http.StatusMethodNotAllowed, "Required status check \"Repositories YAML\" is expected.")
 		case len(pr.Reviews) == 0:
@@ -330,7 +502,7 @@ func (f *fakeTeamFiles) register(mux *http.ServeMux, g *fakeGitHub) {
 		case req.MergeMethod != "squash":
 			ghMessage(w, http.StatusMethodNotAllowed, "Merge method not allowed")
 		default:
-			pr.merge()
+			f.land(pr, time.Now())
 			pr.MergeTitle = req.CommitTitle
 			writeJSON(w, http.StatusOK, map[string]any{"sha": "merged00", "merged": true, kMessage: "Pull Request successfully merged"})
 		}
@@ -354,16 +526,20 @@ func (f *fakeTeamFiles) pull(r *http.Request) *fakePullRequest {
 }
 
 func (f *fakeTeamFiles) pullJSON(pr *fakePullRequest) map[string]any {
+	conflicting := !pr.Merged && f.conflicts(pr)
 	out := map[string]any{"number": pr.Number, "node_id": pullNodeID(pr.Number), "title": pr.Title, "body": pr.Body, kHTMLURL: fmt.Sprintf("https://github.com/%s/github/pull/%d", org, pr.Number),
-		"user": map[string]any{kLogin: pr.Author}, "head": map[string]any{kRef: pr.Head}, kCreatedAtREST: time.Now().UTC().Format(time.RFC3339),
-		"merged": pr.Merged, "mergeable": !pr.Merged, "mergeable_state": "blocked", kState: "open"}
+		"user": map[string]any{kLogin: pr.Author}, "head": map[string]any{kRef: pr.Head, kSHA: f.refs[headsPrefix+pr.Head]}, kCreatedAtREST: time.Now().UTC().Format(time.RFC3339),
+		"merged": pr.Merged, "mergeable": !pr.Merged && !conflicting, "mergeable_state": "blocked", kState: "open"}
+	if conflicting {
+		out["mergeable_state"] = "dirty"
+	}
 	if pr.Merged {
 		out[kState], out["merged_at"] = "closed", pr.MergedAt.UTC().Format(time.RFC3339)
 	}
 	if pr.Closed {
 		out[kState] = "closed"
 	}
-	if len(pr.Reviews) > 0 && !f.checksPending[pr.Number] {
+	if len(pr.Reviews) > 0 && !f.checksPending[pr.Number] && !conflicting {
 		out["mergeable_state"] = "clean"
 	}
 	if pr.AutoMerge {
@@ -406,17 +582,28 @@ func (f *fakeTeamFiles) handleAutoMerge(w http.ResponseWriter, body []byte) {
 }
 
 // merge merges pull request n the way a machine approval does.
-func (f *fakeTeamFiles) merge(n int) {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	f.pulls[n].merge()
-}
+func (f *fakeTeamFiles) merge(n int) { f.mergeAt(n, time.Now()) }
 
-// mergeAt marks n merged at — the clock the poller reads.
+// mergeAt merges n at — the clock the poller reads.
 func (f *fakeTeamFiles) mergeAt(n int, at time.Time) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	f.pulls[n].mergeAt(at)
+	f.land(f.pulls[n], at)
+}
+
+// mergeable is GitHub's mergeable for pull request n.
+func (f *fakeTeamFiles) mergeable(n int) bool {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	pr := f.pulls[n]
+	return !pr.Merged && !f.conflicts(pr)
+}
+
+// at is the file at ref.
+func (f *fakeTeamFiles) at(ref, p string) []byte {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.viewAt(ref)[p]
 }
 
 // close closes n without a merge.

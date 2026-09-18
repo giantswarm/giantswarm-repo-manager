@@ -128,3 +128,33 @@ func TestOpenedExpectsTheRunAndTheMissingFindingNamesTheKind(t *testing.T) {
 		t.Errorf("closed without a merge: %+v findings %+v", r.Setup, r.Findings)
 	}
 }
+
+// TestConflictsAndMergeable: the poller notes when it first found the
+// pending run's pull request conflicting with its base and keeps that time
+// until the pull request is mergeable again; a record without a pending run
+// takes the note without effect.
+func TestConflictsAndMergeable(t *testing.T) {
+	r := &Record{Repository: repoX, Name: "x"}
+	first := time.Date(2026, 9, 18, 17, 20, 0, 0, time.UTC)
+	r.Conflicts(first)
+	if r.Setup.PendingRun.Conflicting() {
+		t.Fatal("no pending run, yet conflicting")
+	}
+	r.Opened(first.Add(-6*time.Minute), "alice", ChangeArchived, ChangePullRequest{Number: 6167, URL: "https://github.com/giantswarm/github/pull/6167"})
+	if r.Setup.PendingRun.Conflicting() {
+		t.Fatal("conflicting at opening")
+	}
+	r.Conflicts(first)
+	r.Conflicts(first.Add(5 * time.Minute))
+	if p := r.Setup.PendingRun; !p.Conflicting() || !p.ConflictsSince.Equal(first) {
+		t.Fatalf("conflicting since %v, want %v", p.ConflictsSince, first)
+	}
+	b, err := json.Marshal(r)
+	if err != nil || !strings.Contains(string(b), `"conflictsSince":"2026-09-18T17:20:00Z"`) {
+		t.Errorf("the note in the record's JSON: %s %v", b, err)
+	}
+	r.Mergeable()
+	if r.Setup.PendingRun.Conflicting() || r.Setup.PendingRun == nil {
+		t.Fatalf("after Mergeable: %+v", r.Setup.PendingRun)
+	}
+}

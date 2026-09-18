@@ -9,6 +9,7 @@ import (
 
 	"github.com/giantswarm/devctl/v8/pkg/reposetup"
 	"github.com/giantswarm/devctl/v8/pkg/reposetup/reconcile"
+	"github.com/google/go-github/v92/github"
 	"github.com/mark3labs/mcp-go/mcp"
 
 	"github.com/giantswarm/giantswarm-repo-manager/internal/inventory"
@@ -36,6 +37,20 @@ const (
 // marker is the machine-readable line every pull request this server opens
 // carries: approve_change reads the deciding team from it.
 const marker = "<!-- giantswarm-repo-manager: team=%s -->"
+
+// teamFromMarker is the deciding team a pull request body's marker names,
+// "" without one.
+func teamFromMarker(body string) string {
+	_, after, ok := strings.Cut(body, "<!-- giantswarm-repo-manager: team=")
+	if !ok {
+		return ""
+	}
+	team, _, ok := strings.Cut(after, " -->")
+	if !ok {
+		return ""
+	}
+	return team
+}
 
 // Plan is a write's dry run.
 type Plan struct {
@@ -647,6 +662,15 @@ type Approval struct {
 	// why, and the pull request is merged on GitHub by hand.
 	Merged    bool `json:"merged"`
 	AutoMerge bool `json:"autoMerge"`
+	// Rerendered says the pull request conflicted with its base — a
+	// neighbouring entry changed first — and was re-rendered on the current
+	// base before the approval: the branch force-pushed as the approver
+	// with the entries the pull request changes, the pull request, its ask
+	// and its auto-merge kept. RerenderError says it conflicted and could
+	// not be re-rendered; the approval stands, the pull request waits for a
+	// rebase.
+	Rerendered    *teamfiles.Rerendered `json:"rerendered,omitempty"`
+	RerenderError string                `json:"rerenderError,omitempty"`
 	// Message is the approval's outcome in one sentence, for the channel the
 	// Approve button was clicked in.
 	Message string `json:"message,omitempty"`
@@ -657,8 +681,11 @@ func (t *tools) approveChange() WriteTool {
 		Name: ToolApproveChange,
 		Description: "Approve a team-file pull request as you, after this server has checked on GitHub that you are a member of the team " +
 			"the change belongs to (the owning team; for a transfer the receiving team), and land it: merged as you when GitHub lets it, else left " +
-			"to GitHub's auto-merge (armed if it was not) — the answer says which, or why neither. The Approve button of a Slack ask calls this tool " +
-			"as the clicking member; a member may also call it directly, and approving on GitHub is equivalent. A non-member is refused, and so is the " +
+			"to GitHub's auto-merge (armed if it was not) — the answer says which, or why neither. A pull request GitHub reports conflicting with " +
+			"its base (a neighbouring entry of the team file changed first) is re-rendered on the current base before the approval — the entries it " +
+			"changes re-applied to the files as they read now and the branch force-pushed as you, the pull request, its ask and its auto-merge kept — " +
+			"and the answer names it (rerendered). The Approve button of a Slack ask calls this tool " +
+			"as the clicking member; a member may also call it directly, and approving on GitHub is equivalent (GitHub does not re-render). A non-member is refused, and so is the " +
 			"person who opened the pull request: GitHub does not accept an author's approval of their own pull request, another member has to approve.",
 		Options: []mcp.ToolOption{
 			mcp.WithNumber(argPullRequest, mcp.Required(), mcp.Description("The pull request number in the team-files repository (giantswarm/github).")),
@@ -701,38 +728,100 @@ func (t *tools) approve(ctx context.Context, args map[string]any, submit bool) (
 	if !submit {
 		return a, nil
 	}
+	// A pull request its base moved under — a neighbouring entry changed
+	// first — cannot merge as it stands: it is re-rendered on the base first,
+	// as the approver, so the review lands on a commit GitHub can merge.
+	a.Rerendered, err = t.rerender(ctx, p, d)
+	if err != nil {
+		a.RerenderError = err.Error()
+	}
 	url, err := p.repo.Approve(ctx, n, fmt.Sprintf("Approved as a member of %s through giantswarm-repo-manager.", d.team))
 	if err != nil {
 		return nil, err
 	}
 	a.ReviewURL = url
 	landing := p.repo.Land(ctx, n)
-	a.Merged, a.AutoMerge, a.Message = landing.Merged, landing.AutoMerge, d.outcome(p.login, landing)
-	t.d.Log.Info("pull request approved", "pr", n, "team", d.team, "as", p.login, "merged", a.Merged, "autoMerge", a.AutoMerge, "reason", landing.Reason)
+	a.Merged, a.AutoMerge, a.Message = landing.Merged, landing.AutoMerge, d.outcome(p.login, landing, a.Rerendered, a.RerenderError)
+	t.d.Log.Info("pull request approved", "pr", n, "team", d.team, "as", p.login, "merged", a.Merged, "autoMerge", a.AutoMerge, "reason", landing.Reason, "rerendered", a.Rerendered != nil)
 	return a, nil
 }
 
+// rerender re-renders the pull request on its base as the person when GitHub
+// reports it conflicting (mergeable: false), and drops the conflict noted on
+// the records of the entries it changes. Nil, nil for a mergeable pull
+// request; a mergeability GitHub has not computed, or could not be read, is
+// logged and lets the approval go ahead — Land says what GitHub does.
+func (t *tools) rerender(ctx context.Context, p *person, d decision) (*teamfiles.Rerendered, error) {
+	pr, conflicts, err := p.repo.Conflicts(ctx, d.pr)
+	if err != nil {
+		t.d.Log.Warn("pull request's mergeability not read", "pr", d.number, "error", err)
+		return nil, nil
+	}
+	if !conflicts {
+		return nil, nil
+	}
+	rr, err := p.repo.Rerender(ctx, pr)
+	if err != nil {
+		t.d.Log.Error("conflicting pull request not re-rendered", "pr", d.number, "as", p.login, "error", err)
+		return nil, err
+	}
+	t.d.Log.Info("conflicting pull request re-rendered on its base", "pr", d.number, "as", p.login, "branch", rr.Branch, "base", rr.Base, "entries", rr.Entries)
+	t.mergeableAgain(ctx, d.number, rr.Entries)
+	return rr, nil
+}
+
+// mergeableAgain drops the conflict the poller noted on the records of the
+// repositories whose pending run is pull request number.
+func (t *tools) mergeableAgain(ctx context.Context, number int, names []string) {
+	if t.d.Inventory == nil {
+		return
+	}
+	for _, name := range names {
+		rec, err := t.d.Inventory.Get(ctx, t.org()+"/"+name)
+		if err != nil || !rec.Setup.PendingRun.Follows(number) || !rec.Setup.PendingRun.Conflicting() {
+			continue
+		}
+		rec.Mergeable()
+		if err := t.d.Inventory.Put(ctx, rec); err != nil {
+			t.d.Log.Error("record not updated after the re-render", "repository", rec.Repository, "error", err)
+		}
+	}
+}
+
 // outcome is the approval's one sentence for the channel: approved as whom,
-// and what became of the pull request.
-func (d decision) outcome(login string, l teamfiles.Landing) string {
+// what became of the pull request, and — when its base had moved — that it
+// was re-rendered first, or that it could not be and why.
+func (d decision) outcome(login string, l teamfiles.Landing, rr *teamfiles.Rerendered, rerenderError string) string {
 	pr := fmt.Sprintf("%s/%s#%d", d.repo.Owner, d.repo.Name, d.number)
+	if rerenderError != "" {
+		return fmt.Sprintf("Approved as %s; %s is not merged: it conflicts with %s (a neighbouring entry changed first) and re-rendering it failed: %s Rebase it on GitHub.",
+			login, pr, d.repo.Ref, strings.TrimSuffix(rerenderError, ".")+".")
+	}
+	// The re-render is a clause on the pull request; mid-sentence it is
+	// closed by a comma.
+	subject := pr
+	if rr != nil {
+		subject += fmt.Sprintf(", re-rendered on %s first (a neighbouring entry had changed),", d.repo.Ref)
+	}
 	switch {
 	case l.Merged:
-		return fmt.Sprintf("Approved as %s and merged: %s.", login, pr)
+		return fmt.Sprintf("Approved as %s and merged: %s.", login, strings.TrimSuffix(subject, ","))
 	case l.AutoMerge:
-		return fmt.Sprintf("Approved as %s; %s merges by itself once its checks pass.", login, pr)
+		return fmt.Sprintf("Approved as %s; %s merges by itself once its checks pass.", login, subject)
 	default:
-		return fmt.Sprintf("Approved as %s; %s is not merged: %s Merge it on GitHub.", login, pr, strings.TrimSuffix(l.Reason, ".")+".")
+		return fmt.Sprintf("Approved as %s; %s is not merged: %s Merge it on GitHub.", login, subject, strings.TrimSuffix(l.Reason, ".")+".")
 	}
 }
 
 // decision is what a pull request's approval turns on: the team whose member
-// may give it and the person who opened it, who may not.
+// may give it and the person who opened it, who may not — and the pull
+// request as read, for the re-render.
 type decision struct {
 	repo   teamfiles.Repo
 	number int
 	team   string
 	author string
+	pr     *github.PullRequest
 }
 
 // approvalBy is the approval p may give, or the refusal in the person's own
@@ -758,12 +847,10 @@ func (t *tools) decision(ctx context.Context, repo teamfiles.Repo, n int) (decis
 	if err != nil {
 		return decision{}, fmt.Errorf("%s/%s#%d: %w", repo.Owner, repo.Name, n, err)
 	}
-	d := decision{repo: repo, number: n, author: pr.GetUser().GetLogin()}
-	if _, after, ok := strings.Cut(pr.GetBody(), "<!-- giantswarm-repo-manager: team="); ok {
-		if team, _, ok := strings.Cut(after, " -->"); ok && team != "" {
-			d.team = team
-			return d, nil
-		}
+	d := decision{repo: repo, number: n, author: pr.GetUser().GetLogin(), pr: pr}
+	if team := teamFromMarker(pr.GetBody()); team != "" {
+		d.team = team
+		return d, nil
 	}
 	teams, err := repo.ChangedTeamFiles(ctx, n)
 	if err != nil {

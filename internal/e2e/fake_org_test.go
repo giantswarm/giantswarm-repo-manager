@@ -44,9 +44,10 @@ const (
 	kHasNextPage     = "hasNextPage"
 	kPageInfo        = "pageInfo"
 	kPrivate         = "private"
-	// lifecycleArchived is set_lifecycle's archived value.
-	lifecycleArchived = "archived"
-	renovateLogin     = "renovate"
+	// lifecycleArchived and lifecycleDeprecated are set_lifecycle's values.
+	lifecycleArchived   = "archived"
+	lifecycleDeprecated = "deprecated"
+	renovateLogin       = "renovate"
 )
 
 const (

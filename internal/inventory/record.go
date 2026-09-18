@@ -344,6 +344,18 @@ type PendingRun struct {
 	// from the pull request: the pending window counts from it. nil while
 	// the pull request is open — no run is due yet — and for an Align now.
 	MergedAt *time.Time `json:"mergedAt,omitempty"`
+	// ConflictsSince is when the poller found GitHub reporting the open pull
+	// request conflicting with its base (mergeable: false): a neighbouring
+	// entry of the team file changed first, and the pull request cannot
+	// merge as it stands. A member's approve_change re-renders it on the
+	// base before approving; nil while GitHub reports it mergeable.
+	ConflictsSince *time.Time `json:"conflictsSince,omitempty"`
+}
+
+// Conflicting says whether the pending run's pull request is noted as
+// conflicting with its base.
+func (p *PendingRun) Conflicting() bool {
+	return p != nil && p.ConflictsSince != nil
 }
 
 // Follows says whether the pending run is the one of pull request number.
@@ -470,7 +482,7 @@ func (r *Record) MissingRunFinding() *Finding {
 		if m.MergedAt != nil {
 			merged = " was merged at " + m.MergedAt.Format(time.RFC3339)
 		}
-		f.Message = fmt.Sprintf("the reconciler run for %s, whose %s pull request %s %s opened at %s%s, had not reported by %s", r.Repository, pullRequestNoun(m.Kind), m.PullRequest.URL, m.By, dispatched, merged, noticed)
+		f.Message = fmt.Sprintf("the reconciler run for %s, whose %s pull request %s %s opened at %s%s, had not reported by %s", r.Repository, PullRequestNoun(m.Kind), m.PullRequest.URL, m.By, dispatched, merged, noticed)
 		f.Fix = fmt.Sprintf("the run follows the pull request's merge: look for it on %s — it may have failed before its report step; the next artifact clears this", m.RunsURL)
 		return f
 	}
@@ -479,9 +491,9 @@ func (r *Record) MissingRunFinding() *Finding {
 	return f
 }
 
-// pullRequestNoun names a team-file pull request by the kind of change it
+// PullRequestNoun names a team-file pull request by the kind of change it
 // makes: "declaration pull request", "archive pull request", …
-func pullRequestNoun(kind string) string {
+func PullRequestNoun(kind string) string {
 	switch kind {
 	case ChangeCreated, ChangeAdded:
 		return "declaration"
@@ -522,6 +534,22 @@ func (r *Record) Merged(at time.Time) {
 func (r *Record) Closed() {
 	r.Setup.PendingRun = nil
 	r.Findings = r.findings()
+}
+
+// Conflicts notes at as when the pending run's pull request was found
+// conflicting with its base; a conflict noted already keeps its time.
+func (r *Record) Conflicts(at time.Time) {
+	if p := r.Setup.PendingRun; p != nil && p.ConflictsSince == nil {
+		p.ConflictsSince = &at
+	}
+}
+
+// Mergeable drops the note of a conflict: the pull request was re-rendered
+// on its base, or GitHub reports it mergeable again.
+func (r *Record) Mergeable() {
+	if p := r.Setup.PendingRun; p != nil {
+		p.ConflictsSince = nil
+	}
 }
 
 func (r *Record) expectRun(p PendingRun) {

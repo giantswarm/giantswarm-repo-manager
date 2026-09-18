@@ -90,3 +90,53 @@ func TestRemoveEntryAndSetField(t *testing.T) {
 		t.Errorf("rendered:\n%s", y)
 	}
 }
+
+// TestRerenderFileReappliesTheChangedEntries: a pull request's change of one
+// file — the entries that differ from its merge base — is written into the
+// file as it reads now, whose other entries moved on: a lifecycle change
+// replaces its entry in place, a creation adds its entry at its alphabetical
+// place, a transfer's removal takes its entry out; the neighbour's change
+// and every other byte stay. A pull request whose change is on the base
+// already applies nothing; one that removes the file is refused.
+func TestRerenderFileReappliesTheChangedEntries(t *testing.T) {
+	const (
+		header = "# header\n"
+		entryA = "- name: a\n  componentType: app\n"
+		entryB = "- name: b\n  componentType: app\n"
+		entryC = "- name: c\n  componentType: app\n"
+		entryD = "- name: d\n  componentType: app\n"
+	)
+	was := header + entryA + entryC
+	// main moved on: b declared between a and c, c deprecated.
+	now := header + entryA + entryB + entryC + "  lifecycle: deprecated\n"
+	cases := []struct {
+		name, want, out string
+		entries         []string
+	}{
+		{"a lifecycle change replaces its entry", header + entryA + "  lifecycle: archived\n" + entryC, header + entryA + "  lifecycle: archived\n" + entryB + entryC + "  lifecycle: deprecated\n", []string{"a"}},
+		{"a creation adds its entry at its place", was + entryD, now + entryD, []string{"d"}},
+		{"a transfer's removal takes its entry out", header + entryC, header + entryB + entryC + "  lifecycle: deprecated\n", []string{"a"}},
+		{"a change on the base already applies nothing", was, now, nil},
+	}
+	for _, c := range cases {
+		out, names, err := rerenderFile("team-x", []byte(was), []byte(c.want), []byte(now))
+		if err != nil {
+			t.Fatalf("%s: %v", c.name, err)
+		}
+		if string(out) != c.out {
+			t.Errorf("%s: file\n%s\nwant\n%s", c.name, out, c.out)
+		}
+		if strings.Join(names, ",") != strings.Join(c.entries, ",") {
+			t.Errorf("%s: entries %v, want %v", c.name, names, c.entries)
+		}
+	}
+	if _, _, err := rerenderFile("team-x", []byte(was), nil, []byte(now)); err == nil {
+		t.Error("a pull request that removes the file: want an error")
+	}
+	// A file the merge base did not have (nil) declares nothing: every entry
+	// of the branch is new; a base without the file takes them all.
+	out, names, err := rerenderFile("team-x", nil, []byte(header+entryA), nil)
+	if err != nil || string(out) != entryA || len(names) != 1 {
+		t.Errorf("a new file: %q %v %v", out, names, err)
+	}
+}

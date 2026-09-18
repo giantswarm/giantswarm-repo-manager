@@ -494,7 +494,7 @@ func TestListScopesPerCaller(t *testing.T) {
 	old := now.Add(-400 * 24 * time.Hour)
 	seed := []*inventory.Record{
 		{Repository: org + "/" + repoPresent, Name: repoPresent, Declaration: &inventory.Declaration{Team: team}, Reality: &inventory.Reality{Visibility: kPublic, LastPersonCommit: &inventory.Commit{Date: now}}, Renovate: inventory.Renovate{Configured: true}},
-		{Repository: org + "/planet-service", Name: "planet-service", Declaration: &inventory.Declaration{Team: teamPlaneteers, Lifecycle: "deprecated"}, Reality: &inventory.Reality{Visibility: kPrivate, IsFork: true, LastPersonCommit: &inventory.Commit{Date: old}}},
+		{Repository: org + "/planet-service", Name: "planet-service", Declaration: &inventory.Declaration{Team: teamPlaneteers, Lifecycle: lifecycleDeprecated}, Reality: &inventory.Reality{Visibility: kPrivate, IsFork: true, LastPersonCommit: &inventory.Commit{Date: old}}},
 		{Repository: org + "/" + repoStray, Name: repoStray, Reality: &inventory.Reality{Visibility: kPublic, Description: "a stray thing"}},
 	}
 	for _, r := range seed {
@@ -524,7 +524,7 @@ func TestListScopesPerCaller(t *testing.T) {
 		{map[string]any{"search": "stray thing"}, org + "/" + repoStray},
 		{map[string]any{kVisibility: kPrivate}, org + "/planet-service"},
 		{map[string]any{"fork": true}, org + "/planet-service"},
-		{map[string]any{argLifecycle: "deprecated"}, org + "/planet-service"},
+		{map[string]any{argLifecycle: lifecycleDeprecated}, org + "/planet-service"},
 		{map[string]any{"inactiveDays": 365, argScope: "team", argTeam: teamPlaneteers}, org + "/planet-service"},
 		{map[string]any{"renovate": "configured"}, org + "/" + repoPresent},
 	}

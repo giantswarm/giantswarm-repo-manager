@@ -573,7 +573,9 @@ func (t *tools) setLifecycle() WriteTool {
 		Name: ToolSetLifecycle,
 		Description: "Deprecate or archive a declared repository by setting lifecycle in its team-file entry. deprecated: security-only Renovate " +
 			"and a catalog flag. archived: the reconciler archives the repository on GitHub and unfollows it on CircleCI; the entry stays as the " +
-			"record. Deletion is not expressible. The ask goes to the owning team's channel; a member's Approve (or an approving review on GitHub) lands it." + pendingRunSentence,
+			"record. An entry without " + alignTrue + " gets it beside the lifecycle — the change opts the repository in to alignment, else the reconciler " +
+			"would record the lifecycle and apply nothing — and the ask says so. Deletion is not expressible. The ask goes to the owning team's channel; " +
+			"a member's Approve (or an approving review on GitHub) lands it." + pendingRunSentence,
 		Options: []mcp.ToolOption{
 			mcp.WithString(argRepository, mcp.Required(), mcp.Description("Repository name, with or without the org.")),
 			mcp.WithString(argLifecycle, mcp.Required(), mcp.Enum(teamfiles.LifecycleDeprecated, teamfiles.LifecycleArchived), mcp.Description("deprecated or archived.")),
@@ -613,12 +615,26 @@ func (t *tools) planLifecycle(ctx context.Context, repo teamfiles.Repo, as strin
 	if err != nil {
 		return nil, err
 	}
-	if f, err := before.Fields(); err == nil && f.Lifecycle == lc {
+	f, err := before.Fields()
+	if err != nil {
+		return nil, fmt.Errorf("reading the entry of %s: %w", name, err)
+	}
+	if f.Lifecycle == lc {
 		return nil, fmt.Errorf("%s is %s already", name, lc)
 	}
 	after, err := teamfiles.SetField(before, teamfiles.FieldLifecycle, lc)
 	if err != nil {
 		return nil, err
+	}
+	// The reconciler applies a lifecycle only to an opted-in entry: one
+	// without the field gets it beside the lifecycle, and the ask says so.
+	change, optsIn := "`lifecycle: "+lc+"`", ""
+	if !f.Align {
+		if after, err = teamfiles.SetField(after, teamfiles.FieldAlign, "true"); err != nil {
+			return nil, err
+		}
+		change += " and " + alignTrue
+		optsIn = " The change also opts the repository in to alignment (" + alignTrue + " in its entry), so the reconciler applies the lifecycle."
 	}
 	pl, err := t.replacePlan(ctx, tf, name, before, after)
 	if err != nil {
@@ -632,9 +648,9 @@ func (t *tools) planLifecycle(ctx context.Context, repo teamfiles.Repo, as strin
 		pl.kind = inventory.ChangeArchived
 	}
 	pl.finish(repo, as, "reposetup/"+lc+"-"+name, fmt.Sprintf("chore(repositories): %s %s (%s)", verb(lc), name, tf.Team),
-		fmt.Sprintf("## Problem\n\n`%s/%s` is to be %s.\n\n## Solution\n\n`lifecycle: %s` in `%s` — %s.\n\n%s\n\nOpened by giantswarm-repo-manager (`%s`) as the caller.",
-			t.org(), name, lc, lc, tf.Path, effect, reasonLine(reason), ToolSetLifecycle))
-	pl.Ask = t.message(ctx, repo, tf.Team, fmt.Sprintf("%s asks to %s `%s/%s` (owned by %s).%s%s", as, verb(lc), t.org(), name, tf.Team, reasonSuffix(reason), decides(tf.Team, as)), true)
+		fmt.Sprintf("## Problem\n\n`%s/%s` is to be %s.\n\n## Solution\n\n%s in `%s` — %s.%s\n\n%s\n\nOpened by giantswarm-repo-manager (`%s`) as the caller.",
+			t.org(), name, lc, change, tf.Path, effect, optsIn, reasonLine(reason), ToolSetLifecycle))
+	pl.Ask = t.message(ctx, repo, tf.Team, fmt.Sprintf("%s asks to %s `%s/%s` (owned by %s).%s%s%s", as, verb(lc), t.org(), name, tf.Team, optsIn, reasonSuffix(reason), decides(tf.Team, as)), true)
 	return pl, nil
 }
 
@@ -900,10 +916,15 @@ type Dispatch struct {
 	// inventory reads the run's artifact within seconds of its completion,
 	// get_repository shows setup.lastRun then.
 	PendingRun *inventory.PendingRun `json:"pendingRun,omitempty"`
-	// Team is the team whose policy file decides the mode: the team input,
-	// else the declaration's.
+	// Team is the team the run is for: the team input, else the declaring
+	// entry's file.
 	Team string `json:"team,omitempty"`
-	// OptedIn is that team's alignOptIn (repository-setup/<team>.yaml).
+	// Declared says the repository has an entry in that team's file (in
+	// any team's file without a team input). Without one the run checks
+	// from the team alone.
+	Declared bool `json:"declared"`
+	// OptedIn is the declaring entry's align (`align: true` in
+	// repositories/<team>.yaml): the repository's opt-in to alignment.
 	// Without it the run is a check whatever the mode asked.
 	OptedIn bool `json:"optedIn"`
 	// Mode is what the run does to the repository: align or check.
@@ -925,19 +946,25 @@ const alignChanges = "merge settings (squash only, auto-merge, delete branch on 
 	"every reporting check required), the CircleCI follow and setup workflows, a CODEOWNERS pull request, description and visibility, " +
 	"lifecycle, catalog and mapping, and a missed release build"
 
+// alignTrue is the field of an entry that opts the repository in to
+// alignment, as the answers spell it.
+const alignTrue = "`align: true`"
+
 // alignWarning is the paragraph a person reads before confirming: what an
 // alignment changes on this repository, that it runs as them, and whether
-// this run changes anything — the team's opt-in decides.
-func alignWarning(repository, team string, optedIn bool) string {
+// this run changes anything — the entry's opt-in decides.
+func alignWarning(repository, team string, optedIn, declared bool) string {
 	head := fmt.Sprintf("Align now changes %s on GitHub and CircleCI to its declared set-up and the company baseline: %s. It runs as you. ",
 		repository, alignChanges)
 	switch {
-	case team == "":
-		return head + "No team is known for this repository: pass team. Without a team's opt-in the run checks and changes nothing."
+	case !declared && team == "":
+		return head + fmt.Sprintf("%s has no entry and no team is known for it: pass team. The run then checks from the team alone and changes nothing; declare the repository with %s in its entry to have it aligned.", repository, alignTrue)
+	case !declared:
+		return head + fmt.Sprintf("%s has no entry: this run checks from the team alone and changes nothing; declare the repository with %s in its entry to have it aligned.", repository, alignTrue)
 	case optedIn:
-		return head + fmt.Sprintf("%s has opted in (alignOptIn in repository-setup/%s.yaml): the planned changes are applied.", team, team)
+		return head + fmt.Sprintf("%s is opted in to alignment (%s in its entry): the planned changes are applied.", repository, alignTrue)
 	default:
-		return head + fmt.Sprintf("%s has not opted in (repository-setup/%s.yaml): this run checks and reports the drift; nothing changes.", team, team)
+		return head + fmt.Sprintf("%s has not opted in to alignment: this run checks and reports the drift; nothing changes. Opt in with %s: %s in its entry (the team reviews).", repository, ToolUpdateRepository, alignTrue)
 	}
 }
 
@@ -946,8 +973,9 @@ func (t *tools) alignRepository() WriteTool {
 		Name: ToolAlignRepository,
 		Description: "Align now: aligns one repository with its declared set-up and the company baseline by dispatching the reconcile-repositories " +
 			"workflow in giantswarm/github as you. WARNING — an alignment changes the repository on GitHub and CircleCI: " + alignChanges + ". " +
-			"It does so only when the owning team has opted in (alignOptIn: true in repository-setup/<team>.yaml); for any other team the run " +
-			"checks and reports the drift and changes nothing. The answer (dry run and commit alike) says which: mode align or check, optedIn, " +
+			"It does so only when the repository has opted in (" + alignTrue + " in its entry in repositories/<team>.yaml); for a repository without it the run " +
+			"checks and reports the drift and changes nothing (opt in with " + ToolUpdateRepository + ": " + alignTrue + " in its entry, the team reviews), and a repository without an entry " +
+			"is checked from the team alone. The answer (dry run and commit alike) says which: mode align or check, optedIn, declared, " +
 			"team, the planned changes from the inventory's last check (per step, with checkedAt) and a warning paragraph to show the person " +
 			"before they confirm. The record shows setup.pendingRun until the inventory has read the run's artifact (within " +
 			"seconds of the run completing) as setup.lastRun, with the run's change block (kind, by, pullRequest) — its failed steps and findings " +
@@ -996,28 +1024,29 @@ func (t *tools) dispatch(ctx context.Context, args map[string]any, run bool) (*D
 		return nil, err
 	}
 	d.As, d.RunsURL = p.login, p.repo.WorkflowURL(workflow)
-	// The team's opt-in decides what the run does; the last check says what
+	// The entry's opt-in decides what the run does; the last check says what
 	// an alignment would apply. Both are in the answer for the person to read
-	// before confirming.
-	if team, _ := inputs[argTeam].(string); team != "" {
-		d.Team = team
-	} else {
-		// The declaring team, from the team files on main (the inventory's
-		// record is the hint that saves reading every file).
-		hint := ""
-		if rec != nil && rec.Declaration != nil {
-			hint = rec.Declaration.Team
-		}
-		if tf, err := p.repo.FindEntry(ctx, name, hint); err == nil {
-			d.Team = tf.Team
-		} else if !errors.Is(err, teamfiles.ErrEntryNotFound) {
-			return nil, fmt.Errorf("reading the team files for %s: %w", name, err)
-		}
+	// before confirming. The entry is read from the team files on main: the
+	// team input names the file, else the inventory's record is the hint
+	// that saves reading every file.
+	d.Team, _ = inputs[argTeam].(string)
+	hint := d.Team
+	if hint == "" && rec != nil && rec.Declaration != nil {
+		hint = rec.Declaration.Team
 	}
-	if d.Team != "" {
-		if pol, err := p.repo.Policy(ctx, d.Team); err == nil {
-			d.OptedIn = pol.AlignOptIn
+	switch tf, err := p.repo.FindEntry(ctx, name, hint); {
+	case err == nil:
+		e, _ := tf.Entries.Entry(name)
+		f, err := e.Fields()
+		if err != nil {
+			return nil, fmt.Errorf("reading the entry of %s: %w", name, err)
 		}
+		d.Declared, d.OptedIn = true, f.Align
+		if d.Team == "" {
+			d.Team = tf.Team
+		}
+	case !errors.Is(err, teamfiles.ErrEntryNotFound):
+		return nil, fmt.Errorf("reading the team files for %s: %w", name, err)
 	}
 	d.Mode = DispatchModeCheck
 	if d.OptedIn {
@@ -1031,7 +1060,7 @@ func (t *tools) dispatch(ctx context.Context, args map[string]any, run bool) (*D
 			}
 		}
 	}
-	d.Warning = alignWarning("giantswarm/"+name, d.Team, d.OptedIn)
+	d.Warning = alignWarning(t.org()+"/"+name, d.Team, d.OptedIn, d.Declared)
 	if !run {
 		return d, nil
 	}

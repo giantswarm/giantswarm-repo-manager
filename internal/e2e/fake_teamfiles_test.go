@@ -131,8 +131,8 @@ func newFakeTeamFiles() *fakeTeamFiles {
 		files: map[string][]byte{
 			"repositories/" + team + ".yaml":               []byte(teamFile),
 			"repositories/" + teamPlaneteers + ".yaml":     []byte(planeteersFile),
-			"repository-setup/" + team + ".yaml":           []byte("alignOptIn: true\nslackChannel: " + bumblebeeChannel + "\nstandupChannel: " + bumblebeeStandup + "\n"),
-			"repository-setup/" + teamPlaneteers + ".yaml": []byte("alignOptIn: false\nslackChannel: " + teamPlaneteers + "\nstandupChannel: standup-planeteers\n"),
+			"repository-setup/" + team + ".yaml":           []byte("slackChannel: " + bumblebeeChannel + "\nstandupChannel: " + bumblebeeStandup + "\n"),
+			"repository-setup/" + teamPlaneteers + ".yaml": []byte("slackChannel: " + teamPlaneteers + "\nstandupChannel: standup-planeteers\n"),
 		},
 		refs: map[string]string{headsPrefix + mainBranch: "base000"}, trees: map[string]map[string][]byte{}, commits: map[string]string{}, parents: map[string]string{}, pulls: map[int]*fakePullRequest{}, next: 4711,
 	}

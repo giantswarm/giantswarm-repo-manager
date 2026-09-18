@@ -86,6 +86,7 @@ var teamFile = `# yaml-language-server: $schema=../repositories.schema.json
     flavours: [generic]
 - name: ` + repoLegacy + `
   componentType: service
+  align: true
   gen:
     language: generic
     flavours: [app]

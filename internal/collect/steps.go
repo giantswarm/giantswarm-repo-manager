@@ -77,7 +77,7 @@ func runStep(last *inventory.LastRun, step reconcile.Step) *reconcile.StepResult
 
 // alignFix is the fix of an unchecked finding here: the reconciler's run
 // reads CircleCI directly.
-const alignFix = "run Align now: the reconciler's check reads CircleCI directly, and for a team that has not opted in it changes nothing"
+const alignFix = "run Align now: the reconciler's check reads CircleCI directly, and for a repository that has not opted in to alignment (`align: true` in its entry) it changes nothing"
 
 // convergedCircleCI is the engine's summary of a converged circleci step.
 const convergedCircleCI = "followed, setup workflows on, checkout key present"

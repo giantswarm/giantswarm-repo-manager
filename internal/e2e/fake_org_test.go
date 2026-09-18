@@ -59,7 +59,10 @@ const (
 	dissolvedTeam   = "team-dissolved"
 	fakeRunURL      = "https://github.com/giantswarm/github/actions/runs/1"
 	fakeGraphQLCost = 7
+	circleSetup     = "ci/circleci: setup"
 	circleBuild     = "ci/circleci: go-build"
+	circleChart     = "ci/circleci: build-chart"
+	circlePushChart = "ci/circleci: push-chart"
 	circlePush      = "ci/circleci: push-to-registries"
 	// presentTag is the present repository's latest release.
 	presentTag = "v1.0.0"

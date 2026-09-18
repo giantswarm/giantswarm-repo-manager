@@ -80,8 +80,10 @@ type Deps struct {
 	// reads the runs of; empty is teamfiles.ReconcilerWorkflow.
 	ReconcilerWorkflow string
 	// WatchInterval is how often watch_repository reads GitHub while it
-	// follows a new repository; 0 is DefaultWatchInterval.
-	WatchInterval time.Duration
+	// follows a new repository; 0 is DefaultWatchInterval. WatchSettle is
+	// how long the release's CircleCI statuses must stay unchanged before
+	// the released phase is done; 0 is DefaultWatchSettle.
+	WatchInterval, WatchSettle time.Duration
 	// Review is klaus-gateway's team-review endpoint; nil leaves the asks
 	// undelivered and reported as such.
 	Review *review.Client

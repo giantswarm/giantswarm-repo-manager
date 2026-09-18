@@ -15,8 +15,9 @@ import (
 
 // watch_repository against the fakes: a creation followed phase by phase as
 // GitHub and the inventory show them — to ready, to a failed step, to a run
-// that never reported, to a red release, through a read GitHub refuses — and
-// the timeout that answers with what is pending.
+// that never reported, to a red release, through a read GitHub refuses,
+// through the jobs the declaration implies and the settle window — and the
+// timeout that answers with what is pending.
 
 const (
 	argTimeout = "timeout"
@@ -24,17 +25,45 @@ const (
 	shinyURL   = "https://github.com/" + org + "/" + shinyService
 	// throughSetUp are the phases done once the reconciler run has reported.
 	throughSetUp = "created scaffolded declared merged setUp"
+	allPhases    = throughSetUp + " released"
+	// watchSettle is the stack's settle window: how long the release's
+	// statuses stay unchanged before released is done (60 s in service).
+	// GitHub dates a status to the second, so the window is over a second.
+	watchSettle = 1500 * time.Millisecond
+	// settling is a call short enough to end inside the settle window.
+	settling = 0.05
+	// jobImagePush is the image push job as the watch names it awaited.
+	jobImagePush = "push-to-registries"
 )
 
-// createShiny creates shiny-service as alice and merges nothing.
+// greenRelease are the statuses of a Go + app release once every job has
+// reported green.
+var greenRelease = []string{circleSetup, circleBuild, circleChart, circlePushChart, circlePush}
+
+// createShiny creates shiny-service as alice from newEntry and merges nothing.
 func (st *stack) createShiny(t *testing.T, c *client.Client) (tools.Created, string) {
 	t.Helper()
+	return st.create(t, c, newEntry)
+}
+
+// create creates the repository entry declares as alice and merges nothing.
+func (st *stack) create(t *testing.T, c *client.Client, entry map[string]any) (tools.Created, string) {
+	t.Helper()
 	var out tools.Created
-	st.callJSON(t, c, tools.ToolCreateRepository, map[string]any{argMode: modeCommit, argTeam: team, argEntry: newEntry}, &out)
+	st.callJSON(t, c, tools.ToolCreateRepository, map[string]any{argMode: modeCommit, argTeam: team, argEntry: entry}, &out)
 	if out.PullRequest == nil {
 		t.Fatalf("create_repository: %+v", out)
 	}
 	return out, fmt.Sprintf("https://github.com/%s/github/pull/%d", org, out.PullRequest.Number)
+}
+
+// declared merges the pull request and lands its entry at main, as GitHub
+// shows a merge, minutes before the reconciler run reports: the inventory
+// reads the team files afresh for that run.
+func (st *stack) declared(pr int, entry string) {
+	st.ghs.files.merge(pr)
+	st.ghs.org.declare(entry)
+	st.advance(6 * time.Minute)
 }
 
 // watch calls watch_repository for shiny-service and its pull request.
@@ -119,17 +148,83 @@ func TestWatchRepositoryFollowsACreationToReadiness(t *testing.T) {
 		t.Fatalf("before CircleCI reported: %+v release=%+v", w, w.Release)
 	}
 	st.ghs.repos.report(shinyService, statePending, circleBuild)
-	if w = st.watch(t, c, pr, 0.3); w.Ready || w.Pending != tools.PhaseReleased || w.PendingReason != "" || w.Failure != nil {
+	if w = st.watch(t, c, pr, 0.3); w.Ready || w.Pending != tools.PhaseReleased || w.Failure != nil ||
+		w.PendingReason != "the CircleCI statuses on "+firstTag+": "+circleBuild+" (pending) — waiting for the pending ones" {
 		t.Fatalf("CircleCI pending: %+v", w)
 	}
 
 	go func() {
 		time.Sleep(150 * time.Millisecond)
-		st.ghs.repos.report(shinyService, stateSuccess, circleBuild, circlePush)
+		st.ghs.repos.report(shinyService, stateSuccess, greenRelease...)
 	}()
 	w = st.watch(t, c, pr, 5)
-	if !w.Ready || w.Pending != "" || w.Failure != nil || names(w.Phases) != "created scaffolded declared merged setUp released" || w.Waited > 2 {
+	if !w.Ready || w.Pending != "" || w.PendingReason != "" || w.Failure != nil || names(w.Phases) != allPhases || w.Waited > 3 {
 		t.Fatalf("ready: %+v", w)
+	}
+}
+
+// TestWatchRepositoryWaitsForTheDeclaredJobsAndTheSettleWindow: CircleCI
+// posts one status per job as the job starts, so green setup and go-build
+// statuses on a Go + app repository with a Dockerfile are not the verdict:
+// released stays pending naming the chart job and the image push as awaited,
+// then — every job green — until the set has stayed unchanged for the settle
+// window; a red build-chart fails the phase at once.
+func TestWatchRepositoryWaitsForTheDeclaredJobsAndTheSettleWindow(t *testing.T) {
+	st := newStack(t)
+	c := st.as(t, aliceToken)
+	created, prURL := st.createShiny(t, c)
+	pr := created.PullRequest.Number
+	st.ghs.repos.put(shinyService, "Dockerfile", "FROM scratch\n")
+	st.declared(pr, "- name: "+shinyService+"\n  componentType: service\n  gen:\n    language: go\n    flavours: [app]\n    ci:\n      chartName: "+shinyService+"\n")
+	st.reported(t, pr, prURL, reconcile.StepResult{Step: reconcile.StepRelease, Verdict: reconcile.VerdictRepaired, Summary: "trigger the missed tag build for " + firstTag})
+	st.ghs.repos.publish(shinyService, firstTag)
+	line := "the CircleCI statuses on " + firstTag + ": "
+
+	st.ghs.repos.report(shinyService, stateSuccess, circleSetup, circleBuild)
+	w := st.watch(t, c, pr, 0.3)
+	if w.Ready || w.Failure != nil || w.Pending != tools.PhaseReleased || names(w.Phases) != throughSetUp ||
+		w.PendingReason != line+circleSetup+" (success), "+circleBuild+" (success) — awaiting a chart job, "+jobImagePush {
+		t.Fatalf("setup and go-build green: %+v", w)
+	}
+	st.ghs.repos.report(shinyService, stateSuccess, circleChart, circlePushChart)
+	if w = st.watch(t, c, pr, settling); w.Ready || w.Failure != nil || !strings.HasSuffix(w.PendingReason, " — awaiting "+jobImagePush) {
+		t.Fatalf("the chart jobs green, no image push: %+v", w)
+	}
+	st.ghs.repos.report(shinyService, stateSuccess, circlePush)
+	if w = st.watch(t, c, pr, settling); w.Ready || w.Failure != nil || !strings.Contains(w.PendingReason, circlePush+" (success) — green for ") ||
+		!strings.Contains(w.PendingReason, "released once unchanged for "+watchSettle.String()) {
+		t.Fatalf("every job green, settling: %+v", w)
+	}
+	if w = st.watch(t, c, pr, 3); !w.Ready || w.Pending != "" || w.PendingReason != "" || w.Failure != nil || names(w.Phases) != allPhases {
+		t.Fatalf("settled: %+v", w)
+	}
+
+	st.ghs.repos.report(shinyService, stateFailure, circleChart)
+	w = st.watch(t, c, pr, 0.3)
+	if w.Ready || w.Failure == nil || w.Failure.Phase != tools.PhaseReleased || w.Failure.Reason != line[:len(line)-2]+" are failure: "+circleChart+" ("+stateFailure+")" {
+		t.Fatalf("build-chart red: %+v failure=%+v", w, w.Failure)
+	}
+}
+
+// TestWatchRepositoryReadiesAPlainRepositoryOnceSettled: a declaration
+// without a chart on a default branch without a Dockerfile implies no job
+// beyond the build: released is done once its statuses are green and have
+// stayed unchanged for the settle window.
+func TestWatchRepositoryReadiesAPlainRepositoryOnceSettled(t *testing.T) {
+	st := newStack(t)
+	c := st.as(t, aliceToken)
+	created, prURL := st.create(t, c, map[string]any{kName: shinyService, kComponentType: kService, kGen: map[string]any{kLanguage: kGo, kFlavours: []any{"generic"}}})
+	pr := created.PullRequest.Number
+	st.declared(pr, "- name: "+shinyService+"\n  componentType: service\n  gen:\n    language: go\n    flavours: [generic]\n")
+	st.reported(t, pr, prURL, reconcile.StepResult{Step: reconcile.StepRelease, Verdict: reconcile.VerdictRepaired, Summary: "trigger the missed tag build for " + firstTag})
+	st.ghs.repos.publish(shinyService, firstTag)
+	st.ghs.repos.report(shinyService, stateSuccess, circleSetup, circleBuild)
+	if w := st.watch(t, c, pr, settling); w.Ready || w.Failure != nil || !strings.Contains(w.PendingReason, "released once unchanged for") {
+		t.Fatalf("green, settling: %+v", w)
+	}
+	w := st.watch(t, c, pr, 3)
+	if !w.Ready || w.Pending != "" || w.PendingReason != "" || w.Failure != nil || names(w.Phases) != allPhases {
+		t.Fatalf("settled: %+v", w)
 	}
 }
 
@@ -212,7 +307,7 @@ func TestWatchRepositoryReportsARefusedRead(t *testing.T) {
 	st.ghs.files.merge(pr)
 	st.reported(t, pr, prURL, reconcile.StepResult{Step: reconcile.StepRelease, Verdict: reconcile.VerdictRepaired, Summary: "trigger the missed tag build for " + firstTag})
 	st.ghs.repos.publish(shinyService, firstTag)
-	st.ghs.repos.report(shinyService, stateSuccess, circleBuild, circlePush)
+	st.ghs.repos.report(shinyService, stateSuccess, greenRelease...)
 	st.ghs.repos.installed(shinyService, false)
 	w := st.watch(t, c, pr, 0.3)
 	if w.Ready || w.Failure != nil || w.Pending != tools.PhaseReleased || names(w.Phases) != throughSetUp ||
@@ -220,7 +315,7 @@ func TestWatchRepositoryReportsARefusedRead(t *testing.T) {
 		t.Fatalf("a refused statuses read: %+v", w)
 	}
 	st.ghs.repos.installed(shinyService, true)
-	if w = st.watch(t, c, pr, 0.3); !w.Ready || w.PendingReason != "" {
+	if w = st.watch(t, c, pr, 3); !w.Ready || w.PendingReason != "" {
 		t.Fatalf("after the App reaches the repository: %+v", w)
 	}
 }

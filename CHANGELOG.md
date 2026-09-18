@@ -15,6 +15,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- The `circleci` step no longer says "CircleCI does not build <repository>" beside an `ok` when the reconciler's run found the project followed and the head simply carries no status yet: the summary then reads "no CircleCI status on main's head yet"; the conclusion is drawn only when nothing else has read the project.
+
+### Fixed
+
 - `ci.platforms` / `ci.arm64`: an image push on orb 9 or newer without a `platforms` value and without a go-build job resolves to the orb's built-in default (`linux/amd64,linux/arm64`), the list `push-to-registries` falls back to when no `.platforms` file was written, instead of staying unknown.
 
 ### Added

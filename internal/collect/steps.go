@@ -93,8 +93,10 @@ func circleCIStep(slug, branch string, cc *inventory.CircleCI, last *inventory.L
 		sr.Summary = "repository not on GitHub"
 		return sr
 	}
-	builds := buildsSentence(slug, branch, cc.Head)
 	if run := runStep(last, reconcile.StepCircleCI); run != nil {
+		// The run read the project itself: a head without a status is a head
+		// not built yet, not a project CircleCI does not build.
+		builds := buildsSentence(slug, branch, cc.Head, false)
 		from := "reconciler run of " + last.Timestamp.UTC().Format(time.RFC3339)
 		switch run.Verdict {
 		case reconcile.VerdictFailed:
@@ -116,6 +118,7 @@ func circleCIStep(slug, branch string, cc *inventory.CircleCI, last *inventory.L
 		}
 		return sr
 	}
+	builds := buildsSentence(slug, branch, cc.Head, true)
 	switch {
 	case cc.Head != nil:
 		sr.Verdict = reconcile.VerdictOK
@@ -136,10 +139,15 @@ func circleCIStep(slug, branch string, cc *inventory.CircleCI, last *inventory.L
 	return sr
 }
 
-// buildsSentence says what the head's `ci/circleci:` statuses tell.
-func buildsSentence(slug, branch string, head *inventory.HeadStatus) string {
+// buildsSentence says what the head's `ci/circleci:` statuses tell; conclude
+// draws the conclusion from a head without any — CircleCI does not build the
+// repository — which holds only when nothing else has read the project.
+func buildsSentence(slug, branch string, head *inventory.HeadStatus, conclude bool) string {
 	if head == nil {
-		return fmt.Sprintf("no CircleCI status on %s's head: CircleCI does not build %s", branch, slug)
+		if conclude {
+			return fmt.Sprintf("no CircleCI status on %s's head: CircleCI does not build %s", branch, slug)
+		}
+		return fmt.Sprintf("no CircleCI status on %s's head yet", branch)
 	}
 	return fmt.Sprintf("CircleCI builds %s: %s (%s, %s)", branch, head.State, jobs(head), head.At.UTC().Format(time.RFC3339))
 }

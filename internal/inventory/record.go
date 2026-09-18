@@ -228,14 +228,15 @@ type Setup struct {
 	// LastRun is the reconciler's last run over this repository — the
 	// reconcile-<name> artifact its workflow run uploaded, read by the poller.
 	LastRun *LastRun `json:"lastRun,omitempty"`
-	// PendingRun is an Align now dispatched for this repository whose run
-	// has not reported yet (a workflow_dispatch returns no run id). The run's
-	// artifact clears it; so does the pending window running out, which
-	// leaves MissingRun.
+	// PendingRun is a reconciler run expected for this repository that has
+	// not reported yet: an Align now dispatched (a workflow_dispatch returns
+	// no run id), or the run that follows the merge of a creation's
+	// declaration pull request. The run's artifact clears it; so does the
+	// pending window running out, which leaves MissingRun.
 	PendingRun *PendingRun `json:"pendingRun,omitempty"`
-	// MissingRun is an Align now whose run did not report within the
-	// pending window: the finding reconcile-run-missing, until the next
-	// artifact or dispatch.
+	// MissingRun is an expected run that did not report within the pending
+	// window: the finding reconcile-run-missing, until the next artifact,
+	// dispatch or creation.
 	MissingRun *MissingRun `json:"missingRun,omitempty"`
 }
 
@@ -298,14 +299,28 @@ const (
 	ChangeNightly = "nightly"
 )
 
-// PendingRun is a dispatched reconciler run that has not reported yet.
+// PendingRun is an expected reconciler run that has not reported yet.
 type PendingRun struct {
+	// DispatchedAt is when the run was expected from: the dispatch of an
+	// Align now, or the opening of a creation's pull request.
 	DispatchedAt time.Time `json:"dispatchedAt"`
-	// By is the login of the person who dispatched it.
+	// By is the login of the person who dispatched it, or who created the
+	// repository.
 	By string `json:"by"`
+	// Kind is the change the run follows: dispatched (an Align now) or
+	// created (the pull request declaring a new repository).
+	Kind string `json:"kind,omitempty"`
+	// PullRequest is the creation's declaration pull request, whose merge
+	// the run follows; nil for an Align now.
+	PullRequest *ChangePullRequest `json:"pullRequest,omitempty"`
 }
 
-// MissingRun is a dispatched reconciler run that never reported.
+// Follows says whether the pending run is the one of pull request number.
+func (p *PendingRun) Follows(number int) bool {
+	return p != nil && p.PullRequest != nil && p.PullRequest.Number == number
+}
+
+// MissingRun is an expected reconciler run that never reported.
 type MissingRun struct {
 	PendingRun
 	// NoticedAt is when the pending window ran out.
@@ -383,10 +398,8 @@ func (r *Record) findings() []Finding {
 			Message: fmt.Sprintf("%s exists on GitHub and no team file declares it", r.Repository),
 			Fix:     "declare it in the owning team's repositories/<team>.yaml, or archive it"})
 	}
-	if m := r.Setup.MissingRun; m != nil {
-		out = append(out, Finding{Kind: FindingReconcileRunMissing, Source: FindingSourceInventory,
-			Message: fmt.Sprintf("the reconciler run %s dispatched at %s for %s had not reported by %s", m.By, m.DispatchedAt.Format(time.RFC3339), r.Repository, m.NoticedAt.Format(time.RFC3339)),
-			Fix:     fmt.Sprintf("look for the run on %s — it may have failed before its report step, or the dispatch started none; dispatch again with align_repository", m.RunsURL)})
+	if f := r.MissingRunFinding(); f != nil {
+		out = append(out, *f)
 	}
 	if r.Setup.Checks != nil {
 		for _, f := range r.Setup.Checks.Findings() {
@@ -396,11 +409,45 @@ func (r *Record) findings() []Finding {
 	return out
 }
 
+// MissingRunFinding is the finding reconcile-run-missing for the record's
+// missing run, nil without one, in the words of the run that was expected:
+// an Align now that started no run or whose run failed before its report
+// step, or a creation's run that follows a merge which may not have happened
+// yet.
+func (r *Record) MissingRunFinding() *Finding {
+	m := r.Setup.MissingRun
+	if m == nil {
+		return nil
+	}
+	f := &Finding{Kind: FindingReconcileRunMissing, Source: FindingSourceInventory}
+	dispatched, noticed := m.DispatchedAt.Format(time.RFC3339), m.NoticedAt.Format(time.RFC3339)
+	if m.Kind == ChangeCreated && m.PullRequest != nil {
+		f.Message = fmt.Sprintf("the reconciler run for %s, whose declaration pull request %s %s opened at %s, had not reported by %s", r.Repository, m.PullRequest.URL, m.By, dispatched, noticed)
+		f.Fix = fmt.Sprintf("the run follows the pull request's merge: merge it, or look for the run on %s — it may have failed before its report step; the next artifact clears this", m.RunsURL)
+		return f
+	}
+	f.Message = fmt.Sprintf("the reconciler run %s dispatched at %s for %s had not reported by %s", m.By, dispatched, r.Repository, noticed)
+	f.Fix = fmt.Sprintf("look for the run on %s — it may have failed before its report step, or the dispatch started none; dispatch again with align_repository", m.RunsURL)
+	return f
+}
+
 // Dispatched marks an Align now by login at now: setup.pendingRun, until
 // the run's artifact or the pending window's end; an earlier missing run is
 // forgotten. The findings follow.
 func (r *Record) Dispatched(now time.Time, by string) {
-	r.Setup.PendingRun = &PendingRun{DispatchedAt: now, By: by}
+	r.expectRun(PendingRun{DispatchedAt: now, By: by, Kind: ChangeDispatched})
+}
+
+// Created marks a creation by login at now whose declaration pull request
+// pr is open: setup.pendingRun expects the reconciler run that follows the
+// merge, the way an Align now expects its run, until the run's artifact or
+// the pending window's end.
+func (r *Record) Created(now time.Time, by string, pr ChangePullRequest) {
+	r.expectRun(PendingRun{DispatchedAt: now, By: by, Kind: ChangeCreated, PullRequest: &pr})
+}
+
+func (r *Record) expectRun(p PendingRun) {
+	r.Setup.PendingRun = &p
 	r.Setup.MissingRun = nil
 	r.Findings = r.findings()
 }

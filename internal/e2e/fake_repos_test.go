@@ -11,6 +11,7 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/giantswarm/devctl/v8/pkg/reposetup"
 	"github.com/google/go-github/v92/github"
@@ -24,6 +25,11 @@ const (
 	roleAdmin  = "admin"
 	roleMember = "member"
 	readmeFile = "README.md"
+	// The REST field and the commit status states the fakes repeat.
+	kCreatedAtREST = "created_at"
+	stateSuccess   = "success"
+	statePending   = "pending"
+	stateFailure   = "failure"
 )
 
 // fakeRepos are the org's repositories.
@@ -33,7 +39,8 @@ type fakeRepos struct {
 }
 
 // fakeRepo is one repository's state: who administers it, the files at the
-// head of main and the git data the scaffold push creates.
+// head of main and the git data the scaffold push creates, its latest
+// release and the commit statuses on it.
 type fakeRepo struct {
 	name, description string
 	private           bool
@@ -45,6 +52,23 @@ type fakeRepo struct {
 	commits           map[string]string // sha → tree sha
 	head              string
 	seq               int
+	createdAt, headAt time.Time
+	release           *fakeRelease
+	// statuses are the commit statuses on the release's tag: the combined
+	// status GET /commits/{ref}/status derives.
+	statuses []fakeStatus
+}
+
+// fakeRelease is the repository's latest release.
+type fakeRelease struct {
+	tag         string
+	publishedAt time.Time
+}
+
+// fakeStatus is one commit status.
+type fakeStatus struct {
+	context, state string
+	updatedAt      time.Time
 }
 
 func newFakeRepos() *fakeRepos { return &fakeRepos{repos: map[string]*fakeRepo{}} }
@@ -54,11 +78,31 @@ func newFakeRepos() *fakeRepos { return &fakeRepos{repos: map[string]*fakeRepo{}
 func (f *fakeRepos) add(name, admin string) *fakeRepo {
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	now := time.Now()
 	r := &fakeRepo{name: name, admins: map[string]bool{admin: true}, files: map[string]string{readmeFile: "# " + name + "\n"},
-		blobs: map[string][]byte{}, trees: map[string][]*github.TreeEntry{}, commits: map[string]string{}}
+		blobs: map[string][]byte{}, trees: map[string][]*github.TreeEntry{}, commits: map[string]string{}, createdAt: now, headAt: now}
 	r.head = r.next("c")
 	f.repos[name] = r
 	return r
+}
+
+// publish gives the repository its latest release, tag, published now.
+func (f *fakeRepos) publish(name, tag string) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.repos[name].release = &fakeRelease{tag: tag, publishedAt: time.Now()}
+}
+
+// report posts one commit status per context on the release's tag, all in
+// state, the way CircleCI reports its jobs.
+func (f *fakeRepos) report(name, state string, contexts ...string) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	r := f.repos[name]
+	r.statuses = nil
+	for _, c := range contexts {
+		r.statuses = append(r.statuses, fakeStatus{context: c, state: state, updatedAt: time.Now()})
+	}
 }
 
 // get is the repository by name, nil when it does not exist.
@@ -76,7 +120,7 @@ func (r *fakeRepo) next(prefix string) string {
 func (r *fakeRepo) toGitHub(asAdmin bool) map[string]any {
 	return map[string]any{
 		kName: r.name, "full_name": org + "/" + r.name, kHTMLURL: "https://github.com/" + org + "/" + r.name,
-		"default_branch": mainBranch, kPrivate: r.private, kDescription: r.description,
+		"default_branch": mainBranch, kPrivate: r.private, kDescription: r.description, kCreatedAtREST: r.createdAt.UTC().Format(time.RFC3339),
 		"owner": map[string]any{kLogin: org}, "permissions": map[string]any{roleAdmin: asAdmin, "push": asAdmin, "pull": true},
 	}
 }
@@ -121,10 +165,10 @@ func (f *fakeRepos) register(mux *http.ServeMux, g *fakeGitHub) {
 			return
 		}
 		repo := &fakeRepo{name: in.GetName(), description: in.GetDescription(), private: in.GetPrivate(), admins: map[string]bool{login: true},
-			empty: !in.GetAutoInit(), files: map[string]string{}, blobs: map[string][]byte{}, trees: map[string][]*github.TreeEntry{}, commits: map[string]string{}}
+			empty: !in.GetAutoInit(), files: map[string]string{}, blobs: map[string][]byte{}, trees: map[string][]*github.TreeEntry{}, commits: map[string]string{}, createdAt: time.Now()}
 		if in.GetAutoInit() {
 			repo.files[readmeFile] = "# " + repo.name + "\n"
-			repo.head = repo.next("c")
+			repo.head, repo.headAt = repo.next("c"), time.Now()
 		}
 		f.repos[repo.name] = repo
 		writeJSON(w, http.StatusCreated, repo.toGitHub(true))
@@ -134,7 +178,37 @@ func (f *fakeRepos) register(mux *http.ServeMux, g *fakeGitHub) {
 			ghMessage(w, http.StatusConflict, "Git Repository is empty.")
 			return
 		}
-		writeJSON(w, http.StatusOK, []map[string]any{{kSHA: repo.head}})
+		writeJSON(w, http.StatusOK, []map[string]any{{kSHA: repo.head, "commit": map[string]any{"committer": map[string]any{"date": repo.headAt.UTC().Format(time.RFC3339)}}}})
+	}))
+	mux.HandleFunc("GET /api/v3/repos/{owner}/{repo}/releases/latest", withRepo(func(w http.ResponseWriter, _ *http.Request, repo *fakeRepo) {
+		if repo.release == nil {
+			ghMessage(w, http.StatusNotFound, "Not Found")
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]any{"tag_name": repo.release.tag, kHTMLURL: "https://github.com/" + org + "/" + repo.name + "/releases/tag/" + repo.release.tag,
+			"published_at": repo.release.publishedAt.UTC().Format(time.RFC3339)})
+	}))
+	mux.HandleFunc("GET /api/v3/repos/{owner}/{repo}/commits/{ref}/status", withRepo(func(w http.ResponseWriter, r *http.Request, repo *fakeRepo) {
+		if repo.release == nil || r.PathValue(kRef) != repo.release.tag {
+			ghMessage(w, http.StatusNotFound, "Not Found")
+			return
+		}
+		// GitHub's combined state: failure when any status is failure or
+		// error, pending when any is pending (or there is none), else success.
+		state, statuses := stateSuccess, []map[string]any{}
+		for _, st := range repo.statuses {
+			statuses = append(statuses, map[string]any{kContext: st.context, kState: st.state, "updated_at": st.updatedAt.UTC().Format(time.RFC3339)})
+			switch {
+			case st.state == stateFailure || st.state == "error":
+				state = stateFailure
+			case st.state == statePending && state != stateFailure:
+				state = statePending
+			}
+		}
+		if len(statuses) == 0 {
+			state = statePending
+		}
+		writeJSON(w, http.StatusOK, map[string]any{kState: state, "total_count": len(statuses), "statuses": statuses, kSHA: repo.head})
 	}))
 	mux.HandleFunc("GET /api/v3/repos/{owner}/{repo}/contents/{path...}", withRepo(func(w http.ResponseWriter, r *http.Request, repo *fakeRepo) {
 		if repo.empty || strings.Trim(r.PathValue("path"), "/") != "" {
@@ -154,7 +228,7 @@ func (f *fakeRepos) register(mux *http.ServeMux, g *fakeGitHub) {
 		data, _ := base64.StdEncoding.DecodeString(in.Content)
 		repo.files[r.PathValue("path")] = string(data)
 		repo.empty = false
-		repo.head = repo.next("c")
+		repo.head, repo.headAt = repo.next("c"), time.Now()
 		writeJSON(w, http.StatusCreated, map[string]any{"content": map[string]any{"path": r.PathValue("path")}, "commit": map[string]any{kSHA: repo.head}})
 	}))
 	mux.HandleFunc("POST /api/v3/repos/{owner}/{repo}/git/blobs", withRepo(func(w http.ResponseWriter, r *http.Request, repo *fakeRepo) {
@@ -202,7 +276,7 @@ func (f *fakeRepos) register(mux *http.ServeMux, g *fakeGitHub) {
 				files[e.GetPath()] = string(repo.blobs[e.GetSHA()])
 			}
 		}
-		repo.files, repo.empty, repo.head = files, false, in.SHA
+		repo.files, repo.empty, repo.head, repo.headAt = files, false, in.SHA, time.Now()
 		writeJSON(w, http.StatusOK, map[string]any{kRef: "refs/" + r.PathValue(kRef), kObject: map[string]any{kSHA: in.SHA}})
 	}))
 }

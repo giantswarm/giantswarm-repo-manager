@@ -37,12 +37,17 @@ the oldest run still open — running, or whose artifacts could not be read this
 newer one is not missed; it never lies more than seven days back (the first poll reads the last seven days). Without an
 inventory App or a store there is no poller (one log line at start); `pollInterval: "0"` turns it off.
 
-**Align now.** `align_repository` dispatches the workflow as the caller; a `workflow_dispatch` returns no run id,
-so the record carries `setup.pendingRun {dispatchedAt, by}` until the repository's next artifact arrives. While any
-`pendingRun` is younger than 15 minutes the poller runs every 30 s. After 15 minutes without an artifact the pending run
-becomes `setup.missingRun` with the finding `reconcile-run-missing` (`source: inventory`), whose fix names the workflow's
-Actions page; the next artifact or dispatch clears it. `get_repository` and `list_repositories` (`setup.pendingRun` in
-the row) carry the state the Repositories page shows.
+**Expected runs.** `align_repository` dispatches the workflow as the caller; a `workflow_dispatch` returns no run id,
+so the record carries `setup.pendingRun {dispatchedAt, by, kind: dispatched}` until the repository's next artifact
+arrives. `create_repository` leaves the same mark on the new repository's record — `{dispatchedAt, by, kind: created,
+pullRequest {number, url}}`, the run that follows the declaration pull request's merge — building the record first when
+the inventory has not seen the repository. While any `pendingRun` is younger than 15 minutes the poller runs every 30 s.
+After 15 minutes without an artifact the pending run becomes `setup.missingRun` with the finding `reconcile-run-missing`
+(`source: inventory`), worded for the run that was expected — an Align now that started no run, or a creation whose pull
+request may not have merged yet — whose fix names the workflow's Actions page; the next artifact, dispatch or creation
+clears it. `get_repository` and `list_repositories` (`setup.pendingRun` in the row) carry the state the Repositories page
+shows; `watch_repository` reads `setup.lastRun` (the run whose `change.pullRequest.number` is the creation's) and
+`setup.missingRun` for its `setUp` phase.
 
 **Artifact contract for 6031a:** `reconcile-<name>.json` is `reconcile.Result` as `devctl repo reconcile` prints it
 (`pkg/reposetup/reconcile`, JSON tags on every field: `repository`, `declared`, `team`, `mode`, `added`, `startedAt`,
@@ -112,8 +117,8 @@ the message to the team's standup channel is rendered from (README, "Asks and me
     "checkError": "",                   // why checks is missing (no read identity, …); a refused entry has checks = the engine's Refused result
     "lastRun": {"result": {"…": "reconcile.Result"}, "runUrl": "…", "timestamp": "…", "runId": 1, "attempt": 1,
                 "change": {"kind": "created", "by": "alice", "pullRequest": {"number": 4711, "url": "…"}}},  // kind: created | added | transferred (+fromTeam) | archived | deprecated | changed | dispatched | nightly
-    "pendingRun": {"dispatchedAt": "…", "by": "alice"},     // an Align now waiting for its run's artifact
-    "missingRun": {"dispatchedAt": "…", "by": "alice", "noticedAt": "…", "runsUrl": "…"}   // one that did not report in 15 min
+    "pendingRun": {"dispatchedAt": "…", "by": "alice", "kind": "created", "pullRequest": {"number": 4711, "url": "…"}},  // a run expected: kind dispatched (an Align now) or created (the pull request's run)
+    "missingRun": {"dispatchedAt": "…", "by": "alice", "kind": "dispatched", "noticedAt": "…", "runsUrl": "…"}   // one that did not report in 15 min
   },
   "findings": [
     {"kind": "default-icon", "message": "…", "fix": "…", "source": "engine"}

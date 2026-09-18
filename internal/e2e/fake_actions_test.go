@@ -176,7 +176,7 @@ func (a *fakeActions) register(mux *http.ServeMux, g *fakeGitHub) {
 				continue
 			}
 			out = append(out, map[string]any{kID: run.ID, "run_attempt": run.Attempt, "status": run.Status, "event": run.Event,
-				"created_at": run.CreatedAt.Format(time.RFC3339), "updated_at": run.CreatedAt.Add(time.Minute).Format(time.RFC3339), kHTMLURL: runURL(run.ID)})
+				kCreatedAtREST: run.CreatedAt.Format(time.RFC3339), "updated_at": run.CreatedAt.Add(time.Minute).Format(time.RFC3339), kHTMLURL: runURL(run.ID)})
 		}
 		writeJSON(w, http.StatusOK, map[string]any{kTotalCount: len(out), "workflow_runs": out})
 	})

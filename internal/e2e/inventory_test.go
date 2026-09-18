@@ -53,7 +53,7 @@ func TestSweepFillsOneRecordPerRepository(t *testing.T) {
 	// the repository (the other systems' contexts are ignored, the worst
 	// state counts), setup workflows are unknown until a reconciler run tells.
 	if ci := present.CircleCI; ci == nil || !ci.Followed || ci.Source != inventory.CircleCISourceStatuses || ci.SetupWorkflows != nil || ci.Error != "" ||
-		ci.Head == nil || ci.Head.State != "pending" || strings.Join(ci.Head.Contexts, ",") != circleBuild+","+circlePush || ci.Head.At.IsZero() ||
+		ci.Head == nil || ci.Head.State != statePending || strings.Join(ci.Head.Contexts, ",") != circleBuild+","+circlePush || ci.Head.At.IsZero() ||
 		strings.Join(ci.Unknown, ",") != inventory.CircleCIFactSetupWorkflows {
 		t.Errorf("present circleci: %+v head=%+v", ci, ci.Head)
 	}

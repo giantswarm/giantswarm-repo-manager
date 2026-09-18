@@ -22,7 +22,8 @@ exposes it, with the repository lifecycle, as MCP tools with the prefix `giantsw
 | `list_repositories`, `get_repository` | the inventory: one row per repository (team, lifecycle, visibility, archived on GitHub, fork, Renovate state, finding kinds, set-up state, record age), sorted by name, with the last sweep's summary, scoped per caller — `mine` (the caller's GitHub teams, read as them), `team`, `unassigned`, `all` — and filtered as on the Repositories page: `search`, `team` in every scope (under `mine` one of the caller's teams — another selects no rows and the answer's `note` says so; `none` under `all` is the undeclared), `renovate` (`configured`, `missing`, `active`, `inactive` against `inventory.renovate.activeDays`), `visibility`, `fork`, `lifecycle` (`active`, `deprecated`, `archived` — a repository archived on GitHub counts as archived whatever its declaration says), the boolean `archived`, `inactiveDays`, `finding`; the full record of one repository. Shape in [`docs/inventory-record.md`](docs/inventory-record.md) |
 | `refresh_repository` | rebuild one record now — writes the inventory cache, nothing on GitHub |
 | `validate_repository` | the dry run of one or more new declarations: the engine's rendered entries with defaults, the implied template and options, the name check through the App, the creation rules' refusals as data, and the guard notices a person sees before any pull request exists (`team-review` for an author outside the owning team and team-planeteers, `batch-review` above three entries) |
-| `create_repository` | the creation-only pull request adding the entries to `repositories/<team>.yaml` as the caller — machine-approved by giantswarm/github's Validate workflow when no notice stands |
+| `create_repository` | the creation-only pull request adding the entries to `repositories/<team>.yaml` as the caller — machine-approved by giantswarm/github's Validate workflow when no notice stands; the record expects the reconciler run of that pull request (`setup.pendingRun`, as after an Align now), so the inventory reads its artifact within the pending interval |
+| `watch_repository` | follows a new repository to readiness after `create_repository`, blocking up to `timeout` seconds (default 120, at most 150): the phases `created`, `scaffolded`, `declared`, `merged`, `setUp` (the reconciler run of the pull request, its failed steps and findings) and `released` (the first release with green CircleCI statuses; while CircleCI is silent the run's release step decides), each with its timestamp and duration; `ready`, `pending` (what is still waited for) and `failure` (the phase and why) — the data an agent narrates instead of reporting the link minutes early |
 | `update_repository` | the entry replaced by the one passed (held to the schema, not the creation rules), one pull request as the caller |
 | `transfer_repository` | the entry moved between two team files in one pull request naming the giving and the receiving team; the ask to the receiving team's channel, a notice to the giving team's |
 | `set_lifecycle` | `deprecated` or `archived` set on the entry; the ask to the owning team's channel |
@@ -135,7 +136,11 @@ the budget runs low. The record and its findings are described in
   teams, read as them) and applies the page's filters; `align_repository` dispatches the workflow as the person, the
   run's artifact lands as `setup.lastRun` with its `change` block and a converged Align now posts nothing, while the
   run of a merged pull request that created the repository posts the one sentence about it to the team's standup
-  channel, linking the pull request, and its finding as a second sentence linking the run.
+  channel, linking the pull request, and its finding as a second sentence linking the run; `watch_repository` follows
+  a creation — the record expects the run of its pull request and the poller runs at the pending interval — to
+  `merged` pending before the merge, to `released` pending while CircleCI is silent, to ready once the statuses turn
+  green during the wait, to a failed step, to a run that never reported (the finding worded for a creation) and to a
+  red release, by the reconciler's finding and by CircleCI's status.
 - `go test ./...` — the write framework refuses `mode: apply` for every registered write tool and
   advertises `commit` alone; the dry run is the engine's result; and, in `internal/e2e`, the whole
   identity chain against a fake GitHub: the person's user token as the bearer is verified with `GET /user`

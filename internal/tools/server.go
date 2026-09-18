@@ -75,6 +75,9 @@ type Deps struct {
 	// repository, the one align_repository dispatches and the inventory
 	// reads the runs of; empty is teamfiles.ReconcilerWorkflow.
 	ReconcilerWorkflow string
+	// WatchInterval is how often watch_repository reads GitHub as the
+	// caller while it follows a new repository; 0 is DefaultWatchInterval.
+	WatchInterval time.Duration
 	// Review is klaus-gateway's team-review endpoint; nil leaves the asks
 	// undelivered and reported as such.
 	Review *review.Client
@@ -114,6 +117,7 @@ func (ts *Tools) MCPServer() *mcpserver.MCPServer {
 	), t.getInfo)
 	t.registerInventory(s)
 	t.registerValidate(s)
+	t.registerWatch(s)
 	for _, wt := range []WriteTool{t.createRepository(), t.updateRepository(), t.transferRepository(), t.setLifecycle(), t.approveChange(), t.alignRepository()} {
 		registerWrite(s, wt)
 	}

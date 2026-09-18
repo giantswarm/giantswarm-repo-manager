@@ -82,6 +82,8 @@ func TestFillClientlessSteps(t *testing.T) {
 			want{reconcile.VerdictReported, []string{"truncated"}, nil, []reconcile.FindingKind{reconcile.FindingUnchecked}, true}, false},
 		{"circleci: the reconciler's run converged", engine(skipCircle), record(both, nil, run(reconcile.ModeCheck, reconcile.StepResult{Step: reconcile.StepCircleCI, Verdict: reconcile.VerdictOK, Summary: convergedCircleCI})), reconcile.StepCircleCI,
 			want{reconcile.VerdictOK, []string{buildsMain, convergedCircleCI, "reconciler run of 2026-09-17T22:17:00Z"}, nil, nil, true}, false},
+		{"circleci: the run converged, the head not built yet — no 'does not build' beside an ok", engine(skipCircle), record(none, nil, run(reconcile.ModeCheck, reconcile.StepResult{Step: reconcile.StepCircleCI, Verdict: reconcile.VerdictOK, Summary: convergedCircleCI})), reconcile.StepCircleCI,
+			want{reconcile.VerdictOK, []string{"no CircleCI status on main's head yet", convergedCircleCI}, nil, nil, true}, false},
 		{"circleci: the reconciler's run repaired — the state holds", engine(skipCircle), record(both, nil, run(reconcile.ModeRepair, reconcile.StepResult{Step: reconcile.StepCircleCI, Verdict: reconcile.VerdictRepaired, Changes: []string{enableSW}})), reconcile.StepCircleCI,
 			want{reconcile.VerdictOK, []string{convergedCircleCI}, nil, nil, true}, false},
 		{"circleci: the reconciler's check found drift — its plan", engine(skipCircle), record(statuses, nil, run(reconcile.ModeCheck, reconcile.StepResult{Step: reconcile.StepCircleCI, Verdict: reconcile.VerdictDrift, Changes: []string{enableSW, createKey}})), reconcile.StepCircleCI,

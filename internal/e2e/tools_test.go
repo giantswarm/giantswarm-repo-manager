@@ -568,6 +568,45 @@ func TestReconcileDispatchesAsThePersonAndTheCompletionMessageFollows(t *testing
 	}
 }
 
+// TestCreationNoticeForARepositoryTheInventoryHasNotSwept: the run behind
+// the pull request declaring a repository reaches the poller minutes after
+// the merge, before any sweep read the entry — the inventory's read of the
+// team files predates it. The poller reads the team files again for such a
+// run: the record carries the declaration and the team hears the one
+// sentence about the creation.
+func TestCreationNoticeForARepositoryTheInventoryHasNotSwept(t *testing.T) {
+	st := newStack(t)
+	ctx := context.Background()
+	if _, err := st.col.Sweep(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if rec := st.record(t, repoStray); rec.Declaration != nil {
+		t.Fatalf("%s should be undeclared after the sweep: %+v", repoStray, rec.Declaration)
+	}
+	// alice's pull request declaring the repository merges after the sweep
+	// read the team files; the reconciler run it triggered reports.
+	st.ghs.org.declare("- name: " + repoStray + "\n  componentType: service\n  gen:\n    language: python\n    flavours: [app]\n")
+	prURL := "https://github.com/" + org + "/github/pull/4712"
+	// The artifact carries the finish at second precision: the run finishes
+	// the second after the sweep read the team files.
+	finished := time.Now().UTC().Truncate(time.Second).Add(time.Second)
+	run := st.ghs.actions.addRun(t, runStatusCompleted, finished, artifactReport{name: repoStray, finishedAt: finished,
+		result: reconcile.Result{Repository: org + "/" + repoStray, Declared: org + "/" + repoStray, Team: team, Converged: true},
+		change: &inventory.Change{Kind: inventory.ChangeCreated, By: alice, PullRequest: &inventory.ChangePullRequest{Number: 4712, URL: prURL}}})
+	if p := st.poll(t); p.Artifacts != 1 || len(p.Errors) != 0 {
+		t.Fatalf("poll: %+v", p)
+	}
+	rec := st.record(t, repoStray)
+	if rec.Declaration == nil || rec.Declaration.Team != team || rec.Setup.LastRun == nil || rec.Setup.LastRun.RunURL != runURL(run.ID) {
+		t.Fatalf("record after the run: declaration=%+v setup=%+v", rec.Declaration, rec.Setup)
+	}
+	_, notices := st.gw.posted()
+	if len(notices) != 1 || notices[0][kChannel] != bumblebeeStandup || notices[0]["team"] != team ||
+		notices[0]["text"] != alice+" created a new repo: "+repoStray+" (app, python)" || notices[0]["link"] != prURL {
+		t.Errorf("notices after the creating run: %v", notices)
+	}
+}
+
 func hasNotice(ns []reposetup.Notice, kind string) bool {
 	for _, n := range ns {
 		if string(n.Kind) == kind {

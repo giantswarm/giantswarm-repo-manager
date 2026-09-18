@@ -279,7 +279,7 @@ func (c *Collector) Refresh(ctx context.Context, repository string, run *invento
 	if name == "" || strings.Contains(name, "/") {
 		return nil, fmt.Errorf("refresh: %q is not a repository of %s", repository, c.opts.Org)
 	}
-	src, err := c.cachedSources(ctx)
+	src, err := c.sourcesFor(ctx, run)
 	if err != nil {
 		return nil, err
 	}
@@ -314,19 +314,33 @@ func (c *Collector) Refresh(ctx context.Context, repository string, run *invento
 // sourcesTTL is how long a refresh reuses the last sources read.
 const sourcesTTL = 5 * time.Minute
 
-func (c *Collector) cachedSources(ctx context.Context) (*sources, error) {
+// sourcesFor is the sources a refresh builds the record from: the last read
+// while it is younger than sourcesTTL — unless it predates the team-file
+// change the run followed. A run behind a person's merged change reaches the
+// poller minutes after the merge; a read from before the run finished may be
+// from before the merge and then has no entry for a repository created or
+// added, and the giving team for one transferred. Such a run reads the team
+// files again, once: the read serves the run's other artifacts.
+func (c *Collector) sourcesFor(ctx context.Context, run *inventory.LastRun) (*sources, error) {
 	c.srcMu.Lock()
-	if c.srcCache != nil && c.now().Sub(c.srcAt) < sourcesTTL {
-		defer c.srcMu.Unlock()
-		return c.srcCache, nil
-	}
+	src, at := c.srcCache, c.srcAt
 	c.srcMu.Unlock()
+	if src != nil && c.now().Sub(at) < sourcesTTL && !predates(at, run) {
+		return src, nil
+	}
 	src, err := c.fetchSources(ctx)
 	if err != nil {
 		return nil, err
 	}
 	c.setCachedSources(src)
 	return src, nil
+}
+
+// predates says whether sources read at `at` may miss the team-file change
+// a run followed: the run is behind a person's merged change and the read is
+// from before the run finished.
+func predates(at time.Time, run *inventory.LastRun) bool {
+	return run != nil && run.Change.PersonMade() && at.Before(run.Timestamp)
 }
 
 func (c *Collector) setCachedSources(src *sources) {

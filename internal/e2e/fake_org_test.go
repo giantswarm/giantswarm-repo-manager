@@ -95,6 +95,9 @@ type fakeOrg struct {
 	remaining int
 	queries   atomic.Int32
 	now       time.Time
+	// teamFile is the team file at main; declare appends an entry, as a
+	// merged pull request does.
+	teamFile string
 	// repos are the repositories created through the REST surface: the
 	// node of one of them is a plain repository as GraphQL would answer.
 	repos *fakeRepos
@@ -103,6 +106,14 @@ type fakeOrg struct {
 var (
 	historyAlias = regexp.MustCompile(`r(\d+): repository\(owner: \$org, name: "([^"]+)"\)`)
 )
+
+// declare appends an entry to the team file at main: the pull request
+// declaring a repository merged.
+func (o *fakeOrg) declare(entry string) {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	o.teamFile += entry
+}
 
 func (o *fakeOrg) handle(w http.ResponseWriter, r *http.Request) {
 	o.queries.Add(1)
@@ -115,6 +126,7 @@ func (o *fakeOrg) handle(w http.ResponseWriter, r *http.Request) {
 	o.mu.Lock()
 	rl := map[string]any{"cost": fakeGraphQLCost, "remaining": o.remaining, "limit": 5000, "resetAt": o.now.Add(time.Hour).Format(time.RFC3339)}
 	o.remaining -= fakeGraphQLCost
+	teamFileText := o.teamFile
 	o.mu.Unlock()
 
 	data := map[string]any{"rateLimit": rl}
@@ -123,7 +135,7 @@ func (o *fakeOrg) handle(w http.ResponseWriter, r *http.Request) {
 	case contains(req.Query, "teamFiles:"):
 		data["organization"] = map[string]any{"teams": map[string]any{kPageInfo: map[string]any{kHasNextPage: false}, kNodes: []map[string]any{{kSlug: team}, {kSlug: teamPlaneteers}}}}
 		data[kGitHub] = map[string]any{
-			"teamFiles": map[string]any{"entries": []map[string]any{{kName: "team-bumblebee.yaml", kType: "blob", kObject: map[string]any{kText: teamFile}}}},
+			"teamFiles": map[string]any{"entries": []map[string]any{{kName: "team-bumblebee.yaml", kType: "blob", kObject: map[string]any{kText: teamFileText}}}},
 			"catalog":   map[string]any{kText: catalogFile},
 		}
 		data["mcb"] = map[string]any{"mapping": map[string]any{kText: mappingFile}}

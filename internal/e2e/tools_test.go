@@ -303,6 +303,38 @@ func TestTransferNamesBothTeams(t *testing.T) {
 	}
 }
 
+// TestDebugChannelReceivesEveryAskAndNotice: with reviews.debugChannel set,
+// the transfer's ask and notice both land in the debug channel, each closing
+// with the channel the policy file chose — the name reviews.channels maps,
+// or the ID as the file carries it; the pull request and the tools' answers
+// read as without it; get_info shows the channel.
+func TestDebugChannelReceivesEveryAskAndNotice(t *testing.T) {
+	st := newStackWith(t, debugChannelName)
+	c := st.as(t, aliceToken)
+	if info := getInfo(t, c); !info.Reviews.Configured || info.Reviews.DebugChannel != debugChannelName {
+		t.Errorf("get_info reviews: %+v", info.Reviews)
+	}
+	var out tools.Committed
+	st.callJSON(t, c, tools.ToolTransferRepository, map[string]any{argMode: modeCommit, kRepository: repoPresent, argToTeam: teamPlaneteers}, &out)
+	asks, notices := st.gw.posted()
+	if len(asks) != 1 || len(notices) != 1 {
+		t.Fatalf("asks=%v notices=%v", asks, notices)
+	}
+	ask, notice := asks[0], notices[0]
+	askText, noticeText := ask["text"].(string), notice["text"].(string)
+	pr := st.ghs.files.pullRequests()[0]
+	if ask[kChannel] != debugChannelID || ask["team"] != teamPlaneteers || !strings.HasPrefix(askText, alice+" asks to transfer") || !strings.HasSuffix(askText, " (for #"+teamPlaneteers+")") ||
+		!strings.HasSuffix(ask["link"].(string), fmt.Sprintf("/pull/%d", pr.Number)) {
+		t.Errorf("ask: %v", ask)
+	}
+	if notice[kChannel] != debugChannelID || notice["team"] != team || !strings.HasSuffix(noticeText, " (for "+bumblebeeStandup+")") {
+		t.Errorf("notice: %v", notice)
+	}
+	if out.Ask == nil || !out.Ask.Delivered || out.Ask.Channel != planeteersChannel || out.Notice == nil || !out.Notice.Delivered || out.Notice.Channel != bumblebeeStandup {
+		t.Errorf("answer: ask=%+v notice=%+v", out.Ask, out.Notice)
+	}
+}
+
 // TestSetLifecycleArchivedOpensThePullRequestAndPostsTheAsk, then
 // approve_change refuses the outsider and the asker, and lands another
 // member's review.

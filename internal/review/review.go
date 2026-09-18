@@ -36,6 +36,11 @@ type Config struct {
 	// standupChannel for notices — to their Slack IDs: the gateway refuses
 	// names, and the policy files carry names today.
 	Channels map[string]string
+	// DebugChannel, when set, receives every ask and notice instead of the
+	// channel the policy file names, the text naming that channel — a test
+	// round without disturbing the teams. A name Channels resolves or an ID;
+	// empty delivers to the policy file's channel.
+	DebugChannel string
 	// HTTPClient defaults to a 15 s client.
 	HTTPClient *http.Client
 }
@@ -44,18 +49,46 @@ type Config struct {
 type Client struct {
 	cfg  Config
 	http *http.Client
+	// debug is the debug channel's ID, empty without one.
+	debug string
+	// names are Channels reversed: the policy file's name by channel ID,
+	// for the text of a redirected message.
+	names map[string]string
 }
 
-// New returns a client, or nil when BaseURL is empty (the endpoint is off).
-func New(cfg Config) *Client {
+// New returns a client, or nil when BaseURL is empty (the endpoint is off);
+// a debug channel neither an ID nor a name Channels resolves is an error.
+func New(cfg Config) (*Client, error) {
 	if cfg.BaseURL == "" {
-		return nil
+		return nil, nil
 	}
 	hc := cfg.HTTPClient
 	if hc == nil {
 		hc = &http.Client{Timeout: 15 * time.Second}
 	}
-	return &Client{cfg: cfg, http: hc}
+	c := &Client{cfg: cfg, http: hc, names: make(map[string]string, len(cfg.Channels))}
+	for name, id := range cfg.Channels {
+		// Two names for one ID: the first in order, so the text is stable.
+		if prev, ok := c.names[id]; !ok || name < prev {
+			c.names[id] = name
+		}
+	}
+	if cfg.DebugChannel != "" {
+		id, err := c.ChannelID(cfg.DebugChannel)
+		if err != nil {
+			return nil, fmt.Errorf("debug channel: %w", err)
+		}
+		c.debug = id
+	}
+	return c, nil
+}
+
+// DebugChannel is the debug channel as configured, empty without one.
+func (c *Client) DebugChannel() string {
+	if c == nil {
+		return ""
+	}
+	return c.cfg.DebugChannel
 }
 
 // Approve is the tool the Approve button calls as the clicking member.
@@ -106,12 +139,34 @@ func (c *Client) ChannelID(name string) (string, error) {
 
 // Review posts an ask.
 func (c *Client) Review(ctx context.Context, a Ask) (*Posted, error) {
+	a.Channel, a.Text = c.route(a.Channel, a.Text)
 	return c.post(ctx, "/reviews", a)
 }
 
 // Notify posts a notice.
 func (c *Client) Notify(ctx context.Context, n Notice) (*Posted, error) {
+	n.Channel, n.Text = c.route(n.Channel, n.Text)
 	return c.post(ctx, "/notices", n)
+}
+
+// route is where a message goes and what it says: the channel and text as
+// given, or — with a debug channel — that channel and the text closing with
+// the channel the policy file chose, "(for #team-x)", so a reader tells the
+// redirect from a misconfiguration.
+func (c *Client) route(channel, text string) (string, string) {
+	if c == nil || c.debug == "" {
+		return channel, text
+	}
+	return c.debug, text + " (for " + c.channelName(channel) + ")"
+}
+
+// channelName is a channel as the policy file names it: "#<name>" when
+// Channels maps a name to the ID, else the ID.
+func (c *Client) channelName(id string) string {
+	if name, ok := c.names[id]; ok {
+		return "#" + name
+	}
+	return id
 }
 
 func (c *Client) post(ctx context.Context, path string, body any) (*Posted, error) {

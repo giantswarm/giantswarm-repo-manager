@@ -155,6 +155,11 @@ reviews:
   # needs an entry (`team-x: C…`, `standup-x: C…`) unless the file carries
   # the ID itself.
   channels: {}  # @schema additionalProperties: true
+  # -- A channel that receives every ask and notice instead of the channel the
+  # policy file names, the text closing with that channel (`… (for #team-x)`):
+  # a test round of the flows without disturbing the teams. A name `channels`
+  # resolves or a Slack channel ID; empty delivers to the policy file's channel.
+  debugChannel: ""
 
 mcp:
   # -- MCP streamable-HTTP endpoint path.

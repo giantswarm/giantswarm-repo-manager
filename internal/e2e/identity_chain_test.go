@@ -97,6 +97,13 @@ func (st *stack) poll(t *testing.T) *collect.ReconcilerPoll {
 
 func newStack(t *testing.T) *stack {
 	t.Helper()
+	return newStackWith(t, "")
+}
+
+// newStackWith is the stack with the review client's debug channel set (as
+// a name reviews.channels resolves), or without one for "".
+func newStackWith(t *testing.T, debugChannel string) *stack {
+	t.Helper()
 	log := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError}))
 	ghs := newFakeGitHub(t, map[string]string{aliceToken: alice, carolToken: carol, daveToken: dave})
 	ghs.teams[alice] = []string{team}
@@ -139,9 +146,14 @@ func newStack(t *testing.T) *stack {
 	}
 	st := &stack{ghs: ghs, gw: gw, app: app, store: store, checker: &fakeChecker{}, log: log}
 	st.col = st.newCollector(0)
+	reviews, err := review.New(review.Config{BaseURL: gws.URL, TokenFile: tokenFile, DebugChannel: debugChannel,
+		Channels: map[string]string{teamPlaneteers: planeteersChannel, "standup-planeteers": planeteersStandup, debugChannelName: debugChannelID}})
+	if err != nil {
+		t.Fatal(err)
+	}
 	ts := tools.New(tools.Deps{Version: testVersion, GitHubAPIURL: apiURL, AuthorizationServer: server.DefaultAuthorizationServer, App: app, Inventory: store, Collector: st.col, Log: log,
 		TeamFilesRepository: org + "/github", TeamFilesRef: mainBranch, SweepTeams: []string{team, teamPlaneteers},
-		Review:   review.New(review.Config{BaseURL: gws.URL, TokenFile: tokenFile, Channels: map[string]string{teamPlaneteers: planeteersChannel, "standup-planeteers": planeteersStandup}}),
+		Review:   reviews,
 		Scaffold: fakeScaffold{}})
 	st.col.OnReconciled(ts.Reconciled)
 	mcpSrv := ts.MCPServer()

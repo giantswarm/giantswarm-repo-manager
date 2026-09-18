@@ -97,6 +97,10 @@ spec:
               value: /var/run/secrets/klaus-gateway/token
             - name: REVIEWS_CHANNELS
               value: {{ include "giantswarm-repo-manager.reviewChannels" . | quote }}
+            {{- with .Values.reviews.debugChannel }}
+            - name: REVIEWS_DEBUG_CHANNEL
+              value: {{ . | quote }}
+            {{- end }}
             {{- end }}
             {{- with .Values.extraEnv }}
             {{- toYaml . | nindent 12 }}

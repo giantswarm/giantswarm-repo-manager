@@ -31,6 +31,9 @@ type Record struct {
 	// CircleCI is the project's state on CircleCI as GitHub and the
 	// reconciler tell it; nil when the repository is gone.
 	CircleCI *CircleCI `json:"circleci,omitempty"`
+	// CI is what the repository's CircleCI configuration says; nil when the
+	// default branch carries none.
+	CI       *CI       `json:"ci,omitempty"`
 	Renovate Renovate  `json:"renovate"`
 	Catalog  Catalog   `json:"catalog"`
 	Mapping  Mapping   `json:"mapping"`
@@ -122,6 +125,12 @@ type PullRequest struct {
 type Release struct {
 	Tag         string    `json:"tag"`
 	PublishedAt time.Time `json:"publishedAt"`
+	// Build is the tag commit's `ci/circleci:` statuses — whether CircleCI
+	// built the release; nil when the commit carries none.
+	Build *HeadStatus `json:"build,omitempty"`
+	// BuildTruncated says the commit's status contexts were more than were
+	// read and none of the read ones was CircleCI's.
+	BuildTruncated bool `json:"buildTruncated,omitempty"`
 }
 
 // Presence says which set-up files the default branch carries.
@@ -153,9 +162,7 @@ type CircleCI struct {
 	// Head is the default branch head's CircleCI statuses; nil when it has
 	// none.
 	Head *HeadStatus `json:"head,omitempty"`
-	// Source names the sources that answered, joined by `+`: statuses (the
-	// head's `ci/circleci:` statuses), artifact (the reconciler's run) and
-	// engine (the engine's own circleci step, when it has a CircleCI client).
+	// Source is what answered: statuses, artifact, or statuses+artifact.
 	Source string `json:"source"`
 	// Unknown names the facts no source yields: followed (the head's status
 	// contexts were truncated and none was CircleCI's), setupWorkflows.
@@ -169,7 +176,6 @@ const (
 	CircleCISourceStatuses = "statuses"
 	CircleCISourceArtifact = "artifact"
 	CircleCISourceBoth     = CircleCISourceStatuses + "+" + CircleCISourceArtifact
-	CircleCISourceEngine   = "engine"
 
 	CircleCIFactFollowed       = "followed"
 	CircleCIFactSetupWorkflows = "setupWorkflows"
@@ -534,3 +540,65 @@ func (r *Record) RunMissing(now time.Time, runsURL string) {
 	r.Setup.PendingRun = nil
 	r.Findings = r.findings()
 }
+
+// CI is what the repository's CircleCI configuration on the default branch
+// says — .circleci/config.yml, workflows.yml and custom.yml — read for the
+// questions a person asks about a repository's CI before aligning it: which
+// architect orb, arm64 images or not, how the images reach China, whether
+// images and charts are signed. Read with the repository, no CircleCI token.
+type CI struct {
+	// Files are the .circleci files found: config.yml, workflows.yml,
+	// custom.yml, in that order.
+	Files []string `json:"files"`
+	// Generated says config.yml carries devctl's generator header.
+	Generated bool `json:"generated"`
+	// Orb is the giantswarm/architect orb version the pipeline pins; ""
+	// without the orb.
+	Orb string `json:"orb,omitempty"`
+	// ImagePush says the pipeline pushes an image (an architect
+	// push-to-registries job), ChartPush a chart (push-to-app-catalog).
+	ImagePush bool `json:"imagePush"`
+	ChartPush bool `json:"chartPush"`
+	// Platforms are the image platforms the push jobs build, resolved the
+	// way the orb does; nil when no image is pushed or the configuration
+	// does not say.
+	Platforms []string `json:"platforms,omitempty"`
+	// ARM64 says the images include linux/arm64; nil when the configuration
+	// does not say.
+	ARM64 *bool `json:"arm64,omitempty"`
+	// ChinaPush is how the images reach the China registry: split, inline,
+	// custom, none.
+	ChinaPush string `json:"chinaPush"`
+	// Signing says whether the pushed images and charts are signed with
+	// cosign: signed, unsigned, unknown, none; SigningReason says why they
+	// are not signed.
+	Signing       string `json:"signing"`
+	SigningReason string `json:"signingReason,omitempty"`
+	// Error names a file that did not parse.
+	Error string `json:"error,omitempty"`
+}
+
+// The ways images reach the China registry.
+const (
+	// ChinaPushSplit: the push job leaves the China registry to the
+	// in-China sync-china-registry job (`split-china-push`).
+	ChinaPushSplit = "split"
+	// ChinaPushInline: the push job pushes to every registry itself.
+	ChinaPushInline = "inline"
+	// ChinaPushCustom: the push job overrides the registry list
+	// (`registries-data`); which hosts, the configuration does not say.
+	ChinaPushCustom = "custom"
+	// ChinaPushNone: no image push.
+	ChinaPushNone = "none"
+)
+
+// Whether the pushed images and charts are signed with cosign.
+const (
+	SigningSigned   = "signed"
+	SigningUnsigned = "unsigned"
+	// SigningUnknown: the configuration does not say (no architect orb, a
+	// development orb version).
+	SigningUnknown = "unknown"
+	// SigningNone: nothing is pushed.
+	SigningNone = "none"
+)

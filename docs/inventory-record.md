@@ -88,18 +88,31 @@ the message to the team's standup channel is rendered from (README, "Asks and me
     "openPullRequests": {"total": 2, "people": 1, "bots": 1, "renovate": 1, "oldestBotAt": "…",
                          "onboarding": [{"number": 1, "title": "Configure Renovate", "author": "renovate", "createdAt": "…"}]},
     "openIssues": 1,
-    "latestRelease": {"tag": "v1.0.0", "publishedAt": "…"},
+    "latestRelease": {"tag": "v1.0.0", "publishedAt": "…",
+                      "build": {"state": "success", "contexts": ["ci/circleci: push-to-registries-release"], "at": "…"}},  // the tag commit's ci/circleci: statuses: whether CircleCI built the release; buildTruncated when more contexts than read and none CircleCI's
     "codeownersTeams": ["team-bumblebee"],
     "unknownCodeownersTeams": [],       // CODEOWNERS teams the org does not have
     "has": {"renovate": true, "dependabot": false, "circleci": true, "workflows": true, "dockerfile": true, "helm": true, "readme": true, "codeowners": true}
   },
-  "circleci": {                         // absent when the repository is gone
+  "circleci": {                         // absent when the repository is gone; no CircleCI token is involved
     "followed": true,                   // ci/circleci: statuses on the head, or the reconciler's circleci step found the project followed
-    "setupWorkflows": true,             // from the reconciler's run artifact or the engine's own check (CircleCI token); absent and named in unknown until one tells
+    "setupWorkflows": true,             // from the reconciler's run artifact only; absent and named in unknown until a run tells
     "head": {"state": "success", "contexts": ["ci/circleci: go-build", "ci/circleci: push-to-registries"], "at": "…"},  // the default branch head's ci/circleci: statuses (worst state)
-    "source": "statuses+artifact",      // the sources that answered, joined by +: statuses, artifact, engine (the engine's own circleci step, with a CircleCI token)
+    "source": "statuses+artifact",      // statuses | artifact | statuses+artifact: the sources that answered
     "unknown": [],                      // the facts no source yields: setupWorkflows, followed (status contexts truncated, none CircleCI's)
     "error": ""                         // the reconciler's circleci step failing, as its run reported it
+  },
+  "ci": {                               // what .circleci/config.yml, workflows.yml and custom.yml on the default branch say; absent without them
+    "files": ["config.yml", "workflows.yml", "custom.yml"],
+    "generated": true,                  // config.yml carries devctl's generator header
+    "orb": "10.5.0",                    // the giantswarm/architect orb version pinned
+    "imagePush": true, "chartPush": true,
+    "platforms": ["linux/amd64", "linux/arm64"],   // the image platforms the push jobs build, resolved the orb's way; absent when the configuration does not say
+    "arm64": true,                      // linux/arm64 among them; absent when unknown
+    "chinaPush": "split",               // split (sync-china-registry) | inline | custom (registries-data) | none
+    "signing": "signed",                // signed | unsigned | unknown | none (nothing pushed)
+    "signingReason": "",                // why unsigned: a private repository, sign: false, an orb before 8.2.0
+    "error": ""                         // a file that did not parse
   },
   "renovate": {
     "configured": true, "path": "renovate.json5",

@@ -17,32 +17,26 @@ import (
 const noCircleCIClient = "no CircleCI client"
 
 // fillClientlessSteps writes the two steps the engine skips for want of a
-// CircleCI client from what the record knows instead. This service holds no
-// CircleCI token, so the engine's circleci and release steps are always
-// "skipped: no CircleCI client" — which reads as CircleCI missing, while
-// the record has the facts from two sources: the `ci/circleci:` statuses on
-// the default branch head (CircleCI builds the repository) and the
-// reconciler's last run over the repository (followed, setup workflows,
-// checkout key, the tag build — checked with its CircleCI token). The steps
-// are written the way the reconciler's run would report them, each summary
-// naming the source; what no source yields is the finding `unchecked` with
-// Align now as the fix, never a guess. A step the engine skipped for another
+// CircleCI client from what the record knows. The steps answer what a
+// person reading them asks — does CircleCI build this repository, did the
+// latest release build — and both answers are on GitHub: the `ci/circleci:`
+// statuses on the default branch head and on the release's tag commit,
+// read with the repository. The reconciler's stored run, made with its own
+// CircleCI token, decides when it ran: it also saw the settings only a token
+// reaches (setup workflows, checkout key). What no source yields is the
+// finding `unchecked`, never a guess; a step the engine skipped for another
 // reason (an archived repository, an empty one) stays as it is. Converged
 // follows the rewritten steps.
 func fillClientlessSteps(res *reconcile.Result, rec *inventory.Record) {
 	if res == nil || rec == nil || rec.Reality == nil {
 		return
 	}
-	slug := rec.Repository
-	var last *inventory.LastRun
-	if rec.Setup.LastRun != nil {
-		last = rec.Setup.LastRun
-	}
+	last := rec.Setup.LastRun
 	if sr := res.Step(reconcile.StepCircleCI); sr != nil && clientless(sr) {
-		*sr = circleCIStep(slug, rec.Reality.DefaultBranch, rec.CircleCI, last)
+		*sr = circleCIStep(rec.Repository, rec.Reality.DefaultBranch, rec.CircleCI, last)
 	}
 	if sr := res.Step(reconcile.StepRelease); sr != nil && clientless(sr) {
-		*sr = releaseStep(slug, releaseTag(sr.Summary), last)
+		*sr = releaseStep(rec.Repository, releaseTag(sr.Summary), rec.Reality.LatestRelease, last)
 	}
 	res.Converged = true
 	for _, sr := range res.Steps {
@@ -68,8 +62,8 @@ func releaseTag(summary string) string {
 	return tag
 }
 
-// runStep is the reconciler's last run's result for step, with the run it
-// came from; nil when no run reports the step or that run skipped it too.
+// runStep is the reconciler's last run's result for step; nil when no run
+// reports the step or that run skipped it too.
 func runStep(last *inventory.LastRun, step reconcile.Step) *reconcile.StepResult {
 	if last == nil {
 		return nil
@@ -81,16 +75,17 @@ func runStep(last *inventory.LastRun, step reconcile.Step) *reconcile.StepResult
 	return sr
 }
 
-// alignFix is the fix of every unchecked finding here: a CircleCI token for
-// the engine's checks, or a reconciler run in the meantime.
-const alignFix = "configure the inventory's CircleCI token (chart value circleci.existingSecret): the engine then checks it on every sweep and refresh; until then a reconciler run reports it — Align now starts one at once, and for a team that has not opted in it checks and changes nothing"
+// alignFix is the fix of an unchecked finding here: the reconciler's run
+// reads CircleCI directly.
+const alignFix = "run Align now: the reconciler's check reads CircleCI directly, and for a team that has not opted in it changes nothing"
 
 // convergedCircleCI is the engine's summary of a converged circleci step.
 const convergedCircleCI = "followed, setup workflows on, checkout key present"
 
 // circleCIStep is the circleci step from the record's CircleCI state: the
-// reconciler's run decides followed, setup workflows and checkout key when
-// it ran; the head's statuses say whether CircleCI builds the branch.
+// head's statuses say whether CircleCI builds the branch — the fact the
+// step is for — and the reconciler's run adds the settings it read when it
+// ran.
 func circleCIStep(slug, branch string, cc *inventory.CircleCI, last *inventory.LastRun) reconcile.StepResult {
 	sr := reconcile.StepResult{Step: reconcile.StepCircleCI}
 	if cc == nil {
@@ -107,32 +102,29 @@ func circleCIStep(slug, branch string, cc *inventory.CircleCI, last *inventory.L
 			sr.Summary = join("the reconciler's circleci step failed: "+run.Summary+" ("+from+")", builds)
 		case reconcile.VerdictOK, reconcile.VerdictRepaired:
 			sr.Verdict = reconcile.VerdictOK
-			sr.Summary = join(convergedCircleCI+" ("+from+")", builds)
+			sr.Summary = join(builds, convergedCircleCI+" ("+from+")")
 		case reconcile.VerdictReported:
 			sr.Verdict = reconcile.VerdictReported
-			sr.Summary = join(convergedCircleCI+" ("+from+")", builds)
+			sr.Summary = join(builds, convergedCircleCI+" ("+from+")")
 			sr.Findings = append([]reconcile.Finding(nil), run.Findings...)
 		default:
 			// Drift: the check found what a repair would do, and no repair ran
 			// since — the reconciler's plan is the step's.
 			sr.Verdict = reconcile.VerdictDrift
-			sr.Summary = join("drift found by the "+from, builds)
+			sr.Summary = join(builds, "drift found by the "+from)
 			sr.Changes = append([]string(nil), run.Changes...)
 		}
 		return sr
 	}
 	switch {
 	case cc.Head != nil:
-		sr.Verdict = reconcile.VerdictReported
+		sr.Verdict = reconcile.VerdictOK
 		sr.Summary = builds
-		sr.Findings = []reconcile.Finding{{Kind: reconcile.FindingUnchecked,
-			Message: fmt.Sprintf("%s is built by CircleCI; whether setup workflows are on and a checkout key exists is out of the inventory's reach: no reconciler run has checked %s yet", slug, slug),
-			Fix:     alignFix}}
 	case contains(cc.Unknown, inventory.CircleCIFactFollowed):
 		sr.Verdict = reconcile.VerdictReported
 		sr.Summary = fmt.Sprintf("the statuses on %s's head were truncated before a CircleCI one", branch)
 		sr.Findings = []reconcile.Finding{{Kind: reconcile.FindingUnchecked,
-			Message: fmt.Sprintf("whether CircleCI builds %s is out of the inventory's reach: the head's status contexts were truncated before a CircleCI one, and no reconciler run has checked %s yet", slug, slug),
+			Message: fmt.Sprintf("whether CircleCI builds %s is out of the inventory's reach: the head's status contexts were truncated before a CircleCI one", slug),
 			Fix:     alignFix}}
 	default:
 		// No CircleCI status on the head and no run: the project is not built,
@@ -149,17 +141,42 @@ func buildsSentence(slug, branch string, head *inventory.HeadStatus) string {
 	if head == nil {
 		return fmt.Sprintf("no CircleCI status on %s's head: CircleCI does not build %s", branch, slug)
 	}
-	jobs := "1 job"
-	if n := len(head.Contexts); n != 1 {
-		jobs = fmt.Sprintf("%d jobs", n)
-	}
-	return fmt.Sprintf("CircleCI builds %s: %s (%s, %s)", branch, head.State, jobs, head.At.UTC().Format(time.RFC3339))
+	return fmt.Sprintf("CircleCI builds %s: %s (%s, %s)", branch, head.State, jobs(head), head.At.UTC().Format(time.RFC3339))
 }
 
-// releaseStep is the release step for tag from the reconciler's last run,
-// when that run verified this very tag; else the tag is unchecked.
-func releaseStep(slug, tag string, last *inventory.LastRun) reconcile.StepResult {
+func jobs(s *inventory.HeadStatus) string {
+	if n := len(s.Contexts); n != 1 {
+		return fmt.Sprintf("%d jobs", n)
+	}
+	return "1 job"
+}
+
+// releaseStep is the release step for tag: the tag commit's `ci/circleci:`
+// statuses say whether CircleCI built the release; the reconciler's run
+// stands in while the commit carries none and that run named the tag; a
+// commit without any CircleCI status is the missed tag build the engine
+// would trigger.
+func releaseStep(slug, tag string, rel *inventory.Release, last *inventory.LastRun) reconcile.StepResult {
 	sr := reconcile.StepResult{Step: reconcile.StepRelease}
+	if rel != nil && rel.Tag == tag && rel.Build != nil {
+		b := rel.Build
+		at := b.At.UTC().Format(time.RFC3339)
+		switch b.State {
+		case "success":
+			sr.Verdict = reconcile.VerdictOK
+			sr.Summary = fmt.Sprintf("release %s built: CircleCI success (%s, %s)", tag, jobs(b), at)
+		case "pending", "expected":
+			sr.Verdict = reconcile.VerdictOK
+			sr.Summary = fmt.Sprintf("release %s: CircleCI pipeline running (%s, %s)", tag, jobs(b), at)
+		default:
+			sr.Verdict = reconcile.VerdictReported
+			sr.Summary = fmt.Sprintf("release %s: CircleCI %s (%s, %s)", tag, b.State, jobs(b), at)
+			sr.Findings = []reconcile.Finding{{Kind: reconcile.FindingRedRelease,
+				Message: fmt.Sprintf("the tag pipeline of %s %s failed (%s)", slug, tag, strings.Join(b.Contexts, ", ")),
+				Fix:     "a tag is never rebuilt: fix the pipeline and cut the next release"}}
+		}
+		return sr
+	}
 	if run := runStep(last, reconcile.StepRelease); run != nil && mentions(run, tag) {
 		from := " (reconciler run of " + last.Timestamp.UTC().Format(time.RFC3339) + ")"
 		sr.Verdict = run.Verdict
@@ -167,7 +184,7 @@ func releaseStep(slug, tag string, last *inventory.LastRun) reconcile.StepResult
 		sr.Findings = append([]reconcile.Finding(nil), run.Findings...)
 		switch {
 		case run.Verdict == reconcile.VerdictRepaired:
-			// The run triggered the missed build; the next run reports it.
+			// The run triggered the missed build; the statuses report it next.
 			sr.Verdict = reconcile.VerdictOK
 			sr.Summary = fmt.Sprintf("release %s: build triggered by the reconciler%s", tag, from)
 		case run.Summary != "":
@@ -177,11 +194,28 @@ func releaseStep(slug, tag string, last *inventory.LastRun) reconcile.StepResult
 		}
 		return sr
 	}
-	sr.Verdict = reconcile.VerdictReported
-	sr.Summary = fmt.Sprintf("release %s: not verified by a reconciler run yet", tag)
-	sr.Findings = []reconcile.Finding{{Kind: reconcile.FindingUnchecked,
-		Message: fmt.Sprintf("whether CircleCI built the tag %s of %s is out of the inventory's reach: no reconciler run has verified it", tag, slug),
-		Fix:     alignFix + "; a missed tag build is triggered by that run"}}
+	switch {
+	case rel == nil || rel.Tag != tag:
+		latest := "none"
+		if rel != nil {
+			latest = rel.Tag
+		}
+		sr.Verdict = reconcile.VerdictReported
+		sr.Summary = fmt.Sprintf("release %s: not the latest release the inventory read (%s)", tag, latest)
+		sr.Findings = []reconcile.Finding{{Kind: reconcile.FindingUnchecked,
+			Message: fmt.Sprintf("whether CircleCI built the tag %s of %s is out of the inventory's reach until its next read of the repository", tag, slug),
+			Fix:     "refresh the repository, or " + alignFix}}
+	case rel.BuildTruncated:
+		sr.Verdict = reconcile.VerdictReported
+		sr.Summary = fmt.Sprintf("release %s: the statuses on its commit were truncated before a CircleCI one", tag)
+		sr.Findings = []reconcile.Finding{{Kind: reconcile.FindingUnchecked,
+			Message: fmt.Sprintf("whether CircleCI built the tag %s of %s is out of the inventory's reach: the commit's status contexts were truncated before a CircleCI one", tag, slug),
+			Fix:     alignFix}}
+	default:
+		sr.Verdict = reconcile.VerdictDrift
+		sr.Summary = fmt.Sprintf("no CircleCI status on %s's commit: the tag was not built", tag)
+		sr.Changes = []string{"trigger the missed tag build for " + tag}
+	}
 	return sr
 }
 

@@ -11,7 +11,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- A CircleCI token for the engine's checks: the chart value `circleci.existingSecret` (a Secret with the token under `token`, passed as `CIRCLECI_TOKEN`; flag `--circleci-token`) gives devctl's reconcile runner its CircleCI client, so the read-mode checks of every sweep and refresh read each project themselves — followed, setup workflows, checkout key, the latest release's pipeline — and the set-up steps `circleci` and `release` show CircleCI drift before anyone runs Align now. Check mode never writes to CircleCI. The engine's step is the third source of the record's `circleci` state (`source` gains `engine`; `setupWorkflows` and `followed` leave `unknown`), `get_info` reports `circleci.configured`, and the start log `circleci=true`. Without the token the two steps still come from the record's other sources as before, and the `unchecked` finding's fix now names the token as the way to have them checked on every sweep, a reconciler run (Align now, a check for a team that has not opted in) in the meantime.
+- The record's `ci` block — what the repository's CircleCI configuration on the default branch says, read with the repository (`.circleci/config.yml`, `workflows.yml`, `custom.yml`): `generated` (devctl's header), `orb` (the giantswarm/architect version pinned), `imagePush`/`chartPush`, `platforms` and `arm64` (the image platforms resolved the orb's way: the push job's `platforms`, the per-architecture build-image jobs it merges, go-build's list from orb 9, the legacy multiarch rule; absent when the configuration does not say), `chinaPush` (`split` with `split-china-push`/`sync-china-registry`, `inline`, `custom` with `registries-data`, `none`) and `signing` (`signed` for a public repository whose push jobs keep the orb's `sign: true` default since 8.2.0; `unsigned` with the reason — private repository, `sign: false`, an older orb; `unknown` without the orb or on a development version; `none` when nothing is pushed). `list_repositories` rows carry `ci` and take the filters `orb` (a version or its prefix), `arm64`, `chinaPush`, `signing` (giantswarm/giantswarm-repo-manager#78).
+- `reality.latestRelease.build`: the release tag commit's `ci/circleci:` statuses, read in the sweep — whether CircleCI built the release.
+
+### Changed
+
+- The set-up steps `circleci` and `release` answer what a person reading them asks, from GitHub alone: `circleci` is `ok` when the head carries CircleCI statuses ("CircleCI builds main: success (6 jobs, …)") and the engine's follow plan as `drift` when it carries none; `release` is `ok` when the tag commit's statuses are green, `reported` with `red-release` when they failed, and the missed tag build as `drift` when the commit carries none. The reconciler's stored run still decides when it ran (it read the settings only a token reaches). No `unchecked` finding about setup workflows or checkout keys any more; `unchecked` remains for status contexts truncated before a CircleCI one (giantswarm/giantswarm-repo-manager#78).
+
+### Removed
+
+- The CircleCI token path of 0.18.0 — the chart value `circleci.existingSecret`, the flag `--circleci-token` / `CIRCLECI_TOKEN`, the engine's CircleCI client, `get_info`'s `circleci.configured`: none of the answers needs a CircleCI token, and a CircleCI personal token cannot be scoped to reads.
 
 ### Fixed
 

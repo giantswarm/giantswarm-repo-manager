@@ -46,18 +46,29 @@ func TestSweepFillsOneRecordPerRepository(t *testing.T) {
 	if present.Declaration == nil || present.Declaration.Team != team || !present.Declaration.Accepted || present.Declaration.Language != "go" || present.Reality == nil {
 		t.Errorf("present declaration: %+v", present.Declaration)
 	}
-	// The engine's findings pass through: the scaffold's default icon, and
-	// the two steps the engine skipped for want of a CircleCI client, written
+	// The engine's findings pass through: the scaffold's default icon. The
+	// two steps the engine skipped for want of a CircleCI client are written
 	// from the record — CircleCI builds main by the head's statuses, the
-	// settings and the tag's build unchecked until a reconciler run tells.
-	if present.Setup.Checks == nil || !present.Setup.Checks.Converged || present.Setup.CheckedAt == nil || kinds(present) != string(reconcile.FindingDefaultIcon)+","+string(reconcile.FindingUnchecked)+","+string(reconcile.FindingUnchecked) || present.Findings[0].Source != inventory.FindingSourceEngine {
+	// release by its tag commit's — and leave no finding.
+	if present.Setup.Checks == nil || !present.Setup.Checks.Converged || present.Setup.CheckedAt == nil || kinds(present) != string(reconcile.FindingDefaultIcon) || present.Findings[0].Source != inventory.FindingSourceEngine {
 		t.Errorf("present set-up state: %+v findings %+v", present.Setup, present.Findings)
 	}
-	if s := present.Setup.Checks.Step(reconcile.StepCircleCI); s == nil || s.Verdict != reconcile.VerdictReported || !strings.HasPrefix(s.Summary, "CircleCI builds main: pending (2 jobs, ") {
+	if s := present.Setup.Checks.Step(reconcile.StepCircleCI); s == nil || s.Verdict != reconcile.VerdictOK || !strings.HasPrefix(s.Summary, "CircleCI builds main: pending (2 jobs, ") {
 		t.Errorf("present circleci step: %+v", s)
 	}
-	if s := present.Setup.Checks.Step(reconcile.StepRelease); s == nil || s.Verdict != reconcile.VerdictReported || s.Summary != "release "+presentTag+": not verified by a reconciler run yet" {
+	if s := present.Setup.Checks.Step(reconcile.StepRelease); s == nil || s.Verdict != reconcile.VerdictOK || !strings.HasPrefix(s.Summary, "release "+presentTag+" built: CircleCI success (2 jobs, ") {
 		t.Errorf("present release step: %+v", s)
+	}
+	if b := present.Reality.LatestRelease.Build; b == nil || b.State != "success" || len(b.Contexts) != 2 {
+		t.Errorf("present release build: %+v", b)
+	}
+	// The CI facts from the configuration on the default branch.
+	if ci := present.CI; ci == nil || !ci.Generated || ci.Orb != "10.5.0" || strings.Join(ci.Files, ",") != "config.yml,workflows.yml" || !ci.ImagePush || !ci.ChartPush ||
+		ci.ARM64 == nil || !*ci.ARM64 || ci.ChinaPush != inventory.ChinaPushSplit || ci.Signing != inventory.SigningSigned || ci.Error != "" {
+		t.Errorf("present ci: %+v", ci)
+	}
+	if stray := st.record(t, repoStray); stray.CI != nil {
+		t.Errorf("stray has no .circleci: %+v", stray.CI)
 	}
 	// CircleCI without a token: the head's ci/circleci: statuses say it builds
 	// the repository (the other systems' contexts are ignored, the worst
@@ -210,12 +221,11 @@ func TestInventoryToolsAndReconcilerRefresh(t *testing.T) {
 		t.Errorf("circleci after the reconciler's run: %+v", ci)
 	}
 	// The refresh the run caused re-ran the engine's checks, and the circleci
-	// step now reads the run's verdict; the release step, which that run
-	// did not report, stays unchecked.
+	// step now carries the run's verdict beside the head's statuses.
 	if s := rec.Setup.Checks.Step(reconcile.StepCircleCI); s == nil || s.Verdict != reconcile.VerdictOK || !strings.Contains(s.Summary, "checkout key present (reconciler run of ") || !strings.Contains(s.Summary, "CircleCI builds main") {
 		t.Errorf("circleci step after the reconciler's run: %+v", s)
 	}
-	if kinds(rec) != string(reconcile.FindingDefaultIcon)+","+string(reconcile.FindingUnchecked) {
+	if kinds(rec) != string(reconcile.FindingDefaultIcon) {
 		t.Errorf("findings after the reconciler's run: %+v", rec.Findings)
 	}
 	if lr := rec.Setup.LastRun; lr == nil || lr.RunURL != runURL(run.ID) || lr.RunID != run.ID || lr.Attempt != 1 || !lr.Timestamp.Equal(finished) || lr.Result.Mode != reconcile.ModeRepair ||

@@ -7,11 +7,9 @@
 // it; flags win over the environment. Optional components (the inventory App
 // giantswarm-repo-manager-inventory for the unattended reads, the inventory
 // store) that are not configured leave the server running and are reported
-// as missing by get_info; nothing stands in for them. A CircleCI token
-// (CIRCLECI_TOKEN) gives the engine's read-mode checks their CircleCI client —
-// followed, setup workflows, checkout key, the release's pipeline, read-only;
-// without one those two steps come from the `ci/circleci:` commit statuses
-// GitHub carries and from the reconciler's run artifact.
+// as missing by get_info; nothing stands in for them. The server holds no
+// CircleCI token: the inventory's CircleCI facts come from the `ci/circleci:`
+// commit statuses GitHub carries and from the reconciler's run artifact.
 package main
 
 import (
@@ -28,8 +26,6 @@ import (
 	"strings"
 	"syscall"
 	"time"
-
-	"github.com/giantswarm/devctl/v8/pkg/circleciclient"
 
 	"github.com/giantswarm/giantswarm-repo-manager/internal/collect"
 	"github.com/giantswarm/giantswarm-repo-manager/internal/gh"
@@ -52,7 +48,6 @@ type options struct {
 
 	githubAPIURL, githubAppPrivateKeyFile string
 	githubAppID, githubAppInstallationID  int64
-	circleciToken                         string
 
 	teamFilesRepository, teamFilesRef                                  string
 	reconcilerWorkflow                                                 string
@@ -84,7 +79,6 @@ func parseFlags(args []string) (*options, error) {
 	f.Int64Var(&o.githubAppID, "github-app-id", envInt64("GITHUB_APP_ID"), "Id of the read-only GitHub App giantswarm-repo-manager-inventory, the identity of the unattended reads (GITHUB_APP_ID)")
 	f.Int64Var(&o.githubAppInstallationID, "github-app-installation-id", envInt64("GITHUB_APP_INSTALLATION_ID"), "The inventory App's installation id on the org (GITHUB_APP_INSTALLATION_ID)")
 	f.StringVar(&o.githubAppPrivateKeyFile, "github-app-private-key-file", envOr("GITHUB_APP_PRIVATE_KEY_FILE", ""), "PEM private key of the inventory App (GITHUB_APP_PRIVATE_KEY_FILE)")
-	f.StringVar(&o.circleciToken, "circleci-token", envOr("CIRCLECI_TOKEN", ""), "CircleCI API token the engine's checks in read mode read the projects with — followed, setup workflows, checkout key, the latest release's pipeline; check mode never writes to CircleCI. Empty leaves the circleci and release steps to the record's other sources, the head's statuses and the reconciler's run; prefer the environment (CIRCLECI_TOKEN)")
 	f.StringVar(&o.teamFilesRepository, "team-files-repository", envOr("TEAM_FILES_REPOSITORY", teamfiles.DefaultRepository), "owner/name of the repository that holds the team files and policy files (TEAM_FILES_REPOSITORY)")
 	f.StringVar(&o.teamFilesRef, "team-files-ref", envOr("TEAM_FILES_REF", teamfiles.DefaultRef), "Branch the team files are read from and pull requests target (TEAM_FILES_REF)")
 	f.StringVar(&o.reviewsURL, "reviews-url", envOr("REVIEWS_URL", ""), "klaus-gateway's base URL for the team-review endpoint (POST /reviews, /notices); empty leaves the asks undelivered (REVIEWS_URL)")
@@ -146,21 +140,12 @@ func run(ctx context.Context, o *options, log *slog.Logger) error {
 		defer s.Close()
 		store, deps.Inventory = s, s
 	}
-	var circle *circleciclient.Client
-	if o.circleciToken != "" {
-		c, err := circleciclient.New(circleciclient.Config{Token: o.circleciToken})
-		if err != nil {
-			return fmt.Errorf("circleci client: %w", err)
-		}
-		circle = c
-		deps.CircleCIConfigured = true
-	}
 	if reader != nil && deps.Inventory != nil {
 		deps.Collector = collect.New(collect.Options{
 			Org: o.org, EngineChecks: o.sweepEngineChecks,
 			Concurrency: o.sweepConcurrency, BudgetFloor: o.graphqlBudgetFloor,
 			Reconciler: collect.ReconcilerOptions{Repository: o.teamFilesRepository, Workflow: o.reconcilerWorkflow, PollInterval: o.reconcilerPollInterval},
-		}, reader, deps.Inventory, collect.NewEngine(o.org, reader, circle), log)
+		}, reader, deps.Inventory, collect.NewEngine(o.org, reader), log)
 	}
 	if o.sweepOnce {
 		if store != nil {
@@ -216,7 +201,7 @@ func run(ctx context.Context, o *options, log *slog.Logger) error {
 		"oauth", o.oauthEnabled, "authorizationServer", deps.AuthorizationServer, "githubApp", deps.App != nil, "reads", readsAs,
 		"inventory", o.valkeyAddr, "inventoryConnectTimeout", o.connectTimeout, "collector", deps.Collector != nil, "sweepInterval", o.sweepInterval,
 		"reconcilerPollInterval", o.reconcilerPollInterval, "reconcilerWorkflow", o.reconcilerWorkflow,
-		"engineChecks", o.sweepEngineChecks, "circleci", circle != nil, "sweepTeams", o.sweepTeams,
+		"engineChecks", o.sweepEngineChecks, "sweepTeams", o.sweepTeams,
 		"teamFiles", o.teamFilesRepository+"@"+o.teamFilesRef, "reviews", o.reviewsURL, "reviewsDebugChannel", o.reviewsDebugChannel)
 	err = srv.Run(runCtx)
 	if cause := context.Cause(runCtx); cause != nil && !errors.Is(cause, context.Canceled) {

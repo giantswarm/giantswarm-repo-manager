@@ -1,0 +1,310 @@
+version: 2.1
+orbs:
+  architect: giantswarm/architect@9.5.5
+
+defaults: &defaults
+  working_directory: ~/happa
+  docker:
+    - image: cimg/node:20.20.2
+
+job_filters: &job_filters
+  filters:
+    tags:
+      only: /^v[0-9]+\.[0-9]+\.[0-9]+$/
+    branches:
+      ignore:
+        - main
+
+whitelist: &whitelist
+  paths:
+    - dist/*
+    - storybook-static/*
+    - node_modules/*
+    - VERSION
+    - ".sentry_release_version"
+
+workflows:
+  version: 2
+
+  build:
+    jobs:
+      - checkout:
+          <<: *job_filters
+      - gather-facts:
+          requires:
+            - checkout
+          <<: *job_filters
+      - test:
+          requires:
+            - checkout
+          <<: *job_filters
+      - lint:
+          requires:
+            - checkout
+          <<: *job_filters
+      - build:
+          requires:
+            - gather-facts
+          <<: *job_filters
+
+      - architect/push-to-registries:
+          context: architect
+          name: push-to-registries
+          # The happa Dockerfile is not arm64-ready (npm is unavailable in the
+          # arm64 nginx stage), so pin the pre-architect-v9 single-platform
+          # build until the Dockerfile supports multi-arch.
+          platforms: linux/amd64
+          # Push only to gsoci/gsociprivate here; the Aliyun copy happens in
+          # sync-china-registry below. Pushing to Aliyun from this buildx step
+          # hung for 20 minutes and timed out the job on every release from
+          # v1.72.6 to v1.72.9 -- which blocked launch-container and therefore
+          # push-happa-to-catalog, leaving the newest chart in the catalog at
+          # 1.72.4 while five releases (including the js-yaml and mermaid CVE
+          # bumps) never reached any installation.
+          split-china-push: true
+          requires:
+            - test
+            - lint
+            - build
+          <<: *job_filters
+
+      # Mirror gsoci -> Aliyun from the in-China galaxy-runner. Nothing requires
+      # this job: an Aliyun mirror failure must never stop a happa release from
+      # reaching the app catalog.
+      - architect/sync-china-registry:
+          context: architect
+          name: sync-china-registry
+          requires:
+            - push-to-registries
+          <<: *job_filters
+
+      - launch-container:
+          requires:
+            - push-to-registries
+          <<: *job_filters
+
+      - architect/push-to-app-catalog:
+          executor: app-build-suite
+          name: push-happa-to-catalog
+          context: architect
+          app_catalog: control-plane-catalog
+          app_catalog_test: control-plane-test-catalog
+          chart: happa
+          persist_chart_archive: true
+          requires:
+            - launch-container
+          # Needed to trigger job also on git tag.
+          filters:
+            branches:
+              ignore:
+                - main
+            tags:
+              only: /^v.*/
+
+      - architect/run-tests-with-ats:
+          name: execute chart tests
+          filters:
+            branches:
+              ignore:
+                - main
+          requires:
+            - push-happa-to-catalog
+
+
+      # FE Docs
+
+      - build-fe-docs:
+          requires:
+            - checkout
+          <<: *job_filters
+
+      - architect/push-to-registries:
+          context: architect
+          name: push-fe-docs-to-registries
+          image: giantswarm/fe-docs
+          dockerfile: "./Dockerfile.fe-docs"
+          requires:
+            - build-fe-docs
+          <<: *job_filters
+
+      - architect/push-to-app-catalog:
+          executor: app-build-suite
+          name: push-fedocs-to-catalog
+          context: architect
+          app_catalog: giantswarm-operations-platform-catalog
+          app_catalog_test: giantswarm-operations-platform-test-catalog
+          chart: fe-docs
+          persist_chart_archive: true
+          explicit_allow_chart_name_mismatch: true
+          requires:
+            - push-fe-docs-to-registries
+          <<: *job_filters
+
+jobs:
+  checkout:
+    <<: *defaults
+
+    steps:
+      - checkout
+
+      - restore_cache:
+          keys:
+          - v3-npm-deps-{{ checksum "yarn.lock" }}
+          - v3-npm-deps-
+
+      - run:
+          name: Print version information
+          command: |
+            node --version
+            yarn --version
+
+      - run:
+          name: Install Dependencies
+          command: yarn install --frozen-lockfile
+
+      - save_cache:
+          paths:
+            - node_modules
+          key: v3-npm-deps-{{ checksum "yarn.lock" }}
+
+      - persist_to_workspace:
+          root: ~/happa
+          <<: *whitelist
+
+  gather-facts:
+    executor: architect/architect
+
+    working_directory: ~/happa
+    steps:
+      - checkout
+
+      - attach_workspace:
+          at: ~/happa
+
+      - run:
+          name: Create VERSION file
+          command: |
+            echo -n "$(architect project version)" > VERSION
+            echo "$(cat VERSION)"
+
+      - run:
+          name: Determine Sentry project release version
+          command: |
+            echo -n "happa@$(cat VERSION)" > .sentry_release_version
+            echo "$(cat .sentry_release_version)"
+
+      - persist_to_workspace:
+          root: ~/happa
+          <<: *whitelist
+
+  lint:
+    <<: *defaults
+
+    steps:
+      - checkout
+
+      - attach_workspace:
+          at: ~/happa
+
+      - run:
+          name: Typecheck code using the TypeScript compiler
+          command: yarn run typecheck
+
+      - run:
+          name: Lint code using ESlint
+          command: yarn run lint --no-color
+
+      - run:
+          name: Validate code style using prettier
+          command: yarn run validate-prettier --no-color
+
+  test:
+    <<: *defaults
+    resource_class: xlarge
+
+    steps:
+      - checkout
+
+      - attach_workspace:
+          at: ~/happa
+
+      - run:
+          name: Run tests
+          command: yarn run test --maxWorkers 4
+
+  build:
+    <<: *defaults
+
+    steps:
+      - checkout
+
+      - attach_workspace:
+          at: ~/happa
+
+      - run:
+          name: Build web application
+          command: SENTRY_RELEASE_VERSION="$(cat .sentry_release_version)" yarn run dist
+          environment:
+            NODE_ENV: production
+            SENTRY_UPLOAD_SOURCEMAPS: 'true'
+
+
+      - persist_to_workspace:
+          root: ~/happa
+          <<: *whitelist
+
+  launch-container:
+    <<: *defaults
+    working_directory: ~/happa
+    steps:
+      - checkout
+
+      - setup_remote_docker
+
+      - attach_workspace:
+          at: ~/happa
+
+      - run:
+          name: Launch container for tests
+          command: |
+            set -x
+            docker run --name happa-branch \
+              -p 8000:8000 \
+              -d \
+              "gsoci.azurecr.io/giantswarm/happa:$(cat VERSION)"
+
+            # The container runs scripts/prepare.ts (via ts-node) before nginx
+            # starts serving, so it can take a while to come up. Poll instead of
+            # relying on a fixed sleep to avoid flaky "connection refused" fails.
+            CURL_OUTPUT=""
+            for attempt in $(seq 1 30); do
+              # `|| true` keeps a not-yet-ready container (curl exit 7) from
+              # aborting the step under `set -e` before we can retry.
+              CURL_OUTPUT=$(ssh remote-docker "curl -s http://localhost:8000") || true
+              if echo "${CURL_OUTPUT}" | grep -q "Giant Swarm web interface"; then
+                echo "Container is serving (attempt ${attempt})."
+                break
+              fi
+              echo "Waiting for container to serve (attempt ${attempt})..."
+              sleep 2
+            done
+
+            echo "${CURL_OUTPUT}" | grep "Giant Swarm web interface"
+
+  build-fe-docs:
+    <<: *defaults
+    resource_class: large
+
+    steps:
+      - checkout
+
+      - attach_workspace:
+          at: ~/happa
+
+      - run:
+          name: Build FE Docs static assets
+          command: NODE_ENV=production yarn run storybook:build
+
+      - persist_to_workspace:
+          root: ~/happa
+          <<: *whitelist

@@ -60,10 +60,6 @@ type Deps struct {
 	// Collector fills the inventory; nil when the store or the inventory App
 	// is missing (refresh_repository and sweep_inventory then say so).
 	Collector *collect.Collector
-	// CircleCIConfigured says the engine's checks run with a CircleCI client
-	// (CIRCLECI_TOKEN): the circleci and release steps are the engine's own
-	// reads, not the record's other sources.
-	CircleCIConfigured bool
 	// RenovateActive is the period a Renovate pull request or commit counts
 	// as activity within (the renovate filter's active and inactive); 0 is
 	// DefaultRenovateActive.
@@ -118,7 +114,7 @@ func (ts *Tools) MCPServer() *mcpserver.MCPServer {
 		mcpserver.WithInstructions("Giant Swarm's repository set-up service. The team files in giantswarm/github (repositories/team-*.yaml) are the desired state of every repository; GitHub is the reality. Call get_info first: it reports who you are to this server (the GitHub login of the token muster put on the call — your own authorization of the App giantswarm-repo-manager), the identity of the unattended reads — the read-only App giantswarm-repo-manager-inventory — and the inventory store. The inventory (list_repositories, get_repository) is one record per repository of the org — declaration, GitHub reality, set-up state, findings — refreshed by a scheduled sweep, after every reconciler run and on refresh_repository; every record carries its age. Every write tool takes dryRun and mode; the only write mode is commit — a team-file pull request opened as you — and apply is refused."),
 	)
 	s.AddTool(mcp.NewTool(ToolGetInfo,
-		mcp.WithDescription("Read-only. Report the service version and how this call is authenticated: the caller (the GitHub login and id GET /user answered for the bearer muster put on the call — the person's own user token through the App giantswarm-repo-manager) and the authorization server pinned for it; whether your credential reaches the team files (teamFiles.readable); the identity of the unattended inventory reads (the read-only App giantswarm-repo-manager-inventory, or not configured) and the inventory store; where the inventory's CircleCI facts come from (circleci.source: the commit statuses and the reconciler's run artifact, plus the engine's own read-only check when a CircleCI token is configured — circleci.configured);the team-review endpoint (reviews.configured, and reviews.debugChannel when one channel receives every ask and notice instead of the teams' channels); the engine (devctl reposetup package) and the write modes. Call first."),
+		mcp.WithDescription("Read-only. Report the service version and how this call is authenticated: the caller (the GitHub login and id GET /user answered for the bearer muster put on the call — the person's own user token through the App giantswarm-repo-manager) and the authorization server pinned for it; whether your credential reaches the team files (teamFiles.readable); the identity of the unattended inventory reads (the read-only App giantswarm-repo-manager-inventory, or not configured) and the inventory store; where the inventory's CircleCI facts come from (commit statuses and the reconciler's run artifact — this server holds no CircleCI token); the team-review endpoint (reviews.configured, and reviews.debugChannel when one channel receives every ask and notice instead of the teams' channels); the engine (devctl reposetup package) and the write modes. Call first."),
 		mcp.WithReadOnlyHintAnnotation(true),
 	), t.getInfo)
 	t.registerInventory(s)
@@ -219,22 +215,9 @@ type InventoryInfo struct {
 
 // CircleCIInfo says where the inventory's CircleCI facts come from.
 type CircleCIInfo struct {
-	// Configured says a CircleCI token is set: the engine's checks read each
-	// project themselves (read-only; check mode never writes).
-	Configured bool `json:"configured"`
-	// Source is statuses+artifact — the `ci/circleci:` commit statuses on the
-	// default branch head and the reconciler's run artifact — plus engine
-	// when a token is configured.
+	// Source is statuses+artifact: the `ci/circleci:` commit statuses on the
+	// default branch head and the reconciler's run artifact; no token.
 	Source string `json:"source"`
-}
-
-// circleCIInfo is get_info's CircleCI section.
-func circleCIInfo(configured bool) CircleCIInfo {
-	info := CircleCIInfo{Configured: configured, Source: inventory.CircleCISourceBoth}
-	if configured {
-		info.Source += "+" + inventory.CircleCISourceEngine
-	}
-	return info
 }
 
 // ReviewsInfo is the team-review endpoint: whether asks and notices are
@@ -269,7 +252,7 @@ func (t *tools) getInfo(ctx context.Context, _ mcp.CallToolRequest) (*mcp.CallTo
 		Version:    t.d.Version,
 		ToolPrefix: ToolPrefix,
 		GitHub:     GitHubInfo{APIURL: apiURL(t.d.GitHubAPIURL)},
-		CircleCI:   circleCIInfo(t.d.CircleCIConfigured),
+		CircleCI:   CircleCIInfo{Source: inventory.CircleCISourceBoth},
 		Reviews:    ReviewsInfo{Configured: t.d.Review != nil, DebugChannel: t.d.Review.DebugChannel()},
 		Engine:     EngineInfo{Module: engineModule, Version: EngineVersion(), Package: engineModule + "/pkg/reposetup"},
 		Capabilities: Capabilities{

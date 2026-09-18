@@ -103,8 +103,10 @@ the inventory App — CircleCI posts them for the projects it builds) together w
 blob; whether the project is followed and setup workflows are on from the reconciler's run artifact, read from
 GitHub after every run (its `circleci` step). What neither source yields, the record names as
 `unknown` — the last pipeline is not derivable and is not part of the record. `get_info` reports
-`circleci.source: statuses+artifact`. The engine's read-mode checks run without a CircleCI client, so their
-`circleci` and `release` steps are skipped.
+`circleci.source: statuses+artifact`. The engine's read-mode checks run without a CircleCI client, which skips
+their `circleci` and `release` steps; the inventory writes those two steps from its sources instead — the reconciler's
+last run decides followed, setup workflows, checkout key and the tag build when it ran, the head's statuses say
+whether CircleCI builds the branch — and what no source yields is the finding `unchecked` with Align now as the fix.
 
 Effective rights of a write are the person's own ∩ the App `giantswarm-repo-manager`'s permissions, on
 the repository at hand. No personal token, no token held or exchanged by this server, no broker; the

@@ -61,6 +61,8 @@ const (
 	fakeGraphQLCost = 7
 	circleBuild     = "ci/circleci: go-build"
 	circlePush      = "ci/circleci: push-to-registries"
+	// presentTag is the present repository's latest release.
+	presentTag = "v1.0.0"
 )
 
 var teamFile = `# yaml-language-server: $schema=../repositories.schema.json
@@ -182,7 +184,7 @@ func (o *fakeOrg) node(name string) map[string]any {
 	switch name {
 	case repoPresent:
 		n := base(false)
-		n["latestRelease"] = map[string]any{"tagName": "v1.0.0", "publishedAt": o.now.AddDate(0, -1, 0).Format(time.RFC3339)}
+		n["latestRelease"] = map[string]any{"tagName": presentTag, "publishedAt": o.now.AddDate(0, -1, 0).Format(time.RFC3339)}
 		n["oldestIssues"] = map[string]any{kNodes: []map[string]any{{kNumber: 3, kTitle: "Dependency Dashboard"}}}
 		n["openPRs"] = map[string]any{kTotalCount: 2, kNodes: []map[string]any{
 			{kNumber: 10, kTitle: "fix(deps): update module x", kCreatedAt: o.now.AddDate(0, 0, -2).Format(time.RFC3339), kHeadRefName: "renovate/x", kAuthor: map[string]any{kLogin: renovateLogin}},
@@ -262,9 +264,16 @@ func (c *fakeChecker) Check(_ context.Context, teamSlug string, entry reposetup.
 		<-c.hold
 	}
 	now := time.Now()
+	// The engine here has no CircleCI client, so its circleci and release
+	// steps are skipped with these exact words (devctl's step_circleci.go);
+	// the collector writes both from the record's sources.
 	return &reconcile.Result{
 		Repository: org + "/" + entry.Name, Declared: org + "/" + entry.Name, Team: teamSlug, Mode: reconcile.ModeCheck, StartedAt: now, FinishedAt: now, Converged: true,
-		Steps: []reconcile.StepResult{{Step: reconcile.StepScaffold, Verdict: reconcile.VerdictOK, Summary: "scaffold present",
-			Findings: []reconcile.Finding{{Kind: reconcile.FindingDefaultIcon, Message: "the chart carries the template's icon", Fix: "replace helm/<chart>/icon.svg"}}}},
+		Steps: []reconcile.StepResult{
+			{Step: reconcile.StepScaffold, Verdict: reconcile.VerdictOK, Summary: "scaffold present",
+				Findings: []reconcile.Finding{{Kind: reconcile.FindingDefaultIcon, Message: "the chart carries the template's icon", Fix: "replace helm/<chart>/icon.svg"}}},
+			{Step: reconcile.StepCircleCI, Verdict: reconcile.VerdictSkipped, Summary: "no CircleCI client"},
+			{Step: reconcile.StepRelease, Verdict: reconcile.VerdictSkipped, Summary: "release " + presentTag + ": no CircleCI client to verify the pipeline"},
+		},
 	}, nil
 }

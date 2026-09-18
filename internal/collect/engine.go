@@ -18,8 +18,9 @@ import (
 // reported-checks rule comes from devctl's githubclient, built on the
 // identity's current token per run (the installation token rotates). The
 // runner gets no CircleCI client — this server holds no CircleCI token — so
-// its circleci and release steps are skipped; the record's CircleCI state
-// comes from the head's statuses and the reconciler's run instead.
+// it skips its circleci and release steps; the collector writes those two
+// from the record's own sources, the head's statuses and the reconciler's
+// run (fillClientlessSteps), so the result reads like the reconciler's.
 type Engine struct {
 	org    string
 	reader *gh.Reader

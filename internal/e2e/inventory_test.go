@@ -46,8 +46,18 @@ func TestSweepFillsOneRecordPerRepository(t *testing.T) {
 	if present.Declaration == nil || present.Declaration.Team != team || !present.Declaration.Accepted || present.Declaration.Language != "go" || present.Reality == nil {
 		t.Errorf("present declaration: %+v", present.Declaration)
 	}
-	if present.Setup.Checks == nil || !present.Setup.Checks.Converged || present.Setup.CheckedAt == nil || len(present.Findings) != 1 || present.Findings[0].Kind != string(reconcile.FindingDefaultIcon) || present.Findings[0].Source != inventory.FindingSourceEngine {
+	// The engine's findings pass through: the scaffold's default icon, and
+	// the two steps the engine skipped for want of a CircleCI client, written
+	// from the record — CircleCI builds main by the head's statuses, the
+	// settings and the tag's build unchecked until a reconciler run tells.
+	if present.Setup.Checks == nil || !present.Setup.Checks.Converged || present.Setup.CheckedAt == nil || kinds(present) != string(reconcile.FindingDefaultIcon)+","+string(reconcile.FindingUnchecked)+","+string(reconcile.FindingUnchecked) || present.Findings[0].Source != inventory.FindingSourceEngine {
 		t.Errorf("present set-up state: %+v findings %+v", present.Setup, present.Findings)
+	}
+	if s := present.Setup.Checks.Step(reconcile.StepCircleCI); s == nil || s.Verdict != reconcile.VerdictReported || !strings.HasPrefix(s.Summary, "CircleCI builds main: pending (2 jobs, ") {
+		t.Errorf("present circleci step: %+v", s)
+	}
+	if s := present.Setup.Checks.Step(reconcile.StepRelease); s == nil || s.Verdict != reconcile.VerdictReported || s.Summary != "release "+presentTag+": not verified by a reconciler run yet" {
+		t.Errorf("present release step: %+v", s)
 	}
 	// CircleCI without a token: the head's ci/circleci: statuses say it builds
 	// the repository (the other systems' contexts are ignored, the worst
@@ -198,6 +208,15 @@ func TestInventoryToolsAndReconcilerRefresh(t *testing.T) {
 	// setup workflows are known now, nothing is left unknown.
 	if ci := rec.CircleCI; ci == nil || !ci.Followed || ci.Source != inventory.CircleCISourceBoth || ci.SetupWorkflows == nil || !*ci.SetupWorkflows || len(ci.Unknown) != 0 || ci.Head == nil {
 		t.Errorf("circleci after the reconciler's run: %+v", ci)
+	}
+	// The refresh the run caused re-ran the engine's checks, and the circleci
+	// step now reads the run's verdict; the release step, which that run
+	// did not report, stays unchecked.
+	if s := rec.Setup.Checks.Step(reconcile.StepCircleCI); s == nil || s.Verdict != reconcile.VerdictOK || !strings.Contains(s.Summary, "checkout key present (reconciler run of ") || !strings.Contains(s.Summary, "CircleCI builds main") {
+		t.Errorf("circleci step after the reconciler's run: %+v", s)
+	}
+	if kinds(rec) != string(reconcile.FindingDefaultIcon)+","+string(reconcile.FindingUnchecked) {
+		t.Errorf("findings after the reconciler's run: %+v", rec.Findings)
 	}
 	if lr := rec.Setup.LastRun; lr == nil || lr.RunURL != runURL(run.ID) || lr.RunID != run.ID || lr.Attempt != 1 || !lr.Timestamp.Equal(finished) || lr.Result.Mode != reconcile.ModeRepair ||
 		rec.Source != inventory.SourceReconciler {
@@ -429,6 +448,15 @@ func TestSweepStopsAtTheBudgetFloor(t *testing.T) {
 	if last == nil || last.Repositories != 0 {
 		t.Errorf("summary not stored: %+v", last)
 	}
+}
+
+// kinds joins the record's finding kinds in order.
+func kinds(r *inventory.Record) string {
+	out := make([]string, 0, len(r.Findings))
+	for _, f := range r.Findings {
+		out = append(out, f.Kind)
+	}
+	return strings.Join(out, ",")
 }
 
 func hasKind(r *inventory.Record, kind string) bool {

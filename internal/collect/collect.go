@@ -96,6 +96,9 @@ type Collector struct {
 	// blobs fetches artifact blobs from their signed URLs: no token.
 	blobs   *http.Client
 	running atomic.Bool
+	// wake wakes the reconciler poller between ticks: WakeReconciler sends,
+	// the poller receives; one buffered wake is all a poll needs.
+	wake chan struct{}
 
 	srcMu    sync.Mutex
 	srcCache *sources
@@ -109,7 +112,7 @@ func New(opts Options, reader *gh.Reader, store *inventory.Store, checker Checke
 		log = slog.Default()
 	}
 	return &Collector{opts: opts, reader: reader, gql: newGraphQL(reader.GraphQLURL(), reader.HTTP(), opts.BudgetFloor), store: store, checker: checker, log: log, now: opts.Now,
-		blobs: &http.Client{Timeout: 90 * time.Second}}
+		blobs: &http.Client{Timeout: 90 * time.Second}, wake: make(chan struct{}, 1)}
 }
 
 // Options are the collector's options.

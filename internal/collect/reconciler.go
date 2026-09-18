@@ -113,29 +113,55 @@ var (
 )
 
 // RunReconcilerPoll polls until ctx is done: at start, then every
-// PollInterval, and every PendingInterval while an Align now is pending. A
-// failed poll is logged and retried at the next interval.
+// PollInterval, every PendingInterval while a run is pending, and at once
+// when WakeReconciler is called. A failed poll is logged and retried at the
+// next interval.
 func (c *Collector) RunReconcilerPoll(ctx context.Context) {
 	o := c.opts.Reconciler
 	if o.PollInterval <= 0 {
 		return
 	}
 	c.log.Info("reconciler poller on", "repository", o.Repository, "workflow", o.Workflow, "interval", o.PollInterval, "pendingInterval", o.PendingInterval)
-	wait := time.Duration(0)
-	for {
-		select {
-		case <-ctx.Done():
-			return
-		case <-time.After(wait):
-		}
-		wait = o.PollInterval
+	pollLoop(ctx, o.PollInterval, o.PendingInterval, c.wake, func(ctx context.Context) bool {
 		poll, err := c.PollReconciler(ctx)
 		if err != nil {
 			c.log.Error("reconciler poll failed", "error", err)
-			continue
+			return false
 		}
-		if poll.Pending > 0 {
-			wait = o.PendingInterval
+		return poll.Pending > 0
+	})
+}
+
+// WakeReconciler makes the poller read the reconciler's runs at once rather
+// than at its next tick: a record whose run was just marked pending is read
+// within PendingInterval from the mark on. It never blocks; wakes that
+// arrive while one is already waiting fold into it.
+func (c *Collector) WakeReconciler() {
+	select {
+	case c.wake <- struct{}{}:
+	default:
+	}
+}
+
+// pollLoop calls poll at once, then every interval — every pendingInterval
+// while poll reports a pending run — and at once when wake receives; it
+// returns when ctx is done. One loop, one timer: a wake between two ticks
+// replaces the tick, and the interval after it is chosen from that poll.
+func pollLoop(ctx context.Context, interval, pendingInterval time.Duration, wake <-chan struct{}, poll func(context.Context) (pending bool)) {
+	wait := time.Duration(0)
+	for {
+		timer := time.NewTimer(wait)
+		select {
+		case <-ctx.Done():
+			timer.Stop()
+			return
+		case <-timer.C:
+		case <-wake:
+			timer.Stop()
+		}
+		wait = interval
+		if poll(ctx) {
+			wait = pendingInterval
 		}
 	}
 }

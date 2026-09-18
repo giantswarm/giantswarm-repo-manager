@@ -885,10 +885,10 @@ func (t *tools) dispatch(ctx context.Context, args map[string]any, run bool) (*D
 	d.Dispatched = true
 	t.d.Log.Info("reconciler dispatched", "repository", name, "as", p.login)
 	// A workflow_dispatch returns no run id: the record waits for the run's
-	// artifact as pendingRun, which the poller answers or gives up.
+	// artifact as pendingRun, which the woken poller answers or gives up.
 	if rec != nil {
 		rec.Dispatched(time.Now().UTC(), p.login)
-		if err := t.d.Inventory.Put(ctx, rec); err != nil {
+		if err := t.putExpectedRun(ctx, rec); err != nil {
 			t.d.Log.Error("pending run not stored", "repository", name, "error", err)
 		} else {
 			d.PendingRun = rec.Setup.PendingRun

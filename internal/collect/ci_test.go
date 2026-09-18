@@ -48,13 +48,15 @@ func TestCIFactsGenerated(t *testing.T) {
 }
 
 // TestCIFactsLegacy: a single hand-maintained config.yml on orb 9.5.5 with an
-// amd64-only push and the split China push.
+// amd64-only push, a second push on the orb's default platforms (no
+// `platforms`, no go-build: buildx falls back to amd64+arm64) and the split
+// China push — the union says arm64.
 func TestCIFactsLegacy(t *testing.T) {
 	ci := parseCI(map[string]string{cfgFile: fixture(t, "legacy-config.yml")}, true)
 	if ci.Generated || ci.Orb != "9.5.5" || ci.Error != "" || strings.Join(ci.Files, ",") != "config.yml" {
 		t.Errorf("generated %v orb %q error %q files %v", ci.Generated, ci.Orb, ci.Error, ci.Files)
 	}
-	if !ci.ImagePush || strings.Join(ci.Platforms, ",") != "linux/amd64" || ci.ARM64 == nil || *ci.ARM64 {
+	if !ci.ImagePush || strings.Join(ci.Platforms, ",") != defaultPlatforms || ci.ARM64 == nil || !*ci.ARM64 {
 		t.Errorf("image %v platforms %v arm64 %v", ci.ImagePush, ci.Platforms, ci.ARM64)
 	}
 	if ci.ChinaPush != inventory.ChinaPushSplit || ci.Signing != inventory.SigningSigned {
@@ -145,7 +147,7 @@ workflows:
 	}{
 		{"pre-9 multiarch job: both platforms, inline China, orb predates signing", pre9, true, defaultPlatforms, &yes, inventory.ChinaPushInline, inventory.SigningUnsigned, "predates signing"},
 		{"pre-9 plain push with sign false: amd64 only, sign off", plainOld, true, "linux/amd64", &no, inventory.ChinaPushInline, inventory.SigningUnsigned, "sign: false on push"},
-		{"buildx without go-build and a registry override: platforms unknown, custom China", buildxNoGo, true, "", nil, inventory.ChinaPushCustom, inventory.SigningSigned, ""},
+		{"buildx without go-build and a registry override: the orb's default platforms, custom China", buildxNoGo, true, defaultPlatforms, &yes, inventory.ChinaPushCustom, inventory.SigningSigned, ""},
 		{"native per-architecture builds merged: both platforms, split China, signed", native, true, defaultPlatforms, &yes, inventory.ChinaPushSplit, inventory.SigningSigned, ""},
 		{"chart only on a dev orb: no image, signing unknown", chartOnly, true, "", nil, inventory.ChinaPushNone, inventory.SigningUnknown, "not a release"},
 		{"no architect orb, nothing pushed", noOrb, true, "", nil, inventory.ChinaPushNone, inventory.SigningNone, ""},

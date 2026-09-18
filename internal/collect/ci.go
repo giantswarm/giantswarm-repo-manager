@@ -168,10 +168,11 @@ func workflowJobs(doc map[string]any) []jobUse {
 // imagePlatforms resolves the platforms the image push jobs build, the way the
 // orb does: the job's `platforms`, else the per-architecture build-image jobs
 // it merges (`merge-digests`), else — from orb 9, every push through buildx —
-// go-build's `platforms` (its default covers amd64 and arm64), else the legacy
-// rule (`multiarch: true` or the multiarch job builds both, a plain push
-// amd64). The union over the push jobs the configuration answers for; nil,
-// nil when no image is pushed or the configuration says nothing for any.
+// go-build's `platforms` when a go-build job wrote `.platforms` (its default
+// covers amd64 and arm64) and the orb's own default, the same two, without
+// one; before orb 9 the legacy rule (`multiarch: true` or the multiarch job
+// builds both, a plain push amd64). The union over the push jobs; nil, nil
+// when no image is pushed or the configuration says nothing for any.
 func imagePlatforms(orb string, pushes, builds, goBuilds []jobUse) ([]string, *bool) {
 	set := map[string]bool{}
 	for _, p := range pushes {
@@ -187,11 +188,8 @@ func imagePlatforms(orb string, pushes, builds, goBuilds []jobUse) ([]string, *b
 		case p.name == jobPushMultiarch || boolParam(p, "multiarch"):
 			addPlatforms(set, defaultPlatforms)
 		case atLeast(orb, orbBuildx):
-			// buildx derives the list from go-build's `.platforms`; without a
-			// go-build job the configuration does not say.
-			if len(goBuilds) == 0 {
-				continue
-			}
+			// buildx takes go-build's `.platforms` when a go-build job wrote
+			// it, else the orb's built-in default — the same list.
 			list := defaultPlatforms
 			for _, g := range goBuilds {
 				if pl := stringParam(g, "platforms"); pl != "" {

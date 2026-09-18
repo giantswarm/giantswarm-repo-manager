@@ -16,16 +16,19 @@ import (
 // watch_repository against the fakes: a creation followed phase by phase as
 // GitHub and the inventory show them — to ready, to a failed step, to a run
 // that never reported, to a red release, through a read GitHub refuses,
-// through the jobs the declaration implies and the settle window — and the
+// through the jobs the declaration implies and the settle window, through a
+// merge arriving mid-call that ends the call with the phase — and the
 // timeout that answers with what is pending.
 
 const (
 	argTimeout = "timeout"
 	firstTag   = "v0.1.0"
 	shinyURL   = "https://github.com/" + org + "/" + shinyService
-	// throughSetUp are the phases done once the reconciler run has reported.
-	throughSetUp = "created scaffolded declared merged setUp"
-	allPhases    = throughSetUp + " released"
+	// throughMerged are the phases done once the pull request is merged,
+	// throughSetUp once the reconciler run has reported.
+	throughMerged = "created scaffolded declared merged"
+	throughSetUp  = throughMerged + " setUp"
+	allPhases     = throughSetUp + " released"
 	// watchSettle is the stack's settle window: how long the release's
 	// statuses stay unchanged before released is done (60 s in service).
 	// GitHub dates a status to the second, so the window is over a second.
@@ -100,11 +103,14 @@ func names(ps []tools.Phase) string {
 // TestWatchRepositoryFollowsACreationToReadiness: the creation leaves the
 // record expecting the run of its pull request, so the poller runs at its
 // pending interval; before the merge the watch answers with merged pending
-// and the three phases done; after the merge and the run, with the release
-// there but CircleCI silent, released stays pending, as it does while
-// CircleCI's statuses are pending; its green statuses during the wait make
-// it ready with every phase. The statuses are read as the inventory App: the
-// fake refuses them to a person's token.
+// and the three phases done; a merge arriving mid-call ends the call within
+// a poll interval with the merged phase and changed, setUp pending; after
+// the run, with the release there but CircleCI silent, released stays
+// pending, as it does while CircleCI's statuses are pending — a call that
+// runs out without a new phase is not changed; its green statuses during the
+// wait make it ready with every phase, changed, and a call that starts ready
+// is ready at once, unchanged. The statuses are read as the inventory App:
+// the fake refuses them to a person's token.
 func TestWatchRepositoryFollowsACreationToReadiness(t *testing.T) {
 	st := newStack(t)
 	c := st.as(t, aliceToken)
@@ -124,7 +130,7 @@ func TestWatchRepositoryFollowsACreationToReadiness(t *testing.T) {
 	}
 
 	w := st.watch(t, c, pr, 0.3)
-	if w.Ready || w.Pending != tools.PhaseMerged || w.Failure != nil || names(w.Phases) != "created scaffolded declared" || w.Repository != shinyURL || w.PullRequest != prURL {
+	if w.Ready || w.Changed || w.Pending != tools.PhaseMerged || w.Failure != nil || names(w.Phases) != "created scaffolded declared" || w.Repository != shinyURL || w.PullRequest != prURL {
 		t.Fatalf("before the merge: %+v", w)
 	}
 	for i, ph := range w.Phases {
@@ -133,7 +139,14 @@ func TestWatchRepositoryFollowsACreationToReadiness(t *testing.T) {
 		}
 	}
 
-	st.ghs.files.merge(pr)
+	go func() {
+		time.Sleep(150 * time.Millisecond)
+		st.ghs.files.merge(pr)
+	}()
+	w = st.watch(t, c, pr, 5)
+	if !w.Changed || w.Ready || w.Pending != tools.PhaseSetUp || w.PendingReason != "" || w.Failure != nil || names(w.Phases) != throughMerged || w.Waited > 1 {
+		t.Fatalf("the merge mid-call: %+v", w)
+	}
 	st.reported(t, pr, prURL,
 		reconcile.StepResult{Step: reconcile.StepCircleCI, Verdict: reconcile.VerdictRepaired, Summary: "followed", Changes: []string{"follow the project"}},
 		reconcile.StepResult{Step: reconcile.StepMetadata, Verdict: reconcile.VerdictReported, Findings: []reconcile.Finding{{Kind: reconcile.FindingDefaultIcon, Message: "the chart carries the template's icon", Fix: "replace the icon"}}},
@@ -148,7 +161,7 @@ func TestWatchRepositoryFollowsACreationToReadiness(t *testing.T) {
 		t.Fatalf("before CircleCI reported: %+v release=%+v", w, w.Release)
 	}
 	st.ghs.repos.report(shinyService, statePending, circleBuild)
-	if w = st.watch(t, c, pr, 0.3); w.Ready || w.Pending != tools.PhaseReleased || w.Failure != nil ||
+	if w = st.watch(t, c, pr, 0.3); w.Ready || w.Changed || w.Pending != tools.PhaseReleased || w.Failure != nil || w.Waited != 0 ||
 		w.PendingReason != "the CircleCI statuses on "+firstTag+": "+circleBuild+" (pending) — waiting for the pending ones" {
 		t.Fatalf("CircleCI pending: %+v", w)
 	}
@@ -158,8 +171,11 @@ func TestWatchRepositoryFollowsACreationToReadiness(t *testing.T) {
 		st.ghs.repos.report(shinyService, stateSuccess, greenRelease...)
 	}()
 	w = st.watch(t, c, pr, 5)
-	if !w.Ready || w.Pending != "" || w.PendingReason != "" || w.Failure != nil || names(w.Phases) != allPhases || w.Waited > 3 {
+	if !w.Ready || !w.Changed || w.Pending != "" || w.PendingReason != "" || w.Failure != nil || names(w.Phases) != allPhases || w.Waited > 3 {
 		t.Fatalf("ready: %+v", w)
+	}
+	if w = st.watch(t, c, pr, 5); !w.Ready || w.Changed || w.Waited != 0 {
+		t.Fatalf("a call that starts ready: %+v", w)
 	}
 }
 
@@ -239,7 +255,7 @@ func TestWatchRepositoryReportsAFailedStep(t *testing.T) {
 	st.ghs.files.merge(pr)
 	st.reported(t, pr, prURL, reconcile.StepResult{Step: reconcile.StepProtection, Verdict: reconcile.VerdictFailed, Summary: "PUT branch protection: 403 Resource not accessible by integration"})
 	w := st.watch(t, c, pr, 0.3)
-	if w.Ready || w.Pending != "" || w.Failure == nil || w.Failure.Phase != tools.PhaseSetUp || names(w.Phases) != "created scaffolded declared merged" ||
+	if w.Ready || w.Changed || w.Pending != "" || w.Failure == nil || w.Failure.Phase != tools.PhaseSetUp || names(w.Phases) != throughMerged ||
 		!strings.Contains(w.Failure.Reason, "the protection step failed: PUT branch protection: 403") || !strings.Contains(w.Failure.Reason, "/actions/runs/") {
 		t.Fatalf("a failed step: %+v failure=%+v", w, w.Failure)
 	}
@@ -265,7 +281,7 @@ func TestWatchRepositoryReportsAMissingRun(t *testing.T) {
 		t.Fatalf("the missing run's finding: %+v (%+v)", f, rec.Findings)
 	}
 	w := st.watch(t, c, pr, 0.3)
-	if w.Ready || w.Failure == nil || w.Failure.Phase != tools.PhaseSetUp || w.Failure.Reason != f.Message || names(w.Phases) != "created scaffolded declared merged" {
+	if w.Ready || w.Failure == nil || w.Failure.Phase != tools.PhaseSetUp || w.Failure.Reason != f.Message || names(w.Phases) != throughMerged {
 		t.Fatalf("a missing run: %+v failure=%+v", w, w.Failure)
 	}
 }

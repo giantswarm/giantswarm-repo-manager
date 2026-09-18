@@ -45,6 +45,41 @@ func circleCI(n *repoNode, run *inventory.LastRun) *inventory.CircleCI {
 	return out
 }
 
+// engineCircleCI adds the engine's own circleci step to the record's CircleCI
+// state — real when the runner has a CircleCI client (the configured token),
+// skipped otherwise, in which case nothing is added. The engine reads the
+// project directly, so what it says stands: followed, setup workflows, or
+// the changes a repair would make; the facts it yields leave Unknown.
+func engineCircleCI(out *inventory.CircleCI, res *reconcile.Result) {
+	if out == nil || res == nil {
+		return
+	}
+	sr := res.Step(reconcile.StepCircleCI)
+	if sr == nil || sr.Verdict == reconcile.VerdictSkipped {
+		return
+	}
+	setup := applyStep(out, res.Mode, sr)
+	if sr.Verdict == reconcile.VerdictFailed {
+		out.Error = "the engine's circleci step failed: " + sr.Summary
+	}
+	out.Source += "+" + inventory.CircleCISourceEngine
+	out.Unknown = without(out.Unknown, inventory.CircleCIFactFollowed)
+	if setup {
+		out.Unknown = without(out.Unknown, inventory.CircleCIFactSetupWorkflows)
+	}
+}
+
+// without is list minus s; nil when nothing is left.
+func without(list []string, s string) []string {
+	var out []string
+	for _, x := range list {
+		if x != s {
+			out = append(out, x)
+		}
+	}
+	return out
+}
+
 // applyStep reads the reconciler's circleci step: the summary of a converged
 // step, the changes a check run would make or a repair made, the error of a
 // failed one. It returns whether the setup-workflows setting is known.

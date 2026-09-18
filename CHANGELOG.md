@@ -9,6 +9,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- A CircleCI token for the engine's checks: the chart value `circleci.existingSecret` (a Secret with the token under `token`, passed as `CIRCLECI_TOKEN`; flag `--circleci-token`) gives devctl's reconcile runner its CircleCI client, so the read-mode checks of every sweep and refresh read each project themselves — followed, setup workflows, checkout key, the latest release's pipeline — and the set-up steps `circleci` and `release` show CircleCI drift before anyone runs Align now. Check mode never writes to CircleCI. The engine's step is the third source of the record's `circleci` state (`source` gains `engine`; `setupWorkflows` and `followed` leave `unknown`), `get_info` reports `circleci.configured`, and the start log `circleci=true`. Without the token the two steps still come from the record's other sources as before, and the `unchecked` finding's fix now names the token as the way to have them checked on every sweep, a reconciler run (Align now, a check for a team that has not opted in) in the meantime.
+
 ### Fixed
 
 - The set-up steps `circleci` and `release` of a repository's `setup.checks` no longer read `skipped: no CircleCI client` — the engine runs without a CircleCI token here, and the inventory now writes those two steps from what it knows: the reconciler's last run over the repository (followed, setup workflows, checkout key, the tag's build — checked with its token) when it ran, and the `ci/circleci:` statuses on the default branch head, which say whether CircleCI builds the branch. Each summary names its source and time; a repository no run has checked yet carries the finding `unchecked` naming what is out of reach and Align now as the fix; a head without a CircleCI status is the drift the engine would report for an unfollowed project. `converged` follows the rewritten steps.

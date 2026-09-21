@@ -11,6 +11,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- `adopt_repository` (`repository`, `team`, `entry`, `reason`; `dryRun` / `mode: commit`) declares a repository that exists on
+  GitHub and no team file declares — the inventory's unassigned scope — the way `create_repository` declares a new one, without
+  the create and scaffold steps: the entry shaped and rendered by the same code, validated against the repositories schema alone
+  (the engine's existing-repository mode; the creation rules are for repositories the manager creates), inserted into
+  `repositories/<team>.yaml` by the same insert as the creation-only pull request, opened as the caller with auto-merge armed, the
+  ask with the Approve button delivered to the team's channel (a plain addition, so the team reviews it), the record's expected
+  run marked `added`. `align` is the person's to set and the pull request body says what the merge does with and without it.
+  `lifecycle: deprecated` or `archived` in the entry adopts the repository and ends its life in the one pull request
+  (`chore(repositories): adopt and archive <name> into <team>`); the entry then gets `align: true` beside the lifecycle, as
+  `set_lifecycle` does, and the plan and the ask say so; `deleted` is refused (declare first, then `set_lifecycle` with the name
+  typed). Refused before any write when the name is free on GitHub (a creation) or declared already (the refusal names the team and
+  the tool to use) (giantswarm/giantswarm-repo-manager#90).
+
+### Changed
+
+- `create_repository` resumes only a creation of the caller's interrupted after the create or the scaffold step: a repository the
+  caller administers whose default branch carries at most one commit. One with a history is somebody's work: its taken name
+  stays refused, the refusal naming `adopt_repository`. Before, any repository the caller administered was declared by
+  the resume, and the pull request then said it had been created and scaffolded by the caller
+  (giantswarm/giantswarm-repo-manager#90).
+
 - `set_lifecycle` takes `deleted`, the fourth lifecycle: the reconciler unfollows the repository on CircleCI and
   deletes it on GitHub — code, issues, pull requests, releases and packages with it; an organization owner can restore
   it on GitHub for 90 days — and the entry stays in the team file as the record of the deletion. A deletion needs

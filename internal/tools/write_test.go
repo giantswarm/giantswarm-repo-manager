@@ -22,8 +22,8 @@ const (
 // validEntry is a declaration the embedded schema and the creation rules
 // accept: a Go service, chart flavour, name free (no name checker → unchecked).
 var validEntry = map[string]any{
-	"name":          "example-service",
-	"componentType": "service",
+	teamfiles.FieldName:          "example-service",
+	teamfiles.FieldComponentType: "service",
 	"gen": map[string]any{
 		"language": "go",
 		"flavours": []any{"app"},

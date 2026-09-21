@@ -364,7 +364,7 @@ func (c *Collector) runChecks(ctx context.Context, records []*inventory.Record, 
 		return 0
 	}
 	var n atomic.Int32
-	c.parallel(records, func(r *inventory.Record) {
+	parallel(c.opts.Concurrency, records, func(r *inventory.Record) {
 		d := src.declarations[r.Name]
 		switch {
 		case r.Declaration == nil || d == nil:
@@ -401,17 +401,19 @@ func (c *Collector) runChecks(ctx context.Context, records []*inventory.Record, 
 	return int(n.Load())
 }
 
-func (c *Collector) parallel(records []*inventory.Record, fn func(*inventory.Record)) {
-	sem := make(chan struct{}, c.opts.Concurrency)
+// parallel runs fn over items, concurrency at a time, and returns when every
+// call has.
+func parallel[T any](concurrency int, items []T, fn func(T)) {
+	sem := make(chan struct{}, concurrency)
 	var wg sync.WaitGroup
-	for _, r := range records {
+	for _, item := range items {
 		wg.Add(1)
 		sem <- struct{}{}
-		go func(r *inventory.Record) {
+		go func(item T) {
 			defer wg.Done()
 			defer func() { <-sem }()
-			fn(r)
-		}(r)
+			fn(item)
+		}(item)
 	}
 	wg.Wait()
 }

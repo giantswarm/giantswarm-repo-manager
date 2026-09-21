@@ -158,3 +158,68 @@ func TestConflictsAndMergeable(t *testing.T) {
 		t.Fatalf("after Mergeable: %+v", r.Setup.PendingRun)
 	}
 }
+
+// TestRunFailedNamesTheRunAndItsConclusion: a pending run whose run
+// completed without a report is given up at once, the finding naming the
+// run and its conclusion — for an Align now and for a team-file pull request
+// alike — and its fix the run and align_repository; the missing run carries
+// the run beside the workflow's Actions page. A record without a pending
+// run is unchanged; the next artifact or dispatch clears the finding.
+func TestRunFailedNamesTheRunAndItsConclusion(t *testing.T) {
+	now := time.Date(2026, 9, 21, 14, 44, 21, 0, time.UTC)
+	noticed := now.Add(70 * time.Second)
+	runs := "https://github.com/giantswarm/github/actions/workflows/reconcile-repositories.yaml"
+	run := "https://github.com/giantswarm/github/actions/runs/35614169562"
+
+	r := &Record{Repository: repoX}
+	r.RunFailed(noticed, runs, run, "failure")
+	if r.Setup.MissingRun != nil || len(r.Findings) != 0 {
+		t.Fatalf("without a pending run: %+v", r.Setup)
+	}
+
+	r.Dispatched(now, "teemow")
+	r.RunFailed(noticed, runs, run, "failure")
+	m := r.Setup.MissingRun
+	if r.Setup.PendingRun != nil || m == nil || m.RunURL != run || m.Conclusion != "failure" || m.RunsURL != runs || !m.NoticedAt.Equal(noticed) || m.By != "teemow" || m.Kind != ChangeDispatched {
+		t.Fatalf("missing run after the failed dispatch run: %+v (pending %+v)", m, r.Setup.PendingRun)
+	}
+	f := r.MissingRunFinding()
+	if f == nil || f.Kind != FindingReconcileRunMissing || f.Source != FindingSourceInventory ||
+		f.Message != "the reconciler run teemow dispatched at 2026-09-21T14:44:21Z for giantswarm/x completed with conclusion failure and uploaded no report: "+run ||
+		!strings.Contains(f.Fix, "look at the run "+run) || !strings.Contains(f.Fix, "dispatch again with align_repository") {
+		t.Errorf("finding for the failed dispatch run: %+v", f)
+	}
+	if len(r.Findings) != 1 || r.Findings[0].Message != f.Message {
+		t.Errorf("the record's findings: %+v", r.Findings)
+	}
+	b, err := json.Marshal(r)
+	if err != nil || !strings.Contains(string(b), `"runUrl":"`+run+`"`) || !strings.Contains(string(b), `"conclusion":"failure"`) {
+		t.Errorf("the run in the record's JSON: %s %v", b, err)
+	}
+
+	pr := ChangePullRequest{Number: 6218, URL: "https://github.com/giantswarm/github/pull/6218"}
+	r = &Record{Repository: repoX}
+	r.Opened(now, "alice", ChangeCreated, pr)
+	r.Merged(now.Add(10 * time.Minute))
+	r.RunFailed(now.Add(12*time.Minute), runs, run, "cancelled")
+	f = r.MissingRunFinding()
+	if f == nil || f.Message != "the reconciler run for giantswarm/x, whose declaration pull request "+pr.URL+" alice opened at 2026-09-21T14:44:21Z was merged at 2026-09-21T14:54:21Z, completed with conclusion cancelled and uploaded no report: "+run ||
+		!strings.Contains(f.Fix, "look at the run "+run) || !strings.Contains(f.Fix, "align_repository") {
+		t.Errorf("finding for the failed merge run: %+v", f)
+	}
+
+	// The window running out without a run to name keeps its wording.
+	r = &Record{Repository: repoX}
+	r.Dispatched(now, "teemow")
+	r.RunMissing(now.Add(16*time.Minute), runs)
+	if f = r.MissingRunFinding(); f == nil || f.Message != "the reconciler run teemow dispatched at 2026-09-21T14:44:21Z for giantswarm/x had not reported by 2026-09-21T15:00:21Z" ||
+		!strings.Contains(f.Fix, "look for the run on "+runs) || r.Setup.MissingRun.RunURL != "" {
+		t.Errorf("finding for the window: %+v (%+v)", f, r.Setup.MissingRun)
+	}
+
+	// The next dispatch forgets the failed run.
+	r.Dispatched(now.Add(20*time.Minute), "teemow")
+	if r.Setup.MissingRun != nil || r.Setup.PendingRun == nil || len(r.Findings) != 0 {
+		t.Errorf("after the next dispatch: %+v findings %+v", r.Setup, r.Findings)
+	}
+}

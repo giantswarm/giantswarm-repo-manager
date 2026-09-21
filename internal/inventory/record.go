@@ -377,13 +377,20 @@ func (p *PendingRun) AwaitedFrom() time.Time {
 	return time.Time{}
 }
 
-// MissingRun is an expected reconciler run that never reported.
+// MissingRun is an expected reconciler run that never reported: its run
+// completed without a report, or the pending window ran out.
 type MissingRun struct {
 	PendingRun
-	// NoticedAt is when the pending window ran out.
+	// NoticedAt is when the poller found the run completed without a
+	// report, or when the pending window ran out.
 	NoticedAt time.Time `json:"noticedAt"`
 	// RunsURL is the workflow's Actions page: where the run is, if any.
 	RunsURL string `json:"runsUrl"`
+	// RunURL and Conclusion name the run that completed without a report —
+	// failed or cancelled before its report step — when the poller found
+	// one; empty when the window ran out with no run to name.
+	RunURL     string `json:"runUrl,omitempty"`
+	Conclusion string `json:"conclusion,omitempty"`
 }
 
 // Finding is something the inventory shows rather than anyone repairs.
@@ -472,9 +479,10 @@ func (r *Record) findings() []Finding {
 
 // MissingRunFinding is the finding reconcile-run-missing for the record's
 // missing run, nil without one, in the words of the run that was expected:
-// an Align now that started no run or whose run failed before its report
-// step, or the run of a team-file pull request (named by its kind) that
-// did not follow the merge.
+// an Align now, or the run of a team-file pull request (named by its kind)
+// that follows the merge. A run found completed without a report is named
+// with its conclusion; one that never showed had not reported by the time
+// the window ran out.
 func (r *Record) MissingRunFinding() *Finding {
 	m := r.Setup.MissingRun
 	if m == nil {
@@ -482,17 +490,25 @@ func (r *Record) MissingRunFinding() *Finding {
 	}
 	f := &Finding{Kind: FindingReconcileRunMissing, Source: FindingSourceInventory}
 	dispatched, noticed := m.DispatchedAt.Format(time.RFC3339), m.NoticedAt.Format(time.RFC3339)
+	expected := fmt.Sprintf("the reconciler run %s dispatched at %s for %s", m.By, dispatched, r.Repository)
 	if m.PullRequest != nil {
 		merged := ""
 		if m.MergedAt != nil {
 			merged = " was merged at " + m.MergedAt.Format(time.RFC3339)
 		}
-		f.Message = fmt.Sprintf("the reconciler run for %s, whose %s pull request %s %s opened at %s%s, had not reported by %s", r.Repository, PullRequestNoun(m.Kind), m.PullRequest.URL, m.By, dispatched, merged, noticed)
-		f.Fix = fmt.Sprintf("the run follows the pull request's merge: look for it on %s — it may have failed before its report step; the next artifact clears this", m.RunsURL)
-		return f
+		expected = fmt.Sprintf("the reconciler run for %s, whose %s pull request %s %s opened at %s%s,", r.Repository, PullRequestNoun(m.Kind), m.PullRequest.URL, m.By, dispatched, merged)
 	}
-	f.Message = fmt.Sprintf("the reconciler run %s dispatched at %s for %s had not reported by %s", m.By, dispatched, r.Repository, noticed)
-	f.Fix = fmt.Sprintf("look for the run on %s — it may have failed before its report step, or the dispatch started none; dispatch again with align_repository", m.RunsURL)
+	switch {
+	case m.RunURL != "":
+		f.Message = fmt.Sprintf("%s completed with conclusion %s and uploaded no report: %s", expected, m.Conclusion, m.RunURL)
+		f.Fix = fmt.Sprintf("look at the run %s — it failed before its report step; dispatch again with align_repository", m.RunURL)
+	case m.PullRequest != nil:
+		f.Message = fmt.Sprintf("%s had not reported by %s", expected, noticed)
+		f.Fix = fmt.Sprintf("the run follows the pull request's merge: look for it on %s — it may have failed before its report step; the next artifact clears this", m.RunsURL)
+	default:
+		f.Message = fmt.Sprintf("%s had not reported by %s", expected, noticed)
+		f.Fix = fmt.Sprintf("look for the run on %s — it may have failed before its report step, or the dispatch started none; dispatch again with align_repository", m.RunsURL)
+	}
 	return f
 }
 
@@ -568,10 +584,24 @@ func (r *Record) expectRun(p PendingRun) {
 // RunMissing ends the pending run at now without an artifact: the finding
 // reconcile-run-missing names runsURL, the workflow's Actions page.
 func (r *Record) RunMissing(now time.Time, runsURL string) {
+	r.giveUp(MissingRun{NoticedAt: now, RunsURL: runsURL})
+}
+
+// RunFailed ends the pending run at now because its run completed with
+// conclusion (failure, cancelled) and uploaded no report: the finding
+// reconcile-run-missing names the run, runURL, beside the workflow's Actions
+// page, so the failure shows at once rather than at the pending window's end.
+func (r *Record) RunFailed(now time.Time, runsURL, runURL, conclusion string) {
+	r.giveUp(MissingRun{NoticedAt: now, RunsURL: runsURL, RunURL: runURL, Conclusion: conclusion})
+}
+
+// giveUp moves the pending run into m; a record without one is unchanged.
+func (r *Record) giveUp(m MissingRun) {
 	if r.Setup.PendingRun == nil {
 		return
 	}
-	r.Setup.MissingRun = &MissingRun{PendingRun: *r.Setup.PendingRun, NoticedAt: now, RunsURL: runsURL}
+	m.PendingRun = *r.Setup.PendingRun
+	r.Setup.MissingRun = &m
 	r.Setup.PendingRun = nil
 	r.Findings = r.findings()
 }

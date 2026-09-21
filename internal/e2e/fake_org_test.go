@@ -338,7 +338,7 @@ func (c *fakeChecker) Check(_ context.Context, teamSlug string, entry reposetup.
 		Repository: org + "/" + entry.Name, Declared: org + "/" + entry.Name, Team: teamSlug, Mode: reconcile.ModeCheck, StartedAt: now, FinishedAt: now, Converged: true,
 		Steps: []reconcile.StepResult{
 			{Step: reconcile.StepScaffold, Verdict: reconcile.VerdictOK, Summary: "scaffold present",
-				Findings: []reconcile.Finding{{Kind: reconcile.FindingDefaultIcon, Message: "the chart carries the template's icon", Fix: "replace helm/<chart>/icon.svg"}}},
+				Findings: []reconcile.Finding{{Kind: reconcile.FindingDefaultIcon, Advisory: true, Message: "the chart carries the template's icon", Fix: "replace helm/<chart>/icon.svg"}}},
 			{Step: reconcile.StepCircleCI, Verdict: reconcile.VerdictSkipped, Summary: "no CircleCI client"},
 			{Step: reconcile.StepRelease, Verdict: reconcile.VerdictSkipped, Summary: "release " + presentTag + ": no CircleCI client to verify the pipeline"},
 		},

@@ -118,7 +118,7 @@ GitHub after every run (its `circleci` step). What neither source yields, the re
 their `circleci` and `release` steps; the inventory writes those two steps as the answers a person reading them wants —
 does CircleCI build this repository (the head's statuses: `ok`, or the engine's follow plan as `drift` when the head
 carries none), did the latest release build (the tag commit's statuses: `ok`, `red-release`, or the missed tag build
-as `drift`) — and the reconciler's last run adds the settings only its token reaches when it ran. The record's `ci`
+as the finding `missed-tag-build`) — and the reconciler's last run adds the settings only its token reaches when it ran. The record's `ci`
 block answers the rest from the configuration on the default branch (`.circleci/config.yml`, `workflows.yml`,
 `custom.yml`, read with the repository): the architect orb version, whether the images include arm64, how they reach
 the China registry (`split`, `inline`, `custom`, `none`) and whether images and charts are signed with cosign

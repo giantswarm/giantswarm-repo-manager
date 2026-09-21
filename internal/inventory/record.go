@@ -393,6 +393,10 @@ type Finding struct {
 	Fix     string `json:"fix,omitempty"`
 	// Source is inventory or engine.
 	Source string `json:"source"`
+	// Advisory is the engine's weight of the finding: for a person only,
+	// the repository counts as in sync with it. The inventory's own
+	// findings are never advisory.
+	Advisory bool `json:"advisory,omitempty"`
 }
 
 // The inventory's own finding kinds; the engine's kinds pass through.
@@ -460,7 +464,7 @@ func (r *Record) findings() []Finding {
 	}
 	if r.Setup.Checks != nil {
 		for _, f := range r.Setup.Checks.Findings() {
-			out = append(out, Finding{Kind: string(f.Kind), Message: f.Message, Fix: f.Fix, Source: FindingSourceEngine})
+			out = append(out, Finding{Kind: string(f.Kind), Message: f.Message, Fix: f.Fix, Source: FindingSourceEngine, Advisory: f.Advisory})
 		}
 	}
 	return out

@@ -149,7 +149,7 @@ func TestWatchRepositoryFollowsACreationToReadiness(t *testing.T) {
 	}
 	st.reported(t, pr, prURL,
 		reconcile.StepResult{Step: reconcile.StepCircleCI, Verdict: reconcile.VerdictRepaired, Summary: "followed", Changes: []string{"follow the project"}},
-		reconcile.StepResult{Step: reconcile.StepMetadata, Verdict: reconcile.VerdictReported, Findings: []reconcile.Finding{{Kind: reconcile.FindingDefaultIcon, Message: "the chart carries the template's icon", Fix: "replace the icon"}}},
+		reconcile.StepResult{Step: reconcile.StepMetadata, Verdict: reconcile.VerdictReported, Findings: []reconcile.Finding{{Kind: reconcile.FindingDefaultIcon, Advisory: true, Message: "the chart carries the template's icon", Fix: "replace the icon"}}},
 		reconcile.StepResult{Step: reconcile.StepRelease, Verdict: reconcile.VerdictRepaired, Summary: "trigger the missed tag build for " + firstTag})
 	if rec := st.record(t, shinyService); rec.Setup.PendingRun != nil || rec.Setup.LastRun == nil {
 		t.Fatalf("record after the run: %+v", rec.Setup)

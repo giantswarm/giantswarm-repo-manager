@@ -241,7 +241,7 @@ func ParseEntry(text []byte) (reposetup.Declaration, error) {
 
 // keyOrder is the order the team files write an entry's keys in; keys not
 // listed follow alphabetically.
-var keyOrder = []string{FieldName, FieldComponentType, "description", "visibility", FieldLifecycle, FieldAlign, "system", "choreReviewers", "replace", FieldGen}
+var keyOrder = []string{FieldName, FieldComponentType, "description", "visibility", FieldLifecycle, "defaultBranch", FieldAlign, "system", "choreReviewers", "requiredChecks", "replace", FieldGen}
 
 // EntryFromValue renders a JSON-compatible value (a tool argument) as a
 // declaration, its keys in the team files' order (name first).

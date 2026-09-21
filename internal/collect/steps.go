@@ -26,7 +26,8 @@ const noCircleCIClient = "no CircleCI client"
 // reaches (setup workflows, checkout key). What no source yields is the
 // finding `unchecked`, never a guess; a step the engine skipped for another
 // reason (an archived repository, an empty one) stays as it is. Converged
-// follows the rewritten steps.
+// follows the rewritten steps by the engine's rule: no step drifted or
+// failed and every finding is advisory.
 func fillClientlessSteps(res *reconcile.Result, rec *inventory.Record) {
 	if res == nil || rec == nil || rec.Reality == nil {
 		return
@@ -39,11 +40,17 @@ func fillClientlessSteps(res *reconcile.Result, rec *inventory.Record) {
 		*sr = releaseStep(rec.Repository, releaseTag(sr.Summary), rec.Reality.LatestRelease, last)
 	}
 	res.Converged = true
-	for _, sr := range res.Steps {
-		if sr.Verdict == reconcile.VerdictDrift || sr.Verdict == reconcile.VerdictFailed {
+	for i := range res.Steps {
+		if !res.Steps[i].Converges() {
 			res.Converged = false
 		}
 	}
+}
+
+// finding is a finding of kind with its message and fix, advisory as the
+// engine says of the kind, so a step written here reads like the engine's.
+func finding(kind reconcile.FindingKind, message, fix string) reconcile.Finding {
+	return reconcile.Finding{Kind: kind, Message: message, Fix: fix, Advisory: kind.Advisory()}
 }
 
 // clientless says whether the engine skipped the step for want of a CircleCI
@@ -126,9 +133,9 @@ func circleCIStep(slug, branch string, cc *inventory.CircleCI, last *inventory.L
 	case contains(cc.Unknown, inventory.CircleCIFactFollowed):
 		sr.Verdict = reconcile.VerdictReported
 		sr.Summary = fmt.Sprintf("the statuses on %s's head were truncated before a CircleCI one", branch)
-		sr.Findings = []reconcile.Finding{{Kind: reconcile.FindingUnchecked,
-			Message: fmt.Sprintf("whether CircleCI builds %s is out of the inventory's reach: the head's status contexts were truncated before a CircleCI one", slug),
-			Fix:     alignFix}}
+		sr.Findings = []reconcile.Finding{finding(reconcile.FindingUnchecked,
+			fmt.Sprintf("whether CircleCI builds %s is out of the inventory's reach: the head's status contexts were truncated before a CircleCI one", slug),
+			alignFix)}
 	default:
 		// No CircleCI status on the head and no run: the project is not built,
 		// the check-mode plan is the engine's for an unfollowed project.
@@ -163,7 +170,7 @@ func jobs(s *inventory.HeadStatus) string {
 // statuses say whether CircleCI built the release; the reconciler's run
 // stands in while the commit carries none and that run named the tag; a
 // commit without any CircleCI status is the missed tag build the engine
-// would trigger.
+// reports (finding missed-tag-build: a tag is never built for the person).
 func releaseStep(slug, tag string, rel *inventory.Release, last *inventory.LastRun) reconcile.StepResult {
 	sr := reconcile.StepResult{Step: reconcile.StepRelease}
 	if rel != nil && rel.Tag == tag && rel.Build != nil {
@@ -179,9 +186,9 @@ func releaseStep(slug, tag string, rel *inventory.Release, last *inventory.LastR
 		default:
 			sr.Verdict = reconcile.VerdictReported
 			sr.Summary = fmt.Sprintf("release %s: CircleCI %s (%s, %s)", tag, b.State, jobs(b), at)
-			sr.Findings = []reconcile.Finding{{Kind: reconcile.FindingRedRelease,
-				Message: fmt.Sprintf("the tag pipeline of %s %s failed (%s)", slug, tag, strings.Join(b.Contexts, ", ")),
-				Fix:     "a tag is never rebuilt: fix the pipeline and cut the next release"}}
+			sr.Findings = []reconcile.Finding{finding(reconcile.FindingRedRelease,
+				fmt.Sprintf("the tag pipeline of %s %s failed (%s)", slug, tag, strings.Join(b.Contexts, ", ")),
+				"a tag is never rebuilt: fix the pipeline and cut the next release")}
 		}
 		return sr
 	}
@@ -190,15 +197,9 @@ func releaseStep(slug, tag string, rel *inventory.Release, last *inventory.LastR
 		sr.Verdict = run.Verdict
 		sr.Changes = append([]string(nil), run.Changes...)
 		sr.Findings = append([]reconcile.Finding(nil), run.Findings...)
-		switch {
-		case run.Verdict == reconcile.VerdictRepaired:
-			// The run triggered the missed build; the statuses report it next.
-			sr.Verdict = reconcile.VerdictOK
-			sr.Summary = fmt.Sprintf("release %s: build triggered by the reconciler%s", tag, from)
-		case run.Summary != "":
+		sr.Summary = fmt.Sprintf("release %s%s", tag, from)
+		if run.Summary != "" {
 			sr.Summary = run.Summary + from
-		default:
-			sr.Summary = fmt.Sprintf("release %s%s", tag, from)
 		}
 		return sr
 	}
@@ -210,19 +211,21 @@ func releaseStep(slug, tag string, rel *inventory.Release, last *inventory.LastR
 		}
 		sr.Verdict = reconcile.VerdictReported
 		sr.Summary = fmt.Sprintf("release %s: not the latest release the inventory read (%s)", tag, latest)
-		sr.Findings = []reconcile.Finding{{Kind: reconcile.FindingUnchecked,
-			Message: fmt.Sprintf("whether CircleCI built the tag %s of %s is out of the inventory's reach until its next read of the repository", tag, slug),
-			Fix:     "refresh the repository, or " + alignFix}}
+		sr.Findings = []reconcile.Finding{finding(reconcile.FindingUnchecked,
+			fmt.Sprintf("whether CircleCI built the tag %s of %s is out of the inventory's reach until its next read of the repository", tag, slug),
+			"refresh the repository, or "+alignFix)}
 	case rel.BuildTruncated:
 		sr.Verdict = reconcile.VerdictReported
 		sr.Summary = fmt.Sprintf("release %s: the statuses on its commit were truncated before a CircleCI one", tag)
-		sr.Findings = []reconcile.Finding{{Kind: reconcile.FindingUnchecked,
-			Message: fmt.Sprintf("whether CircleCI built the tag %s of %s is out of the inventory's reach: the commit's status contexts were truncated before a CircleCI one", tag, slug),
-			Fix:     alignFix}}
+		sr.Findings = []reconcile.Finding{finding(reconcile.FindingUnchecked,
+			fmt.Sprintf("whether CircleCI built the tag %s of %s is out of the inventory's reach: the commit's status contexts were truncated before a CircleCI one", tag, slug),
+			alignFix)}
 	default:
-		sr.Verdict = reconcile.VerdictDrift
+		sr.Verdict = reconcile.VerdictReported
 		sr.Summary = fmt.Sprintf("no CircleCI status on %s's commit: the tag was not built", tag)
-		sr.Changes = []string{"trigger the missed tag build for " + tag}
+		sr.Findings = []reconcile.Finding{finding(reconcile.FindingMissedTagBuild,
+			fmt.Sprintf("release %s of %s has no CircleCI status on its commit: nothing was built or published for the tag", tag, slug),
+			"cut the next tag, or trigger the tag's pipeline by hand")}
 	}
 	return sr
 }

@@ -26,6 +26,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- The engine is devctl v8.82.1, from v8.67.0: the repository-alignment baseline — status checks required non-strictly with
+  `enforce_admins` final, advisory findings that leave `converged` true, the finding `missed-tag-build` in place of a triggered
+  tag build, the `circleci` and `release` steps only for a repository with a pipeline, the profiles `fork` and `customer` with
+  `defaultBranch` and `requiredChecks` in the entry, and the run's request count under `requests`. The inventory follows the
+  engine: a check's `converged` is the engine's rule (a non-advisory finding on a reported step clears it, an advisory one
+  does not), the record's findings carry `advisory`, the clientless `release` step reports `missed-tag-build` instead of
+  planning a trigger, and an entry the tools write orders `defaultBranch` and `requiredChecks` as the team files do
+  (giantswarm/giantswarm-repo-manager#89).
 - `create_repository` resumes only a creation of the caller's interrupted after the create or the scaffold step: a repository the
   caller administers whose default branch carries at most one commit. One with a history is somebody's work: its taken name
   stays refused, the refusal naming `adopt_repository`. Before, any repository the caller administered was declared by

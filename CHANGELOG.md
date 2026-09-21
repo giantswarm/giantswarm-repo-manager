@@ -9,6 +9,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- The engine is devctl v8.82.7, from v8.82.1. Every declared repository read *not in sync* with `settings drift:
+  allow_squash_merge false → true, allow_update_branch false → true, allow_auto_merge false → true, delete_branch_on_merge
+  false → true` while the reconciler's run said `settings ok`: `GET /repos/{owner}/{repo}` carries the six merge settings for
+  an identity with admin rights on the repository only, the inventory App (`administration: read`) got them as `null`, and
+  the engine read an absent field as `false`. The engine's settings step now reads them through GraphQL, which answers the
+  inventory App with the values, and reports them as an `unchecked` finding, never as drift, when that read fails too; the
+  inventory App stays read-only. A refused entry's check reads `converged: false` (the engine's `Refused` result, devctl
+  v8.82.6) instead of *converged* beside the refusal.
+
 ### Added
 
 - `adopt_repository` (`repository`, `team`, `entry`, `reason`; `dryRun` / `mode: commit`) declares a repository that exists on

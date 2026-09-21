@@ -43,6 +43,9 @@ const (
 // reported green.
 var greenRelease = []string{circleSetup, circleBuild, circleChart, circlePushChart, circlePush}
 
+// summaryFollowed is the circleci step's summary of a repaired follow.
+const summaryFollowed = "followed"
+
 // createShiny creates shiny-service as alice from newEntry and merges nothing.
 func (st *stack) createShiny(t *testing.T, c *client.Client) (tools.Created, string) {
 	t.Helper()
@@ -148,7 +151,7 @@ func TestWatchRepositoryFollowsACreationToReadiness(t *testing.T) {
 		t.Fatalf("the merge mid-call: %+v", w)
 	}
 	st.reported(t, pr, prURL,
-		reconcile.StepResult{Step: reconcile.StepCircleCI, Verdict: reconcile.VerdictRepaired, Summary: "followed", Changes: []string{"follow the project"}},
+		reconcile.StepResult{Step: reconcile.StepCircleCI, Verdict: reconcile.VerdictRepaired, Summary: summaryFollowed, Changes: []string{"follow the project"}},
 		reconcile.StepResult{Step: reconcile.StepMetadata, Verdict: reconcile.VerdictReported, Findings: []reconcile.Finding{{Kind: reconcile.FindingDefaultIcon, Advisory: true, Message: "the chart carries the template's icon", Fix: "replace the icon"}}},
 		reconcile.StepResult{Step: reconcile.StepRelease, Verdict: reconcile.VerdictRepaired, Summary: "trigger the missed tag build for " + firstTag})
 	if rec := st.record(t, shinyService); rec.Setup.PendingRun != nil || rec.Setup.LastRun == nil {
@@ -316,7 +319,7 @@ func TestWatchRepositoryAwaitsTheRunFromTheMerge(t *testing.T) {
 	}
 
 	// The run reports after all: the finding goes, the watch goes on.
-	st.reported(t, pr, prURL, reconcile.StepResult{Step: reconcile.StepCircleCI, Verdict: reconcile.VerdictRepaired, Summary: "followed"})
+	st.reported(t, pr, prURL, reconcile.StepResult{Step: reconcile.StepCircleCI, Verdict: reconcile.VerdictRepaired, Summary: summaryFollowed})
 	if rec := st.record(t, shinyService); rec.Setup.MissingRun != nil || rec.Setup.PendingRun != nil || hasKind(rec, inventory.FindingReconcileRunMissing) {
 		t.Fatalf("record after the late run: %+v findings %+v", rec.Setup, rec.Findings)
 	}
@@ -362,7 +365,7 @@ func TestWatchRepositoryFailsAtOnceWhenTheMergeRunUploadsNoReport(t *testing.T) 
 	if w.Ready || w.Failure == nil || w.Failure.Phase != tools.PhaseSetUp || w.Failure.Reason != f.Message || names(w.Phases) != throughMerged {
 		t.Fatalf("the watch with the failed run: %+v failure=%+v", w, w.Failure)
 	}
-	st.reported(t, pr, prURL, reconcile.StepResult{Step: reconcile.StepCircleCI, Verdict: reconcile.VerdictRepaired, Summary: "followed"})
+	st.reported(t, pr, prURL, reconcile.StepResult{Step: reconcile.StepCircleCI, Verdict: reconcile.VerdictRepaired, Summary: summaryFollowed})
 	if rec := st.record(t, shinyService); rec.Setup.MissingRun != nil || rec.Setup.PendingRun != nil || hasKind(rec, inventory.FindingReconcileRunMissing) {
 		t.Fatalf("record after the late run: %+v findings %+v", rec.Setup, rec.Findings)
 	}

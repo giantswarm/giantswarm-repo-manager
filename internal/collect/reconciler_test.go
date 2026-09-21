@@ -248,6 +248,8 @@ func TestExpects(t *testing.T) {
 	}
 	align := &inventory.PendingRun{DispatchedAt: dispatched, Kind: inventory.ChangeDispatched}
 	pr := &inventory.PendingRun{DispatchedAt: dispatched.Add(-time.Hour), Kind: inventory.ChangeCreated, PullRequest: &inventory.ChangePullRequest{Number: 7}}
+	// mergeCommit is the pull request's merge commit, the head of its push run.
+	const mergeCommit = "d7f63a3b746fe0c95e64e415d44c339b0e8ee566"
 	cases := []struct {
 		name     string
 		p        *inventory.PendingRun
@@ -259,11 +261,11 @@ func TestExpects(t *testing.T) {
 		{"an Align now's run, created in the dispatch's second", align, run(eventWorkflowDispatch, dispatched.Truncate(time.Minute), ""), "", true},
 		{"a dispatch run from before the Align now", align, run(eventWorkflowDispatch, dispatched.Add(-2*time.Minute), ""), "", false},
 		{"the schedule's run over the same repository", align, run("schedule", dispatched.Add(time.Minute), ""), "", false},
-		{"a push run over the same repository", align, run(eventPush, dispatched.Add(time.Minute), "abc"), "", false},
-		{"the push run of the merge", pr, run(eventPush, dispatched, "abc"), "abc", true},
-		{"a push run of another merge", pr, run(eventPush, dispatched, "def"), "abc", false},
+		{"a push run over the same repository", align, run(eventPush, dispatched.Add(time.Minute), mergeCommit), "", false},
+		{"the push run of the merge", pr, run(eventPush, dispatched, mergeCommit), mergeCommit, true},
+		{"a push run of another merge", pr, run(eventPush, dispatched, "e3ee7f2f"), mergeCommit, false},
 		{"the pull request unmerged", pr, run(eventPush, dispatched, ""), "", false},
-		{"a dispatch run while the pull request's run is expected", pr, run(eventWorkflowDispatch, dispatched, "abc"), "abc", false},
+		{"a dispatch run while the pull request's run is expected", pr, run(eventWorkflowDispatch, dispatched, mergeCommit), mergeCommit, false},
 	}
 	for _, c := range cases {
 		if got := expects(c.p, c.run, c.mergeSHA); got != c.want {

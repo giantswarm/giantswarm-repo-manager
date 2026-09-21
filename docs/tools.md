@@ -4,6 +4,7 @@ Generated from the registered tools (`make tools-doc`); through muster every too
 
 | Tool | Kind |
 |---|---|
+| `adopt_repository` | write (dryRun, mode: commit) |
 | `align_repository` | write (dryRun, mode: commit) |
 | `approve_change` | write (dryRun, mode: commit) |
 | `create_repository` | write (dryRun, mode: commit) |
@@ -17,6 +18,52 @@ Generated from the registered tools (`make tools-doc`); through muster every too
 | `update_repository` | write (dryRun, mode: commit) |
 | `validate_repository` | read-only |
 | `watch_repository` | read-only |
+
+## `adopt_repository`
+
+WRITES (as you, with your own GitHub token through the App giantswarm-repo-manager). Adopt a repository of the org that exists on GitHub and no team file declares (the inventory's unassigned scope): the entry you pass is added to the team's file (repositories/<team>.yaml in giantswarm/github) in a pull request opened as you with auto-merge armed, and the ask with the Approve button goes to the team's channel — an existing name is a plain addition, so the team reviews it: a member other than you approves. The entry is validated against the repositories schema (not the creation rules, which are for repositories the manager creates) and rendered as create_repository renders a declaration; `align` is yours to set: with true the reconciler run of the merge aligns the repository with its declared set-up and the company baseline, without it that run checks the repository and reports the drift, changing nothing. `lifecycle: deprecated` or `archived` in the entry adopts the repository and ends its life in the one pull request; the entry then gets `align: true` beside the lifecycle — else the reconciler would record the lifecycle and apply nothing — and the plan and the ask say so. `deleted` is refused here: declare first, then set_lifecycle with the name typed. Refused before any write when the name is free on GitHub (a new repository: use create_repository) or declared already (the refusal names the team; use update_repository, transfer_repository or set_lifecycle). The record shows setup.pendingRun until the reconciler run of the merged pull request has reported (get_repository). Every write takes dryRun and mode: dryRun: true returns the rendered change and writes nothing; mode: "commit" opens the team-file pull request as you and may take up to a minute (its writes run on GitHub within the call) — wait for the one answer. mode: "apply" is refused for every write tool (a repository without its declaration is drift), and mode is required unless dryRun is true.
+
+```json
+{
+  "properties": {
+    "dryRun": {
+      "description": "Render the change and write nothing (default false).",
+      "type": "boolean"
+    },
+    "entry": {
+      "additionalProperties": true,
+      "description": "The declaration as it goes into the team file: componentType, description, visibility, lifecycle, align, gen and the other fields of the repositories schema; name is the repository and may be left out.",
+      "properties": {},
+      "type": "object"
+    },
+    "mode": {
+      "description": "How the change lands: \"commit\" (a team-file pull request as you). \"apply\" is refused.",
+      "enum": [
+        "commit"
+      ],
+      "type": "string"
+    },
+    "reason": {
+      "description": "Why, for the pull request body and the ask.",
+      "type": "string"
+    },
+    "repository": {
+      "description": "Repository name, with or without the org; it exists on GitHub and no team file declares it.",
+      "type": "string"
+    },
+    "team": {
+      "description": "The adopting team's file, as its GitHub team slug: team-bumblebee, team-planeteers, …",
+      "type": "string"
+    }
+  },
+  "required": [
+    "repository",
+    "team",
+    "entry"
+  ],
+  "type": "object"
+}
+```
 
 ## `align_repository`
 
@@ -84,7 +131,7 @@ WRITES (as you, with your own GitHub token through the App giantswarm-repo-manag
 
 ## `create_repository`
 
-WRITES (as you, with your own GitHub token through the App giantswarm-repo-manager). Create one or more new repositories of the giantswarm org as you, in this order: the repository (you are its admin), one scaffold commit on its default branch rendered by the engine from the declaration (v0.1.0 follows from the scaffold's auto-release), then the pull request adding the entries to the team's file (repositories/<team>.yaml in giantswarm/github) — the reconciler sets the repositories up once it merges and never creates. Every entry is written with `align: true` — the creation is the repository's opt-in to alignment, so the reconciler run after the pull request merges sets the repository up; an entry saying `align: false` is refused. An owner role in the org is required: the org lets only owners create repositories, and the dry run tells you so before any write. dryRun: true is validate_repository's result with the creation plan (creation: the create and scaffold steps, the pull request) and writes nothing; refusals are data (entries[].problems, creation.refusal), an error means the validation could not run. mode commit refuses before any write — the engine's refusals, a taken name, a missing owner role — and resumes a creation interrupted by a failure: a repository you administer is not created again, a scaffold on the default branch not pushed again, an open pull request for the branch is reported. The pull request is machine-approved when you are in the team (or team-planeteers) and at most three entries are added, else your team reviews it. Every write takes dryRun and mode: dryRun: true returns the rendered change and writes nothing; mode: "commit" opens the team-file pull request as you and may take up to a minute (its writes run on GitHub within the call) — wait for the one answer. mode: "apply" is refused for every write tool (a repository without its declaration is drift), and mode is required unless dryRun is true.
+WRITES (as you, with your own GitHub token through the App giantswarm-repo-manager). Create one or more new repositories of the giantswarm org as you, in this order: the repository (you are its admin), one scaffold commit on its default branch rendered by the engine from the declaration (v0.1.0 follows from the scaffold's auto-release), then the pull request adding the entries to the team's file (repositories/<team>.yaml in giantswarm/github) — the reconciler sets the repositories up once it merges and never creates. Every entry is written with `align: true` — the creation is the repository's opt-in to alignment, so the reconciler run after the pull request merges sets the repository up; an entry saying `align: false` is refused. An owner role in the org is required: the org lets only owners create repositories, and the dry run tells you so before any write. dryRun: true is validate_repository's result with the creation plan (creation: the create and scaffold steps, the pull request) and writes nothing; refusals are data (entries[].problems, creation.refusal), an error means the validation could not run. mode commit refuses before any write — the engine's refusals, a taken name, a missing owner role — and resumes a creation interrupted by a failure: a repository you administer whose default branch carries at most one commit is not created again, a scaffold on the default branch not pushed again, an open pull request for the branch is reported; a repository with a history is somebody's work and is refused, its refusal naming adopt_repository, which declares it. The pull request is machine-approved when you are in the team (or team-planeteers) and at most three entries are added, else your team reviews it. Every write takes dryRun and mode: dryRun: true returns the rendered change and writes nothing; mode: "commit" opens the team-file pull request as you and may take up to a minute (its writes run on GitHub within the call) — wait for the one answer. mode: "apply" is refused for every write tool (a repository without its declaration is drift), and mode is required unless dryRun is true.
 
 ```json
 {
@@ -427,7 +474,7 @@ WRITES (as you, with your own GitHub token through the App giantswarm-repo-manag
 
 ## `validate_repository`
 
-Read-only. The dry run of creating one or more new repositories for a team, exactly what create_repository would do: each entry rendered with the schema's defaults, the implied template (giantswarm/template for Go, template-app for a chart, the minimal scaffold otherwise) and its options, whether the name is free on GitHub, and the refusals of the creation rules as data (entries[].problems, and as the engine's findings entry-refused / gen-circleci-refused). Every entry is written with `align: true` — the creation is the repository's opt-in to alignment, so the reconciler run after the pull request merges sets the repository up; an entry saying `align: false` is refused. Plus the guard notices a person sees before any pull request exists: team-review when the author is outside the owning team and team-planeteers, batch-review above three entries, names-unchecked without the App. And the creation as you (creation): the create and scaffold steps the engine would run with your token and the pull request that follows, its body carrying your reason — or the refusal when you are not an owner of the org (the org lets only owners create repositories). Writes nothing. Takes the same arguments as create_repository (team, entry or entries, reason), so you run it with exactly the arguments you commit. Use it before create_repository; for an existing repository's state use get_repository.
+Read-only. The dry run of creating one or more new repositories for a team, exactly what create_repository would do: each entry rendered with the schema's defaults, the implied template (giantswarm/template for Go, template-app for a chart, the minimal scaffold otherwise) and its options, whether the name is free on GitHub, and the refusals of the creation rules as data (entries[].problems, and as the engine's findings entry-refused / gen-circleci-refused). Every entry is written with `align: true` — the creation is the repository's opt-in to alignment, so the reconciler run after the pull request merges sets the repository up; an entry saying `align: false` is refused. Plus the guard notices a person sees before any pull request exists: team-review when the author is outside the owning team and team-planeteers, batch-review above three entries, names-unchecked without the App. And the creation as you (creation): the create and scaffold steps the engine would run with your token and the pull request that follows, its body carrying your reason — or the refusal when you are not an owner of the org (the org lets only owners create repositories). Writes nothing. Takes the same arguments as create_repository (team, entry or entries, reason), so you run it with exactly the arguments you commit. Use it before create_repository; an existing repository that no team file declares is declared with adopt_repository, and its state is read with get_repository.
 
 ```json
 {

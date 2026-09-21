@@ -19,8 +19,9 @@ import (
 
 // Field names of an entry the tools edit.
 const (
-	FieldName      = "name"
-	FieldLifecycle = "lifecycle"
+	FieldName          = "name"
+	FieldComponentType = "componentType"
+	FieldLifecycle     = "lifecycle"
 	// FieldAlign is the entry's opt-in to alignment: with `align: true` the
 	// reconciler changes the repository to its declared set-up on every
 	// trigger; without it every run is a check.
@@ -240,7 +241,7 @@ func ParseEntry(text []byte) (reposetup.Declaration, error) {
 
 // keyOrder is the order the team files write an entry's keys in; keys not
 // listed follow alphabetically.
-var keyOrder = []string{FieldName, "componentType", "description", "visibility", FieldLifecycle, FieldAlign, "system", "choreReviewers", "replace", FieldGen}
+var keyOrder = []string{FieldName, FieldComponentType, "description", "visibility", FieldLifecycle, FieldAlign, "system", "choreReviewers", "replace", FieldGen}
 
 // EntryFromValue renders a JSON-compatible value (a tool argument) as a
 // declaration, its keys in the team files' order (name first).

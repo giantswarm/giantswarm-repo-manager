@@ -173,24 +173,11 @@ func (t *tools) entryFor(ctx context.Context, repo teamfiles.Repo, name, hint st
 // repository that exists (reposetup.ModeExisting): the schema, not the
 // creation rules.
 func (t *tools) schemaProblems(ctx context.Context, team string, d reposetup.Declaration) ([]reposetup.Problem, error) {
-	y, err := d.YAML()
+	e, err := t.existingVerdict(ctx, team, d)
 	if err != nil {
 		return nil, err
 	}
-	tf, err := reposetup.ParseTeamFile(team, strings.NewReader(y))
-	if err != nil {
-		return nil, err
-	}
-	res, err := t.validator().Validate(ctx, reposetup.Request{TeamFile: tf, Mode: reposetup.ModeExisting})
-	if err != nil {
-		return nil, err
-	}
-	for _, e := range res.Entries {
-		if e.Name == d.Name {
-			return e.Problems, nil
-		}
-	}
-	return nil, fmt.Errorf("the engine returned no verdict for %s", d.Name)
+	return e.Problems, nil
 }
 
 // finish fills the plan's rendering and pull-request text.

@@ -150,7 +150,7 @@ func (t *tools) registerValidate(s *mcpserver.MCPServer) {
 			"owning team and team-planeteers, batch-review above three entries, names-unchecked without the App. And the creation as you (creation): the create and scaffold steps the engine " +
 			"would run with your token and the pull request that follows, its body carrying your reason — or the refusal when you are not an owner of the org (the org lets only owners create repositories). Writes nothing. " +
 			"Takes the same arguments as create_repository (team, entry or entries, reason), so you run it with exactly the arguments you commit. " +
-			"Use it before create_repository; for an existing repository's state use get_repository."),
+			"Use it before create_repository; an existing repository that no team file declares is declared with adopt_repository, and its state is read with get_repository."),
 		mcp.WithReadOnlyHintAnnotation(true),
 	}, creationArguments()...)
 	s.AddTool(mcp.NewTool(ToolValidateRepository, opts...), func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
@@ -174,8 +174,9 @@ func (t *tools) createRepository() WriteTool {
 			"required: the org lets only owners create repositories, and the dry run tells you so before any write. dryRun: true is validate_repository's result with the " +
 			"creation plan (creation: the create and scaffold steps, the pull request) and writes nothing; refusals are data (entries[].problems, creation.refusal), an error " +
 			"means the validation could not run. mode commit refuses before any write — the engine's refusals, a taken name, a missing owner role — and resumes a creation " +
-			"interrupted by a failure: a repository you administer is not created again, a scaffold on the default branch not pushed again, an open pull request for the " +
-			"branch is reported. The pull request is machine-approved when you are in the team (or team-planeteers) and at most three entries are added, else your team reviews it.",
+			"interrupted by a failure: a repository you administer whose default branch carries at most one commit is not created again, a scaffold on the default branch not " +
+			"pushed again, an open pull request for the branch is reported; a repository with a history is somebody's work and is refused, its refusal naming adopt_repository, " +
+			"which declares it. The pull request is machine-approved when you are in the team (or team-planeteers) and at most three entries are added, else your team reviews it.",
 		Options: creationArguments(),
 		DryRun:  func(ctx context.Context, args map[string]any) (any, error) { return t.validate(ctx, args) },
 		Commit:  t.commitCreate,
@@ -271,14 +272,21 @@ func (t *tools) dryRun(ctx context.Context, args map[string]any, p *person, perr
 	return &v, nil
 }
 
+// adoptHint closes the taken-name refusal of a repository with content: it
+// is somebody's work, not a creation interrupted after the create step, and
+// adopt_repository is the way to declare it.
+const adoptHint = " — the repository has a history, so it is not a creation of yours interrupted after the create step: declare it with " + ToolAdoptRepository
+
 // resumed validates again, for repositories that exist, the entries refused
-// for their taken name alone whose repository the caller administers — the
-// caller's own creations interrupted after the create step. Anyone else's
-// repository stays refused. The ModeExisting verdicts replace those entries;
-// the guard notices are the creation's.
+// for their taken name alone whose repository the caller administers and
+// whose default branch carries at most one commit — the caller's own
+// creations interrupted after the create or the scaffold step. Anyone else's
+// repository stays refused, and so does one with a history, its refusal
+// naming adopt_repository. The ModeExisting verdicts replace the resumed
+// entries; the guard notices are the creation's.
 func (t *tools) resumed(ctx context.Context, p *person, req reposetup.Request, res *reposetup.Result) (*reposetup.Result, []string, error) {
 	var names []string
-	for _, e := range res.Entries {
+	for i, e := range res.Entries {
 		if !e.RefusedForTakenName() {
 			continue
 		}
@@ -289,6 +297,18 @@ func (t *tools) resumed(ctx context.Context, p *person, req reposetup.Request, r
 		case err != nil:
 			return nil, nil, fmt.Errorf("read %s/%s as you: %w", t.org(), e.Name, err)
 		case strings.EqualFold(repo.GetFullName(), t.org()+"/"+e.Name) && repo.GetPermissions().GetAdmin():
+			initial, err := initialOnly(ctx, p.gh, t.org(), e.Name, repo.GetDefaultBranch())
+			if err != nil {
+				return nil, nil, err
+			}
+			if !initial {
+				for j := range res.Entries[i].Problems {
+					if res.Entries[i].Problems[j].Field == teamfiles.FieldName {
+						res.Entries[i].Problems[j].Message += adoptHint
+					}
+				}
+				continue
+			}
 			names = append(names, e.Name)
 		}
 	}
@@ -440,21 +460,14 @@ func (t *tools) declaration(ctx context.Context, p *person, v *Validation, args 
 	if err != nil {
 		return nil, err
 	}
-	content := tf.Content
 	entries, _ := entriesArg(args)
 	parsed, err := parseEntries(team, entries)
 	if err != nil {
 		return nil, err
 	}
-	names := make([]string, 0, len(parsed.Entries))
-	for _, d := range parsed.Entries {
-		if _, dup := tf.Entries.Entry(d.Name); dup {
-			return nil, fmt.Errorf("%s declares %s already: use update_repository", tf.Path, d.Name)
-		}
-		if content, err = reposetup.InsertEntry(team, content, d); err != nil {
-			return nil, fmt.Errorf("insert %s: %w", d.Name, err)
-		}
-		names = append(names, d.Name)
+	content, names, err := insertEntries(team, tf, parsed.Entries)
+	if err != nil {
+		return nil, err
 	}
 	reason, _ := args[argReason].(string)
 	pl := &Plan{Repository: t.org() + "/" + strings.Join(names, ","), Team: team, Accepted: true, change: teamfiles.Change{Files: map[string][]byte{tf.Path: content}}}

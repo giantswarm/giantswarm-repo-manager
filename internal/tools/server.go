@@ -34,7 +34,7 @@ const (
 
 // WriteToolNames lists every tool registered through the write framework.
 func WriteToolNames() []string {
-	return []string{ToolCreateRepository, ToolUpdateRepository, ToolTransferRepository, ToolSetLifecycle, ToolApproveChange, ToolAlignRepository}
+	return []string{ToolCreateRepository, ToolAdoptRepository, ToolUpdateRepository, ToolTransferRepository, ToolSetLifecycle, ToolApproveChange, ToolAlignRepository}
 }
 
 // engineModule is the devctl module the engine package comes from; its version
@@ -120,7 +120,7 @@ func (ts *Tools) MCPServer() *mcpserver.MCPServer {
 	t.registerInventory(s)
 	t.registerValidate(s)
 	t.registerWatch(s)
-	for _, wt := range []WriteTool{t.createRepository(), t.updateRepository(), t.transferRepository(), t.setLifecycle(), t.approveChange(), t.alignRepository()} {
+	for _, wt := range []WriteTool{t.createRepository(), t.adoptRepository(), t.updateRepository(), t.transferRepository(), t.setLifecycle(), t.approveChange(), t.alignRepository()} {
 		registerWrite(s, wt)
 	}
 	return s

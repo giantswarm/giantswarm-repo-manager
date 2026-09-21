@@ -10,6 +10,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/google/go-github/v92/github"
+
 	"github.com/giantswarm/giantswarm-repo-manager/internal/inventory"
 )
 
@@ -211,6 +213,61 @@ func TestPredates(t *testing.T) {
 	for _, c := range cases {
 		if got := predates(c.at, c.run); got != c.want {
 			t.Errorf("%s: predates=%v, want %v", c.name, got, c.want)
+		}
+	}
+}
+
+// TestRepositoryOfJob: the reconciler's job for a repository is "Reconcile
+// <name>", listed under its team's shard; the Plan job and a team's summary
+// name no repository.
+func TestRepositoryOfJob(t *testing.T) {
+	cases := map[string]string{
+		"team-bumblebee / Reconcile backstage":    "backstage",
+		"Reconcile github":                        "github",
+		"team-bumblebee / Summary team-bumblebee": "",
+		"Plan":       "",
+		"Reconcile ": "",
+		"team-planeteers / Reconcile happa / Reconcile": "",
+	}
+	for job, want := range cases {
+		if got := repositoryOfJob(job); got != want {
+			t.Errorf("%q: repository %q, want %q", job, got, want)
+		}
+	}
+}
+
+// TestExpects: an Align now's run is a workflow_dispatch run created at or
+// after the mark — a minute earlier at most, the clocks being two; a
+// team-file pull request's is the push run whose head is the merge commit.
+// A run of another event, or created long before the dispatch, is not the
+// mark's.
+func TestExpects(t *testing.T) {
+	dispatched := time.Date(2026, 9, 21, 14, 44, 21, 0, time.UTC)
+	run := func(event string, created time.Time, head string) *github.WorkflowRun {
+		return &github.WorkflowRun{Event: &event, CreatedAt: &github.Timestamp{Time: created}, HeadSHA: &head}
+	}
+	align := &inventory.PendingRun{DispatchedAt: dispatched, Kind: inventory.ChangeDispatched}
+	pr := &inventory.PendingRun{DispatchedAt: dispatched.Add(-time.Hour), Kind: inventory.ChangeCreated, PullRequest: &inventory.ChangePullRequest{Number: 7}}
+	cases := []struct {
+		name     string
+		p        *inventory.PendingRun
+		run      *github.WorkflowRun
+		mergeSHA string
+		want     bool
+	}{
+		{"an Align now's run, created after the dispatch", align, run(eventWorkflowDispatch, dispatched.Add(2*time.Second), ""), "", true},
+		{"an Align now's run, created in the dispatch's second", align, run(eventWorkflowDispatch, dispatched.Truncate(time.Minute), ""), "", true},
+		{"a dispatch run from before the Align now", align, run(eventWorkflowDispatch, dispatched.Add(-2*time.Minute), ""), "", false},
+		{"the schedule's run over the same repository", align, run("schedule", dispatched.Add(time.Minute), ""), "", false},
+		{"a push run over the same repository", align, run(eventPush, dispatched.Add(time.Minute), "abc"), "", false},
+		{"the push run of the merge", pr, run(eventPush, dispatched, "abc"), "abc", true},
+		{"a push run of another merge", pr, run(eventPush, dispatched, "def"), "abc", false},
+		{"the pull request unmerged", pr, run(eventPush, dispatched, ""), "", false},
+		{"a dispatch run while the pull request's run is expected", pr, run(eventWorkflowDispatch, dispatched, "abc"), "abc", false},
+	}
+	for _, c := range cases {
+		if got := expects(c.p, c.run, c.mergeSHA); got != c.want {
+			t.Errorf("%s: expects=%v, want %v", c.name, got, c.want)
 		}
 	}
 }

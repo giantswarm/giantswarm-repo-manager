@@ -385,6 +385,90 @@ func TestReconcileNowPendingUntilTheArtifactOrTheWindow(t *testing.T) {
 	}
 }
 
+// TestReconcileNowRunWithoutAReportEndsThePendingRunAtOnce: a dispatched
+// run that completes without an artifact for the repository — failed before
+// its report step — ends the pending run in the poll that reads it, the
+// finding reconcile-run-missing naming the run and its conclusion, no
+// pending window. The repositories a run handled are read from its jobs. A
+// dispatch run from before the Align now is not its run; a run without a
+// report over a repository expecting none is only logged; a partly failed
+// run stores its artifacts and gives up the pending runs of the repositories
+// it failed on; the next dispatch forgets the failure.
+func TestReconcileNowRunWithoutAReportEndsThePendingRunAtOnce(t *testing.T) {
+	st := newStack(t)
+	ctx := context.Background()
+	if _, err := st.col.Sweep(ctx); err != nil {
+		t.Fatal(err)
+	}
+	c := st.as(t, aliceToken)
+	var d tools.Dispatch
+	st.callJSON(t, c, tools.ToolAlignRepository, map[string]any{argMode: modeCommit, kRepository: repoLegacy}, &d)
+	dispatched := st.record(t, repoLegacy).Setup.PendingRun
+	if dispatched == nil {
+		t.Fatal("no pending run after the dispatch")
+	}
+	// Somebody's dispatch run from five minutes before the Align now failed
+	// without a report over the same repository: not the Align now's run.
+	st.ghs.actions.addRunWithoutReport(t, eventDispatch, st.now().Add(-5*time.Minute), "", repoLegacy)
+	// A success run without a report over a repository expecting none: a log
+	// line, nothing on the record.
+	success := st.ghs.actions.addRun(t, runStatusCompleted, st.now())
+	st.ghs.actions.mu.Lock()
+	success.Jobs = append(success.Jobs, reconcileJob(repoPresent))
+	st.ghs.actions.mu.Unlock()
+	if p := st.poll(t); p.Runs != 2 || p.Pending != 1 || p.Missing != 0 || len(p.Errors) != 0 {
+		t.Fatalf("poll with the earlier run and the success run: %+v", p)
+	}
+	if rec := st.record(t, repoLegacy); rec.Setup.PendingRun == nil || rec.Setup.MissingRun != nil {
+		t.Fatalf("record after runs that are not its own: %+v", rec.Setup)
+	}
+	if rec := st.record(t, repoPresent); rec.Setup.MissingRun != nil || hasKind(rec, inventory.FindingReconcileRunMissing) {
+		t.Fatalf("a repository expecting no run: %+v findings %+v", rec.Setup, rec.Findings)
+	}
+
+	// The Align now's run fails before its report step.
+	failed := st.ghs.actions.addRunWithoutReport(t, eventDispatch, st.now(), "", repoLegacy)
+	if p := st.poll(t); p.Runs != 1 || p.Pending != 0 || p.Missing != 1 || len(p.Errors) != 0 {
+		t.Fatalf("poll with the failed run: %+v", p)
+	}
+	rec := st.record(t, repoLegacy)
+	m := rec.Setup.MissingRun
+	if rec.Setup.PendingRun != nil || m == nil || m.RunURL != runURL(failed.ID) || m.Conclusion != conclusionFailure || m.By != alice || !m.DispatchedAt.Equal(dispatched.DispatchedAt) ||
+		!strings.Contains(m.RunsURL, "/actions/workflows/"+reconcilerWorkflow) {
+		t.Fatalf("missing run after the failed run: %+v (pending %+v)", m, rec.Setup.PendingRun)
+	}
+	f := rec.MissingRunFinding()
+	if f == nil || !hasKind(rec, inventory.FindingReconcileRunMissing) || f.Source != inventory.FindingSourceInventory ||
+		!strings.Contains(f.Message, alice+" dispatched at ") || !strings.HasSuffix(f.Message, "completed with conclusion failure and uploaded no report: "+runURL(failed.ID)) ||
+		!strings.Contains(f.Fix, "look at the run "+runURL(failed.ID)) || !strings.Contains(f.Fix, "align_repository") {
+		t.Fatalf("the failed run's finding: %+v", f)
+	}
+	var got inventory.Record
+	st.callJSON(t, c, tools.ToolGetRepository, map[string]any{kRepository: repoLegacy}, &got)
+	if got.Setup.MissingRun == nil || got.Setup.MissingRun.RunURL != runURL(failed.ID) || !hasKind(&got, inventory.FindingReconcileRunMissing) {
+		t.Errorf("get_repository does not carry the failed run: %+v findings %+v", got.Setup.MissingRun, got.Findings)
+	}
+
+	// Dispatched again; the run reports on another repository and fails on
+	// this one: the artifact is stored, the pending run given up.
+	st.callJSON(t, c, tools.ToolAlignRepository, map[string]any{argMode: modeCommit, kRepository: repoLegacy}, &d)
+	if rec := st.record(t, repoLegacy); rec.Setup.PendingRun == nil || rec.Setup.MissingRun != nil || hasKind(rec, inventory.FindingReconcileRunMissing) {
+		t.Fatalf("after the next dispatch: %+v findings %+v", rec.Setup, rec.Findings)
+	}
+	finished := st.now().UTC().Truncate(time.Second)
+	partly := st.ghs.actions.addRun(t, runStatusCompleted, finished, artifactReport{name: repoPresent, finishedAt: finished, result: reconcile.Result{Converged: true}})
+	st.ghs.actions.failed(partly, repoLegacy)
+	if p := st.poll(t); p.Runs != 1 || p.Artifacts != 1 || p.Pending != 0 || p.Missing != 1 || len(p.Errors) != 0 {
+		t.Fatalf("poll with the partly failed run: %+v", p)
+	}
+	if rec := st.record(t, repoPresent); rec.Setup.LastRun == nil || rec.Setup.LastRun.RunID != partly.ID || rec.Setup.MissingRun != nil {
+		t.Errorf("the reported repository: %+v", rec.Setup)
+	}
+	if rec := st.record(t, repoLegacy); rec.Setup.PendingRun != nil || rec.Setup.MissingRun == nil || rec.Setup.MissingRun.RunURL != runURL(partly.ID) {
+		t.Errorf("the failed repository: %+v", rec.Setup)
+	}
+}
+
 // TestReconcilerPollReadsTheLastSevenDaysAndWaitsForOpenRuns: a first poll
 // (no cursor) reads the runs of the last seven days only; a run still in
 // progress holds the cursor where it stands, so its artifact is read when it

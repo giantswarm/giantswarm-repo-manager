@@ -42,6 +42,14 @@ type fakeRun struct {
 	Event     string
 	CreatedAt time.Time
 	Artifacts []*fakeArtifact
+	// Conclusion is the completed run's: success, or failure when a job
+	// failed before its report step. HeadSHA is the run's head commit — a
+	// push run's merge commit. Jobs are the run's job names as GitHub lists
+	// them: Plan, one "<team> / Reconcile <name>" per repository handled,
+	// the team's summary.
+	Conclusion string
+	HeadSHA    string
+	Jobs       []string
 }
 
 type fakeArtifact struct {
@@ -55,6 +63,10 @@ const (
 	runStatusCompleted  = "completed"
 	runStatusInProgress = "in_progress"
 	eventDispatch       = "workflow_dispatch"
+	eventPush           = "push"
+	conclusionSuccess   = "success"
+	conclusionFailure   = "failure"
+	kConclusion         = "conclusion"
 	// reconcilerWorkflow is the reconciler's workflow file: the one the
 	// tools dispatch and the poller reads the runs of.
 	reconcilerWorkflow = "reconcile-repositories.yaml"
@@ -70,21 +82,63 @@ func runURL(id int64) string {
 // run. It returns the run for later changes (status, attempt).
 func (a *fakeActions) addRun(t *testing.T, status string, createdAt time.Time, reports ...artifactReport) *fakeRun {
 	t.Helper()
-	run := &fakeRun{ID: a.nextID.Add(1), Attempt: 1, Status: status, Event: eventDispatch, CreatedAt: createdAt.UTC()}
+	run := &fakeRun{ID: a.nextID.Add(1), Attempt: 1, Status: status, Event: eventDispatch, CreatedAt: createdAt.UTC(), Jobs: []string{"Plan"}}
+	if status == runStatusCompleted {
+		run.Conclusion = conclusionSuccess
+	}
 	for _, r := range reports {
 		run.Artifacts = append(run.Artifacts, &fakeArtifact{ID: a.nextID.Add(1), Name: collect.ArtifactPrefix + r.name, Zip: r.zip(t, run)})
+		run.Jobs = append(run.Jobs, reconcileJob(r.name))
 	}
+	run.Jobs = append(run.Jobs, team+" / Summary "+team)
 	a.mu.Lock()
 	a.runs = append(a.runs, run)
 	a.mu.Unlock()
 	return run
 }
 
-// complete marks a run completed.
+// addRunWithoutReport adds a completed run of event over the repositories
+// named that uploaded no artifact for them — its Reconcile jobs failed
+// before their report step — with head as its head commit (a push run's
+// merge commit) and conclusion failure.
+func (a *fakeActions) addRunWithoutReport(t *testing.T, event string, createdAt time.Time, head string, repositories ...string) *fakeRun {
+	t.Helper()
+	run := a.addRun(t, runStatusCompleted, createdAt)
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	run.Event, run.HeadSHA, run.Conclusion = event, head, conclusionFailure
+	run.Jobs = []string{"Plan"}
+	for _, name := range repositories {
+		run.Jobs = append(run.Jobs, reconcileJob(name))
+	}
+	run.Jobs = append(run.Jobs, team+" / Summary "+team)
+	return run
+}
+
+// failed marks the run's Reconcile jobs for the repositories named failed
+// without an artifact, beside the artifacts the run did upload: the run's
+// conclusion is failure.
+func (a *fakeActions) failed(run *fakeRun, repositories ...string) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	run.Conclusion = conclusionFailure
+	for _, name := range repositories {
+		run.Jobs = append(run.Jobs, reconcileJob(name))
+	}
+}
+
+// reconcileJob is the name GitHub lists the reconciler's job for one
+// repository under: the reusable workflow's job "Reconcile <name>" behind
+// its caller, the team's shard.
+func reconcileJob(name string) string {
+	return team + " / Reconcile " + name
+}
+
+// complete marks a run completed with success.
 func (a *fakeActions) complete(run *fakeRun) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
-	run.Status = runStatusCompleted
+	run.Status, run.Conclusion = runStatusCompleted, conclusionSuccess
 }
 
 // rerun is the run's next attempt with fresh artifacts: the same run id.
@@ -175,10 +229,27 @@ func (a *fakeActions) register(mux *http.ServeMux, g *fakeGitHub) {
 			if run.CreatedAt.Before(since) {
 				continue
 			}
-			out = append(out, map[string]any{kID: run.ID, "run_attempt": run.Attempt, "status": run.Status, "event": run.Event,
+			out = append(out, map[string]any{kID: run.ID, "run_attempt": run.Attempt, "status": run.Status, kConclusion: run.Conclusion, "event": run.Event, "head_sha": run.HeadSHA,
 				kCreatedAtREST: run.CreatedAt.Format(time.RFC3339), "updated_at": run.CreatedAt.Add(time.Minute).Format(time.RFC3339), kHTMLURL: runURL(run.ID)})
 		}
 		writeJSON(w, http.StatusOK, map[string]any{kTotalCount: len(out), "workflow_runs": out})
+	})
+	mux.HandleFunc("GET "+base+"/runs/{id}/jobs", func(w http.ResponseWriter, r *http.Request) {
+		id, _ := strconv.ParseInt(r.PathValue(kID), 10, 64)
+		a.mu.Lock()
+		defer a.mu.Unlock()
+		for _, run := range a.runs {
+			if run.ID != id {
+				continue
+			}
+			out := []map[string]any{}
+			for i, name := range run.Jobs {
+				out = append(out, map[string]any{kID: run.ID*1000 + int64(i), kName: name, "status": run.Status, kConclusion: run.Conclusion, "run_id": run.ID, "run_attempt": run.Attempt})
+			}
+			writeJSON(w, http.StatusOK, map[string]any{kTotalCount: len(out), "jobs": out})
+			return
+		}
+		ghMessage(w, http.StatusNotFound, "Not Found")
 	})
 	mux.HandleFunc("GET "+base+"/runs/{id}/artifacts", func(w http.ResponseWriter, r *http.Request) {
 		id, _ := strconv.ParseInt(r.PathValue(kID), 10, 64)

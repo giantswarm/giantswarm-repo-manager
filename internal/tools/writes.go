@@ -269,8 +269,8 @@ func (t *tools) commit(ctx context.Context, p *person, pl *Plan) (*Committed, er
 // reconciler run that follows the merge of pull request pr, a team-file
 // change of kind by the person, the way an Align now marks a dispatch: the
 // poller reads the run's artifact within its pending interval, and a run
-// that does not report within the window leaves the finding
-// reconcile-run-missing, worded for the kind. A repository the inventory
+// that fails before its report step or does not report within the window
+// leaves the finding reconcile-run-missing, worded for the kind. A repository the inventory
 // has not seen yet gets its record built first. Nil, with a log line, when
 // the mark could not be stored — the pull request stands either way.
 func (t *tools) expectRun(ctx context.Context, p *person, repository, kind string, pr *teamfiles.PullRequest) *inventory.PendingRun {
@@ -1105,8 +1105,9 @@ func (t *tools) alignRepository() WriteTool {
 			"(optIn.committed: pullRequest, ask, pendingRun). The record shows setup.pendingRun until the inventory has read the run's artifact (within seconds of a " +
 			"dispatched run completing; after the merge for an opt-in) as setup.lastRun, with the run's change block (kind, by, pullRequest) — its failed steps and " +
 			"findings are on the record and in the run. The team's standup channel hears nothing about a dispatch or the opt-in itself: the sentences about who created, " +
-			"added, transferred, archived or deprecated a repository, and the failed steps and findings of a run, follow a merged pull request only. A run that does not " +
-			"report within 15 minutes leaves the finding reconcile-run-missing. Here mode commit means: dispatch — or, for opt-in, open the pull request.",
+			"added, transferred, archived or deprecated a repository, and the failed steps and findings of a run, follow a merged pull request only. A run that fails " +
+			"before its report step leaves the finding reconcile-run-missing naming the run and its conclusion as soon as it completes; one that does not report within " +
+			"15 minutes leaves it too. Here mode commit means: dispatch — or, for opt-in, open the pull request.",
 		Options: []mcp.ToolOption{
 			mcp.WithString(argRepository, mcp.Required(), mcp.Description("Repository name, with or without the org.")),
 			mcp.WithString(argTeam, mcp.Description("Team slug; required for a repository without an entry (it is then aligned from the team alone), optional otherwise.")),

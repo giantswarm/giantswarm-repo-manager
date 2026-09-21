@@ -325,6 +325,52 @@ func TestWatchRepositoryAwaitsTheRunFromTheMerge(t *testing.T) {
 	}
 }
 
+// TestWatchRepositoryFailsAtOnceWhenTheMergeRunUploadsNoReport: the push
+// run of the merged pull request — the run whose head is the merge commit —
+// completing without an artifact for the repository ends the pending run in
+// the poll that reads it, the finding worded for the creation with the
+// merge time and the run's conclusion, and the setUp phase fails with it at
+// once; a push run of another merge over the same repository is not this
+// pull request's. The run's late artifact clears the finding.
+func TestWatchRepositoryFailsAtOnceWhenTheMergeRunUploadsNoReport(t *testing.T) {
+	st := newStack(t)
+	c := st.as(t, aliceToken)
+	created, prURL := st.createShiny(t, c)
+	pr := created.PullRequest.Number
+	merged := st.now().UTC().Truncate(time.Second)
+	st.ghs.files.mergeAt(pr, merged)
+	// Another merge's push run over the repository failed without a report.
+	st.ghs.actions.addRunWithoutReport(t, eventPush, st.now(), "other000", shinyService)
+	if p := st.poll(t); p.Pending != 1 || p.Missing != 0 || len(p.Errors) != 0 {
+		t.Fatalf("poll with another merge's failed run: %+v", p)
+	}
+	if rec := st.record(t, shinyService); !rec.Setup.PendingRun.Follows(pr) || rec.Setup.MissingRun != nil {
+		t.Fatalf("record after another merge's run: %+v", rec.Setup)
+	}
+	failed := st.ghs.actions.addRunWithoutReport(t, eventPush, st.now(), st.ghs.files.mergeSHA(pr), shinyService)
+	if p := st.poll(t); p.Pending != 0 || p.Missing != 1 || len(p.Errors) != 0 {
+		t.Fatalf("poll with the merge's failed run: %+v", p)
+	}
+	rec := st.record(t, shinyService)
+	f := rec.MissingRunFinding()
+	if rec.Setup.PendingRun != nil || rec.Setup.MissingRun == nil || rec.Setup.MissingRun.RunURL != runURL(failed.ID) || rec.Setup.MissingRun.Conclusion != conclusionFailure ||
+		f == nil || !strings.Contains(f.Message, prURL) || !strings.Contains(f.Message, "was merged at "+merged.Format(time.RFC3339)) ||
+		!strings.HasSuffix(f.Message, "completed with conclusion failure and uploaded no report: "+runURL(failed.ID)) || !strings.Contains(f.Fix, "look at the run "+runURL(failed.ID)) {
+		t.Fatalf("the failed run on the record: %+v finding %+v", rec.Setup.MissingRun, f)
+	}
+	w := st.watch(t, c, pr, 0.3)
+	if w.Ready || w.Failure == nil || w.Failure.Phase != tools.PhaseSetUp || w.Failure.Reason != f.Message || names(w.Phases) != throughMerged {
+		t.Fatalf("the watch with the failed run: %+v failure=%+v", w, w.Failure)
+	}
+	st.reported(t, pr, prURL, reconcile.StepResult{Step: reconcile.StepCircleCI, Verdict: reconcile.VerdictRepaired, Summary: "followed"})
+	if rec := st.record(t, shinyService); rec.Setup.MissingRun != nil || rec.Setup.PendingRun != nil || hasKind(rec, inventory.FindingReconcileRunMissing) {
+		t.Fatalf("record after the late run: %+v findings %+v", rec.Setup, rec.Findings)
+	}
+	if w = st.watch(t, c, pr, 0.3); w.Failure != nil || w.Pending != tools.PhaseReleased || names(w.Phases) != throughSetUp {
+		t.Fatalf("watch after the late run: %+v failure=%+v", w, w.Failure)
+	}
+}
+
 // TestWatchRepositoryForgetsTheRunOfAClosedPullRequest: a pull request
 // closed without a merge is followed by no run — the poller drops the mark
 // without a finding; the watch fails on merged, as before.

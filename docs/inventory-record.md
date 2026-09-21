@@ -42,12 +42,19 @@ so the record carries `setup.pendingRun {dispatchedAt, by, kind: dispatched}` un
 arrives. `create_repository` leaves the same mark on the new repository's record — `{dispatchedAt, by, kind: created,
 pullRequest {number, url}}`, the run that follows the declaration pull request's merge — building the record first when
 the inventory has not seen the repository. While any `pendingRun` is younger than 15 minutes the poller runs every 30 s.
-After 15 minutes without an artifact the pending run becomes `setup.missingRun` with the finding `reconcile-run-missing`
-(`source: inventory`), worded for the run that was expected — an Align now that started no run, or a creation whose pull
-request may not have merged yet — whose fix names the workflow's Actions page; the next artifact, dispatch or creation
-clears it. `get_repository` and `list_repositories` (`setup.pendingRun` in the row) carry the state the Repositories page
-shows; `watch_repository` reads `setup.lastRun` (the run whose `change.pullRequest.number` is the creation's) and
-`setup.missingRun` for its `setUp` phase.
+A completed run that uploaded no artifact for a repository it handled — its `Reconcile <name>` job failed or was
+cancelled before the report step — ends that repository's pending run in the poll that reads it: the run's payload does
+not carry a dispatch's inputs, so the repositories a run handled are read from the names of its jobs (`<team> / Reconcile
+<name>`), and a record is given up only when the run is the one it expects — a `workflow_dispatch` run created at or
+after an Align now's mark (a minute earlier at most, the clocks being two), the `push` run whose head is the merge commit
+of the record's pull request. The pending run becomes `setup.missingRun {…, runUrl, conclusion}` with the finding
+`reconcile-run-missing` (`source: inventory`) naming the run, its conclusion and "uploaded no report", the fix the run and
+`align_repository`. After 15 minutes without a run to name — the dispatch started none, the jobs could not be read — the
+pending run becomes `setup.missingRun` with the same finding worded for the run that was expected, an Align now or a
+creation whose pull request may not have merged yet, whose fix names the workflow's Actions page. The next artifact,
+dispatch or creation clears it. `get_repository` and `list_repositories` (`setup.pendingRun` in the row) carry the state
+the Repositories page shows; `watch_repository` reads `setup.lastRun` (the run whose `change.pullRequest.number` is the
+creation's) and `setup.missingRun` for its `setUp` phase.
 
 **Conflicting pull requests.** Reading an open pull request, the poller also reads GitHub's `mergeable`: `false` means a
 neighbouring entry of the team file changed first and the pull request cannot merge as it stands. The record notes it
@@ -141,7 +148,8 @@ the message to the team's standup channel is rendered from (README, "Asks and me
                 "change": {"kind": "created", "by": "alice", "pullRequest": {"number": 4711, "url": "…"}}},  // kind: created | added | transferred (+fromTeam) | archived | deleted | deprecated | changed | dispatched | nightly
     "pendingRun": {"dispatchedAt": "…", "by": "alice", "kind": "created", "pullRequest": {"number": 4711, "url": "…"},   // a run expected: kind dispatched (an Align now) or the pull request's kind
                    "mergedAt": "…", "conflictsSince": "…"},   // the merge, once read; the pull request found conflicting with its base (mergeable: false), until it is re-rendered
-    "missingRun": {"dispatchedAt": "…", "by": "alice", "kind": "dispatched", "noticedAt": "…", "runsUrl": "…"}   // one that did not report in 15 min
+    "missingRun": {"dispatchedAt": "…", "by": "alice", "kind": "dispatched", "noticedAt": "…", "runsUrl": "…",   // one given up: its run completed without a report,
+                   "runUrl": "…", "conclusion": "failure"}                                                        // named here, or none reported in 15 min (no runUrl)
   },
   "findings": [
     {"kind": "default-icon", "message": "…", "fix": "…", "source": "engine"}
@@ -155,8 +163,9 @@ the message to the team's standup channel is rendered from (README, "Asks and me
 ### Findings
 
 The inventory's own kinds (`source: inventory`): `declared-but-gone` (declaration, no repository), `undeclared-on-github`
-(repository, no declaration — archived ones included), `reconcile-run-missing` (an Align now whose run did not report
-within 15 minutes; the fix names the workflow's Actions page). The engine's kinds pass through with `source: engine`:
+(repository, no declaration — archived ones included), `reconcile-run-missing` (an expected run that completed without a
+report — the fix names the run — or did not report within 15 minutes — the fix names the workflow's Actions page). The
+engine's kinds pass through with `source: engine`:
 `entry-refused` and `gen-circleci-refused` (the engine refuses the entry — `setup.checks` is its `Refused` result, the
 `entry` step reported and no step run, one finding per problem naming the field to fix), `repository-missing`, `renamed`,
 `abs-prerequisite`, `default-icon`, `red-release`, `renovate-missing`, `archived-undeclared`, `pending-pull-request`,

@@ -12,6 +12,7 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/giantswarm/devctl/v8/pkg/reposetup/reconcile"
@@ -57,8 +58,22 @@ const (
 	// ArtifactPrefix is what the reconciler names its per-repository
 	// artifact: reconcile-<name>, the name without the org.
 	ArtifactPrefix = "reconcile-"
-	// runCompleted is the Actions run status the artifacts are final at.
+	// runCompleted is the Actions run status the artifacts are final at,
+	// runSuccess the conclusion of a run whose every job succeeded.
 	runCompleted = "completed"
+	runSuccess   = "success"
+	// The events of the runs a record expects: an Align now's dispatch, the
+	// push of a merged team-file pull request.
+	eventWorkflowDispatch = "workflow_dispatch"
+	eventPush             = "push"
+	// reconcileJobPrefix starts the name of the reconciler's job for one
+	// repository: "Reconcile <name>", listed under its team's shard as
+	// "<team> / Reconcile <name>".
+	reconcileJobPrefix = "Reconcile "
+	// dispatchSlack is how much earlier than its mark a run may have been
+	// created and still be the mark's own: GitHub truncates created_at to
+	// the second, and the manager's clock is not GitHub's.
+	dispatchSlack = time.Minute
 )
 
 func (o *ReconcilerOptions) defaults() {
@@ -100,8 +115,9 @@ type ReconcilerPoll struct {
 	// a repository's setup.lastRun, Skipped the ones a record already named.
 	Runs, Artifacts, Skipped int
 	// Pending is the expected runs whose window is running — an Align now,
-	// a merged pull request — and Missing the ones given up this time. A
-	// pull request still open is neither: no run is due yet.
+	// a merged pull request — and Missing the ones given up this time: the
+	// window ran out, or the run completed without a report. A pull request
+	// still open is neither: no run is due yet.
 	Pending, Missing int
 	// Conflicting is the open pull requests GitHub reports conflicting with
 	// their base this time (pendingRun.conflictsSince on their records).
@@ -274,10 +290,12 @@ func (c *Collector) listRuns(ctx context.Context, since time.Time) ([]*github.Wo
 	}
 }
 
-// consumeRun stores every reconcile-<name> artifact of a completed run;
-// false when one could not be read now, which keeps the run open for the
-// next poll. A run without artifacts (cancelled, failed before its report
-// step) or with a malformed one is consumed with a log line.
+// consumeRun stores every reconcile-<name> artifact of a completed run, the
+// artifacts read Concurrency at a time; false when one could not be read
+// now, which keeps the run open for the next poll. A run without artifacts
+// (cancelled, failed before its report step) or with a malformed one is
+// consumed with a log line, and the records expecting a run this run
+// handled and did not report on hear of its failure at once (runWithoutReport).
 func (c *Collector) consumeRun(ctx context.Context, run *github.WorkflowRun, poll *ReconcilerPoll) bool {
 	log := c.log.With("run", run.GetID(), "attempt", run.GetRunAttempt(), "url", run.GetHTMLURL())
 	artifacts, err := c.listArtifacts(ctx, run.GetID())
@@ -286,33 +304,170 @@ func (c *Collector) consumeRun(ctx context.Context, run *github.WorkflowRun, pol
 		log.Error("reconciler run: artifacts not listed", "error", err)
 		return false
 	}
-	ok, found := true, 0
+	type report struct {
+		artifact *github.Artifact
+		name     string
+	}
+	var reports []report
+	reported := map[string]bool{}
 	for _, a := range artifacts {
 		name, is := strings.CutPrefix(a.GetName(), ArtifactPrefix)
 		if !is || a.GetExpired() {
 			continue
 		}
-		found++
-		err := c.consumeArtifact(ctx, run, a, name)
+		reports = append(reports, report{a, name})
+		reported[name] = true
+	}
+	var mu sync.Mutex
+	ok := true
+	parallel(c.opts.Concurrency, reports, func(r report) {
+		err := c.consumeArtifact(ctx, run, r.artifact, r.name)
+		mu.Lock()
+		defer mu.Unlock()
 		switch {
 		case err == nil:
 			poll.Artifacts++
-			log.Info("reconciler run stored", "repository", name)
+			log.Info("reconciler run stored", "repository", r.name)
 		case errors.Is(err, errArtifactSkipped):
 			poll.Skipped++
 		case errors.Is(err, errArtifactMalformed), errors.Is(err, inventory.ErrNotFound):
 			poll.Errors = append(poll.Errors, err.Error())
-			log.Warn("reconciler run: artifact not stored", "repository", name, "error", err)
+			log.Warn("reconciler run: artifact not stored", "repository", r.name, "error", err)
 		default:
 			poll.Errors = append(poll.Errors, err.Error())
-			log.Error("reconciler run: artifact not read", "repository", name, "error", err)
+			log.Error("reconciler run: artifact not read", "repository", r.name, "error", err)
 			ok = false
 		}
-	}
-	if found == 0 {
+	})
+	if len(reports) == 0 {
 		log.Info("reconciler run without a report", "conclusion", run.GetConclusion())
 	}
+	if len(reports) == 0 || run.GetConclusion() != runSuccess {
+		c.runWithoutReport(ctx, run, reported, poll, log)
+	}
 	return ok
+}
+
+// runWithoutReport gives up the pending runs a completed run leaves
+// unanswered: the run handled their repository — failed or cancelled before
+// its report step — and uploaded no report for it. The record gets the
+// finding reconcile-run-missing at once, naming the run and its conclusion,
+// rather than at the pending window's end. The run's payload does not say
+// which repositories it handled (the REST API omits a dispatch's inputs);
+// its jobs do, one "Reconcile <name>" per repository. Only the records whose
+// pending run this run is are given up (expects); a run whose jobs cannot be
+// read now is logged, and the window says so later.
+func (c *Collector) runWithoutReport(ctx context.Context, run *github.WorkflowRun, reported map[string]bool, poll *ReconcilerPoll, log *slog.Logger) {
+	names, err := c.listRunRepositories(ctx, run.GetID())
+	if err != nil {
+		poll.Errors = append(poll.Errors, err.Error())
+		log.Warn("reconciler run: jobs not listed", "conclusion", run.GetConclusion(), "error", err)
+		return
+	}
+	now := c.now()
+	for _, name := range names {
+		if reported[name] {
+			continue
+		}
+		rec, err := c.store.Get(ctx, c.opts.Org+"/"+name)
+		if err != nil {
+			if !errors.Is(err, inventory.ErrNotFound) {
+				log.Error("reconciler run without a report: record not read", "repository", name, "error", err)
+			}
+			continue
+		}
+		p := rec.Setup.PendingRun
+		if p == nil {
+			continue
+		}
+		mergeSHA := ""
+		if p.PullRequest != nil && run.GetEvent() == eventPush {
+			mergeSHA = c.readMergeCommit(ctx, rec, log)
+		}
+		if !expects(p, run, mergeSHA) {
+			continue
+		}
+		rec.RunFailed(now, c.opts.Reconciler.RunsURL(), run.GetHTMLURL(), run.GetConclusion())
+		if err := c.store.Put(ctx, rec); err != nil {
+			log.Error("reconciler run without a report: failure not stored", "repository", rec.Repository, "error", err)
+			continue
+		}
+		poll.Missing++
+		log.Warn("reconciler run failed without a report", "repository", rec.Repository, "conclusion", run.GetConclusion(), "by", p.By, "kind", p.Kind)
+	}
+}
+
+// expects says whether run is the one pending run p awaits. An Align now's
+// is a workflow_dispatch run created at or after the mark (dispatchSlack
+// earlier at most); a team-file pull request's is the push run whose head
+// is the pull request's merge commit, mergeSHA ("" while the pull request is
+// unmerged). A run of another event over the same repository — the
+// schedule, somebody else's dispatch — is not the mark's: its own run may
+// still report.
+func expects(p *inventory.PendingRun, run *github.WorkflowRun, mergeSHA string) bool {
+	if p.PullRequest == nil {
+		return run.GetEvent() == eventWorkflowDispatch && !p.DispatchedAt.After(run.GetCreatedAt().Add(dispatchSlack))
+	}
+	return run.GetEvent() == eventPush && mergeSHA != "" && mergeSHA == run.GetHeadSHA()
+}
+
+// readMergeCommit reads the pull request of rec's pending run as the
+// inventory App and returns its merge commit, "" while it is unmerged or not
+// readable now; a merge the mark does not carry yet is noted on it.
+func (c *Collector) readMergeCommit(ctx context.Context, rec *inventory.Record, log *slog.Logger) string {
+	owner, repo := c.opts.Reconciler.repo()
+	p := rec.Setup.PendingRun
+	pr, _, err := c.reader.REST().PullRequests.Get(ctx, owner, repo, p.PullRequest.Number)
+	if err != nil {
+		log.Error("reconciler run without a report: pull request not read", "repository", rec.Repository, "pullRequest", p.PullRequest.URL, "error", err)
+		return ""
+	}
+	if !pr.GetMerged() {
+		return ""
+	}
+	if p.MergedAt == nil {
+		rec.Merged(pr.GetMergedAt().Time)
+	}
+	return pr.GetMergeCommitSHA()
+}
+
+// listRunRepositories is the repositories a run handled, read from the
+// names of its latest attempt's jobs: the reconciler runs one job
+// "Reconcile <name>" per repository, under its team's shard; the Plan job
+// and the summaries name none.
+func (c *Collector) listRunRepositories(ctx context.Context, runID int64) ([]string, error) {
+	owner, repo := c.opts.Reconciler.repo()
+	opts := &github.ListWorkflowJobsOptions{Filter: "latest", ListOptions: github.ListOptions{PerPage: 100}}
+	var out []string
+	for {
+		jobs, resp, err := c.reader.REST().Actions.ListWorkflowJobs(ctx, owner, repo, runID, opts)
+		if err != nil {
+			return nil, fmt.Errorf("list jobs of run %d: %w", runID, err)
+		}
+		for _, j := range jobs.Jobs {
+			if name := repositoryOfJob(j.GetName()); name != "" {
+				out = append(out, name)
+			}
+		}
+		if resp.NextPage == 0 {
+			return out, nil
+		}
+		opts.Page = resp.NextPage
+	}
+}
+
+// repositoryOfJob is the repository a reconciler job's name says it handled:
+// "Reconcile <name>", shown under the reusable workflow's caller as
+// "<team> / Reconcile <name>"; "" for any other job.
+func repositoryOfJob(job string) string {
+	if i := strings.LastIndex(job, " / "); i >= 0 {
+		job = job[i+len(" / "):]
+	}
+	name, is := strings.CutPrefix(job, reconcileJobPrefix)
+	if !is || name == "" {
+		return ""
+	}
+	return name
 }
 
 // listArtifacts lists a run's artifacts.

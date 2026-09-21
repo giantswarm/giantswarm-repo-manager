@@ -95,6 +95,9 @@ type fakePullRequest struct {
 	Merged     bool
 	MergedAt   time.Time
 	MergeTitle string
+	// MergeSHA is the squash commit on main: the head of the push run that
+	// follows the merge.
+	MergeSHA string
 	// Closed is a pull request closed without a merge.
 	Closed bool
 }
@@ -223,8 +226,16 @@ func (f *fakeTeamFiles) land(pr *fakePullRequest, at time.Time) {
 		f.files[p] = c
 	}
 	sha := fmt.Sprintf("main%03d", len(f.snapshots))
+	pr.MergeSHA = sha
 	f.refs[headsPrefix+mainBranch] = sha
 	f.snapshots[sha] = copyFiles(f.files)
+}
+
+// mergeSHA is the merge commit of pull request n, "" while it is unmerged.
+func (f *fakeTeamFiles) mergeSHA(n int) string {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.pulls[n].MergeSHA
 }
 
 // deny makes the repository unreachable for login: every read as them
@@ -534,7 +545,7 @@ func (f *fakeTeamFiles) pullJSON(pr *fakePullRequest) map[string]any {
 		out["mergeable_state"] = "dirty"
 	}
 	if pr.Merged {
-		out[kState], out["merged_at"] = "closed", pr.MergedAt.UTC().Format(time.RFC3339)
+		out[kState], out["merged_at"], out["merge_commit_sha"] = "closed", pr.MergedAt.UTC().Format(time.RFC3339), pr.MergeSHA
 	}
 	if pr.Closed {
 		out[kState] = "closed"

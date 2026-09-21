@@ -24,6 +24,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   typed). Refused before any write when the name is free on GitHub (a creation) or declared already (the refusal names the team and
   the tool to use) (giantswarm/giantswarm-repo-manager#90).
 
+### Fixed
+
+- A reconciler run that completes without a report for a repository expecting one — its `Reconcile <name>` job failed or was
+  cancelled before the report step, a devctl download answered 504 — ends the record's pending run in the poll that reads it,
+  not 15 minutes after the dispatch: the run's jobs name the repositories it handled (the REST payload carries no dispatch
+  inputs), and a record whose pending run this run is — a `workflow_dispatch` run created at or after the Align now's mark, the
+  `push` run whose head is the merge commit of the record's pull request — gets `setup.missingRun {runUrl, conclusion}` and the
+  finding `reconcile-run-missing` naming the run, its conclusion and "uploaded no report", its fix the run and
+  `align_repository`. The Repositories page's alignment dialog shows the failure at once. A success run without a report over
+  a repository expecting none stays a log line; a run over many repositories that failed on some gives up those alone.
+- The poller reads a run's artifacts `concurrency` at a time (the sweep's setting) instead of one after another: a run over 95
+  repositories reached the records in about twelve minutes, each artifact's refresh with its engine check in series.
+
 ### Changed
 
 - The engine is devctl v8.82.1, from v8.67.0: the repository-alignment baseline — status checks required non-strictly with

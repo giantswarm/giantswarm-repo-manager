@@ -118,7 +118,9 @@ func (n *releaseNode) pullRequest() *inventory.ChangePullRequest {
 // final without a message (a team that is not messaged), empty means try
 // again next pass. The watch stores the sentence as the release's Told, so
 // the team hears it once.
-func (c *Collector) OnReleased(fn func(context.Context, *inventory.Record) (string, bool)) { c.released = fn }
+func (c *Collector) OnReleased(fn func(context.Context, *inventory.Record) (string, bool)) {
+	c.released = fn
+}
 
 // RunReleaseWatch passes every Interval until ctx is done; off without an
 // interval or a client. A failed pass is logged and the next one runs on

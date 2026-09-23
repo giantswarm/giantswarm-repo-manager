@@ -177,7 +177,7 @@ func TestReleaseWatchTellsTheTeamOnce(t *testing.T) {
 	if _, err := st.col.Refresh(ctx, org+"/"+repoLegacy, nil, inventory.SourceRefresh); err != nil {
 		t.Fatal(err)
 	}
-	o.release(repoLegacy, "v2.0.0", st.now().Add(-time.Minute), 7)
+	o.release(repoLegacy, legacyTag, st.now().Add(-time.Minute), 7)
 	if p := st.watchReleases(t); p.Started != 1 || p.Settled != 1 || p.Told != 0 {
 		t.Errorf("private: %+v", p)
 	}
@@ -190,6 +190,22 @@ func TestReleaseWatchTellsTheTeamOnce(t *testing.T) {
 	}
 	if len(notices()) != 2 {
 		t.Errorf("a private repository without a token posts nothing: %v", notices())
+	}
+	// Its release step stands in with the tag commit's statuses, read
+	// against the declaration: the two failed legs of a branch pipeline at
+	// the commit are another pipeline's, the tag pipeline's four jobs are
+	// green, so the release reads built and no red-release is found.
+	if legacy.Setup.Checks == nil {
+		t.Fatal("the private repository has no checks")
+	}
+	if sr := legacy.Setup.Checks.Step(reconcile.StepRelease); sr == nil || sr.Verdict != reconcile.VerdictOK ||
+		!strings.Contains(sr.Summary, "release "+legacyTag+" built: CircleCI success (4 jobs") || !strings.Contains(sr.Summary, "2 statuses of a branch pipeline at the commit ignored") {
+		t.Errorf("the private release from its commit's statuses: %+v", sr)
+	}
+	for _, f := range legacy.Findings {
+		if f.Kind == string(reconcile.FindingRedRelease) || f.Kind == string(reconcile.FindingMissedTagBuild) {
+			t.Errorf("a branch pipeline's statuses on the release commit read as the tag's: %+v", f)
+		}
 	}
 	// An undeclared repository's release is nobody's to tell.
 	o.release(repoStray, "v0.1.0", st.now().Add(-time.Minute), 0)

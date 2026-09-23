@@ -39,6 +39,8 @@ const (
 	mainBranch       = "main"
 	kUser            = "user"
 	kState           = "state"
+	kStatusRollup    = "statusCheckRollup"
+	kContexts        = "contexts"
 	kContext         = "context"
 	kTarget          = "target"
 	kHasNextPage     = "hasNextPage"
@@ -57,6 +59,7 @@ const (
 	repoPresent     = "present-service"
 	repoGone        = "gone-service"
 	repoLegacy      = "legacy-app"
+	legacyTag       = "v2.0.0"
 	repoStray       = "stray-repo"
 	repoArchived    = "archived-old"
 	dissolvedTeam   = "team-dissolved"
@@ -217,7 +220,7 @@ func (o *fakeOrg) handle(w http.ResponseWriter, r *http.Request) {
 			target := map[string]any{"history": o.history(name)}
 			if ref, ok := n["defaultBranchRef"].(map[string]any); ok {
 				if t, ok := ref[kTarget].(map[string]any); ok {
-					target["statusCheckRollup"] = t["statusCheckRollup"]
+					target[kStatusRollup] = t[kStatusRollup]
 				}
 			}
 			n["defaultBranchRef"] = map[string]any{kName: mainBranch, kTarget: target}
@@ -262,7 +265,7 @@ func (o *fakeOrg) node(name string) map[string]any {
 	switch name {
 	case repoPresent:
 		n := base(false)
-		n["latestRelease"] = map[string]any{kTagName: presentTag, "publishedAt": o.now.AddDate(0, -1, 0).Format(time.RFC3339), kTagCommit: map[string]any{"statusCheckRollup": o.releaseRollup()}}
+		n["latestRelease"] = map[string]any{kTagName: presentTag, "publishedAt": o.now.AddDate(0, -1, 0).Format(time.RFC3339), kTagCommit: map[string]any{kStatusRollup: o.releaseRollup()}}
 		n["oldestIssues"] = map[string]any{kNodes: []map[string]any{{kNumber: 3, kTitle: "Dependency Dashboard"}}}
 		n["openPRs"] = map[string]any{kTotalCount: 2, kNodes: []map[string]any{
 			{kNumber: 10, kTitle: "fix(deps): update module x", kCreatedAt: o.now.AddDate(0, 0, -2).Format(time.RFC3339), kHeadRefName: "renovate/x", kAuthor: map[string]any{kLogin: renovateLogin}},
@@ -272,7 +275,7 @@ func (o *fakeOrg) node(name string) map[string]any {
 		n["renovate0"] = map[string]any{kText: "{\n  // generated\n  \"extends\": [\"github>giantswarm/renovate-presets:default.json5\"],\n  packageRules: [{ enabled: false, matchPackageNames: [\"x\"] },],\n}\n"}
 		n["ciConfig"] = map[string]any{kText: fakeCIConfig}
 		n["ciWorkflows"] = map[string]any{kText: fakeCIWorkflows}
-		n["defaultBranchRef"] = map[string]any{kName: mainBranch, kTarget: map[string]any{"statusCheckRollup": o.rollup()}}
+		n["defaultBranchRef"] = map[string]any{kName: mainBranch, kTarget: map[string]any{kStatusRollup: o.rollup()}}
 		n["dockerfile"] = map[string]any{"id": "3"}
 		n["helm"] = map[string]any{"id": "4"}
 		return n
@@ -288,7 +291,12 @@ func (o *fakeOrg) node(name string) map[string]any {
 		n := base(false)
 		n["ciConfig"] = map[string]any{kText: fakeCIConfig}
 		if o.private[repoLegacy] {
+			// The private repository's tag pipeline is out of the watch's
+			// reach: its release is read from the tag commit's statuses,
+			// which two pipelines posted, against the generated pipeline.
 			n["visibility"] = "PRIVATE"
+			n["ciWorkflows"] = map[string]any{kText: fakeCIWorkflowsFiltered}
+			n["latestRelease"] = map[string]any{kTagName: legacyTag, "publishedAt": o.now.Add(-time.Minute).Format(time.RFC3339), kTagCommit: map[string]any{kStatusRollup: o.mixedRollup()}}
 		}
 		return n
 	case repoArchived:
@@ -308,7 +316,7 @@ func (o *fakeOrg) node(name string) map[string]any {
 // statuses (one still pending) among a GitHub Actions check run and another
 // system's status.
 func (o *fakeOrg) rollup() map[string]any {
-	return map[string]any{kState: "PENDING", "contexts": map[string]any{
+	return map[string]any{kState: "PENDING", kContexts: map[string]any{
 		kPageInfo: map[string]any{kHasNextPage: false},
 		kNodes: []map[string]any{
 			{kName: "lint"}, // a CheckRun: no context
@@ -321,11 +329,28 @@ func (o *fakeOrg) rollup() map[string]any {
 // releaseRollup is the present repository's release tag commit: built green
 // by the release jobs.
 func (o *fakeOrg) releaseRollup() map[string]any {
-	return map[string]any{kState: stateSuccessGQL, "contexts": map[string]any{
+	return map[string]any{kState: stateSuccessGQL, kContexts: map[string]any{
 		kPageInfo: map[string]any{kHasNextPage: false},
 		kNodes: []map[string]any{
 			{kContext: circleBuild, kState: stateSuccessGQL, kCreatedAt: o.now.AddDate(0, -1, 0).Format(time.RFC3339)},
 			{kContext: "ci/circleci: push-to-registries-release", kState: stateSuccessGQL, kCreatedAt: o.now.AddDate(0, -1, 0).Format(time.RFC3339)},
+		}}}
+}
+
+// mixedRollup is a release commit two pipelines built (backstage v2.58.8):
+// the tag's, green in every job, and a branch's pushed at the same commit,
+// whose image legs timed out.
+func (o *fakeOrg) mixedRollup() map[string]any {
+	at := o.now.Add(-time.Minute).Format(time.RFC3339)
+	node := func(context, state string) map[string]any {
+		return map[string]any{kContext: context, kState: state, kCreatedAt: at}
+	}
+	return map[string]any{kState: "FAILURE", kContexts: map[string]any{
+		kPageInfo: map[string]any{kHasNextPage: false},
+		kNodes: []map[string]any{
+			node("ci/circleci: build-image-amd64", "FAILURE"), node("ci/circleci: build-image-arm64", "FAILURE"),
+			node(circleBuild, stateSuccessGQL), node("ci/circleci: push-to-registries-release", stateSuccessGQL),
+			node("ci/circleci: sync-china-registry", stateSuccessGQL), node("ci/circleci: push-chart-release", stateSuccessGQL),
 		}}}
 }
 
@@ -361,6 +386,63 @@ workflows:
           requires: [push-to-registries-release]
       - architect/push-to-app-catalog:
           name: push-chart
+`
+
+// fakeCIWorkflowsFiltered is the generated pipeline with its filters: the
+// native per-architecture build on branches (never main), the release jobs
+// on tags alone, go-build on both.
+const fakeCIWorkflowsFiltered = `version: 2.1
+orbs:
+  architect: giantswarm/architect@10.6.2
+workflows:
+  build:
+    jobs:
+      - architect/go-build:
+          name: go-build
+          filters:
+            tags:
+              only: /^v.*/
+      - architect/build-image:
+          name: build-image-amd64
+          platform: linux/amd64
+          requires: [go-build]
+          filters:
+            branches:
+              ignore: main
+      - architect/build-image:
+          name: build-image-arm64
+          platform: linux/arm64
+          requires: [go-build]
+          filters:
+            branches:
+              ignore: main
+      - architect/push-to-registries:
+          name: push-to-registries-release
+          merge-digests: true
+          split-china-push: true
+          platforms: linux/amd64,linux/arm64
+          requires: [go-build]
+          filters:
+            tags:
+              only: /^v.*/
+            branches:
+              ignore: /.*/
+      - architect/sync-china-registry:
+          name: sync-china-registry
+          requires: [push-to-registries-release]
+          filters:
+            tags:
+              only: /^v.*/
+            branches:
+              ignore: /.*/
+      - architect/push-to-app-catalog:
+          name: push-chart-release
+          requires: [push-to-registries-release]
+          filters:
+            tags:
+              only: /^v.*/
+            branches:
+              ignore: /.*/
 `
 
 // history is the default branch's recent commits: the stray repository saw

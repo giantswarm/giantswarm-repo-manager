@@ -12,8 +12,13 @@ import (
 
 // Test constants of this package's CircleCI derivations.
 const (
-	stateSuccess = "success"
-	releaseJob   = "ci/circleci: push-to-registries-release"
+	stateSuccess   = "success"
+	releaseJobName = "push-to-registries-release"
+	releaseJob     = "ci/circleci: " + releaseJobName
+	setupJob       = "setup"
+	amd64Leg       = "build-image-amd64"
+	mainBranch     = "main"
+	vTags          = "/^v.*/"
 )
 
 // TestFillClientlessSteps: the engine's circleci and release steps, skipped
@@ -49,7 +54,7 @@ func TestFillClientlessSteps(t *testing.T) {
 		return &inventory.Release{Tag: t, PublishedAt: built.Add(-time.Hour), Build: build, BuildTruncated: truncated}
 	}
 	record := func(cc *inventory.CircleCI, rel *inventory.Release, last *inventory.LastRun) *inventory.Record {
-		return &inventory.Record{Repository: slug, Name: "x", Reality: &inventory.Reality{DefaultBranch: "main", LatestRelease: rel}, CircleCI: cc, Setup: inventory.Setup{LastRun: last}}
+		return &inventory.Record{Repository: slug, Name: "x", Reality: &inventory.Reality{DefaultBranch: mainBranch, LatestRelease: rel}, CircleCI: cc, Setup: inventory.Setup{LastRun: last}}
 	}
 	statuses := &inventory.CircleCI{Followed: true, Head: head, Source: inventory.CircleCISourceStatuses, Unknown: []string{inventory.CircleCIFactSetupWorkflows}}
 	none := &inventory.CircleCI{Source: inventory.CircleCISourceStatuses, Unknown: []string{inventory.CircleCIFactSetupWorkflows}}
@@ -203,5 +208,126 @@ func TestFillClientlessStepsAdvisory(t *testing.T) {
 				t.Errorf("converged %v, want %v", res.Converged, tc.converged)
 			}
 		})
+	}
+}
+
+// TestStatusesReleaseStep: the release step from a tag commit's statuses
+// against the declaration — a branch pipeline's statuses at the release
+// commit are ignored (backstage v2.58.8), a failed tag-only job is the tag
+// pipeline's failure, a failed job that runs on branches too cannot be
+// attributed beside a branch pipeline's statuses and reads unchecked
+// (tunnelport v1.6.7), and without a branch pipeline's statuses every
+// failure is the tag pipeline's; a record of the earlier shape, without the
+// failed and pending lists, reads as it did.
+func TestStatusesReleaseStep(t *testing.T) {
+	const slug, tag = "giantswarm/x", "v2.58.8"
+	at := time.Date(2026, 9, 23, 8, 13, 0, 0, time.UTC)
+	tagOnly := func(n string) inventory.CIJob {
+		return inventory.CIJob{Name: n, TagsOnly: []string{vTags}, BranchesIgnore: []string{"/.*/"}}
+	}
+	shared := func(n string) inventory.CIJob { return inventory.CIJob{Name: n, TagsOnly: []string{vTags}} }
+	branchOnly := func(n string) inventory.CIJob { return inventory.CIJob{Name: n, BranchesIgnore: []string{mainBranch}} }
+	ci := &inventory.CI{Jobs: []inventory.CIJob{
+		shared("node-build"), shared("build-chart"), shared(setupJob),
+		branchOnly(amd64Leg), branchOnly("build-image-arm64"), branchOnly("push-to-registries"), branchOnly("execute-chart-tests"), branchOnly("push-chart"),
+		tagOnly("build-image-release-amd64"), tagOnly("build-image-release-arm64"), tagOnly(releaseJobName), tagOnly("sync-china-registry"), tagOnly("push-chart-release"),
+	}}
+	ctx := func(jobs ...string) []string {
+		out := make([]string, 0, len(jobs))
+		for _, j := range jobs {
+			out = append(out, "ci/circleci: "+j)
+		}
+		return out
+	}
+	tagPipeline := ctx("build-chart", "build-image-release-amd64", "build-image-release-arm64", "node-build", "push-chart-release", releaseJobName, setupJob, "sync-china-registry")
+	branchLegs := ctx(amd64Leg, "build-image-arm64")
+	status := func(state string, contexts, failed, pending []string) *inventory.HeadStatus {
+		return &inventory.HeadStatus{State: state, Contexts: contexts, Failed: failed, Pending: pending, At: at}
+	}
+	cases := []struct {
+		name     string
+		build    *inventory.HeadStatus
+		ci       *inventory.CI
+		verdict  reconcile.Verdict
+		summary  []string
+		findings []reconcile.FindingKind
+		absent   []string // substrings the finding messages must not carry
+	}{
+		{"backstage v2.58.8: a green tag pipeline beside a red branch pipeline reads built",
+			status(stateFailure, append(append([]string{}, branchLegs...), tagPipeline...), branchLegs, nil), ci,
+			reconcile.VerdictOK, []string{"release v2.58.8 built: CircleCI success (8 jobs, 2026-09-23T08:13:00Z); 2 statuses of a branch pipeline at the commit ignored"}, nil, nil},
+		{"a red tag-only job is the tag pipeline's failure, the branch legs are not named",
+			status(stateFailure, append(append([]string{}, branchLegs...), tagPipeline...), append(append([]string{}, branchLegs...), releaseJob), nil), ci,
+			reconcile.VerdictReported, []string{"release v2.58.8: CircleCI failure in push-to-registries-release (8 jobs"}, []reconcile.FindingKind{reconcile.FindingRedRelease}, []string{amd64Leg}},
+		{"tunnelport v1.6.7: a canceled branch pipeline's shared jobs beside a green tag pipeline read unchecked",
+			status(statusError, ctx("chart-test", "go-build", "go-test", releaseJobName), ctx("chart-test", "go-build", "go-test"), nil),
+			&inventory.CI{Jobs: []inventory.CIJob{shared("go-build"), shared("go-test"), branchOnly("chart-test"), tagOnly(releaseJobName)}},
+			reconcile.VerdictReported, []string{"release v2.58.8: two pipelines' statuses on its commit, go-build, go-test failed"}, []reconcile.FindingKind{reconcile.FindingUnchecked}, []string{"chart-test"}},
+		{"a failed shared job without a branch pipeline's statuses is the tag pipeline's",
+			status(stateFailure, ctx("go-build", releaseJobName), ctx("go-build"), nil),
+			&inventory.CI{Jobs: []inventory.CIJob{shared("go-build"), tagOnly(releaseJobName)}},
+			reconcile.VerdictReported, []string{"release v2.58.8: CircleCI failure in go-build (2 jobs"}, []reconcile.FindingKind{reconcile.FindingRedRelease}, nil},
+		{"a pending tag job beside a finished branch pipeline reads running",
+			status("pending", append(append([]string{}, branchLegs...), tagPipeline...), branchLegs, ctx("push-chart-release")), ci,
+			reconcile.VerdictOK, []string{"release v2.58.8: CircleCI pipeline running (8 jobs", "2 statuses of a branch pipeline at the commit ignored"}, nil, nil},
+		{"without a declaration every status counts",
+			status(stateFailure, append(append([]string{}, branchLegs...), tagPipeline...), branchLegs, nil), nil,
+			reconcile.VerdictReported, []string{"release v2.58.8: CircleCI failure in build-image-amd64, build-image-arm64 (10 jobs, 2026-09-23T08:13:00Z)"}, []reconcile.FindingKind{reconcile.FindingRedRelease}, nil},
+		{"a declaration naming none of the jobs as the tag's is no evidence",
+			status(stateSuccess, ctx("build", "publish"), nil, nil), &inventory.CI{Jobs: []inventory.CIJob{branchOnly("build"), branchOnly("publish")}},
+			reconcile.VerdictOK, []string{"release v2.58.8 built: CircleCI success (2 jobs, 2026-09-23T08:13:00Z)"}, nil, nil},
+		{"the earlier record shape: a red state names every context",
+			&inventory.HeadStatus{State: stateFailure, Contexts: ctx("go-build", releaseJobName), At: at}, nil,
+			reconcile.VerdictReported, []string{"release v2.58.8: CircleCI failure in go-build, push-to-registries-release"}, []reconcile.FindingKind{reconcile.FindingRedRelease}, nil},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := statusesReleaseStep(slug, tag, tc.build, tc.ci)
+			if got.Verdict != tc.verdict {
+				t.Errorf("verdict %s, want %s (%+v)", got.Verdict, tc.verdict, got)
+			}
+			for _, s := range tc.summary {
+				if !strings.Contains(got.Summary, s) {
+					t.Errorf("summary %q lacks %q", got.Summary, s)
+				}
+			}
+			if len(got.Findings) != len(tc.findings) {
+				t.Fatalf("findings %+v, want kinds %v", got.Findings, tc.findings)
+			}
+			for i, f := range got.Findings {
+				if f.Kind != tc.findings[i] || f.Message == "" || f.Fix == "" {
+					t.Errorf("finding %d %+v, want %s with a message and a fix", i, f, tc.findings[i])
+				}
+				for _, s := range tc.absent {
+					if strings.Contains(f.Message, s) {
+						t.Errorf("finding names %q: %q", s, f.Message)
+					}
+				}
+			}
+		})
+	}
+}
+
+// TestBuildsSentenceIgnoresOtherPipelines: the circleci step's sentence
+// about the default branch head counts the branch's own statuses — the tag
+// pipeline's release jobs and a bot's branch pipeline whose jobs skip the
+// default branch are another pipeline's.
+func TestBuildsSentenceIgnoresOtherPipelines(t *testing.T) {
+	at := time.Date(2026, 9, 23, 9, 6, 2, 0, time.UTC)
+	ci := &inventory.CI{Jobs: []inventory.CIJob{
+		{Name: "node-build", TagsOnly: []string{vTags}},
+		{Name: amd64Leg, BranchesIgnore: []string{mainBranch}},
+		{Name: releaseJobName, TagsOnly: []string{vTags}, BranchesIgnore: []string{"/.*/"}},
+	}}
+	head := &inventory.HeadStatus{State: stateFailure, At: at,
+		Contexts: []string{"ci/circleci: " + amd64Leg, "ci/circleci: node-build", releaseJob},
+		Failed:   []string{"ci/circleci: " + amd64Leg}}
+	want := "CircleCI builds main: success (1 job, 2026-09-23T09:06:02Z; 2 statuses of other pipelines at the head ignored)"
+	if got := buildsSentence("giantswarm/x", mainBranch, head, ci, true); got != want {
+		t.Errorf("got  %q\nwant %q", got, want)
+	}
+	// Without a declaration the sentence is the head's as before.
+	if got := buildsSentence("giantswarm/x", mainBranch, head, nil, true); got != "CircleCI builds main: failure (3 jobs, 2026-09-23T09:06:02Z)" {
+		t.Errorf("without a declaration: %q", got)
 	}
 }

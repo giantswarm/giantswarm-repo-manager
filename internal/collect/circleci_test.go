@@ -20,7 +20,7 @@ func TestCircleCIDerivation(t *testing.T) {
 		n.DefaultBranchRef = &struct {
 			Name   string        `json:"name"`
 			Target *branchTarget `json:"target"`
-		}{Name: "main", Target: &branchTarget{StatusCheckRollup: &statusRollup{State: "SUCCESS"}}}
+		}{Name: mainBranch, Target: &branchTarget{StatusCheckRollup: &statusRollup{State: "SUCCESS"}}}
 		r := n.DefaultBranchRef.Target.StatusCheckRollup
 		r.Contexts.PageInfo.HasNextPage = truncated
 		for i, c := range contexts {

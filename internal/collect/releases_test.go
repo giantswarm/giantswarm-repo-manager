@@ -29,7 +29,7 @@ const (
 	backstage11508  = "https://app.circleci.com/pipelines/github/giantswarm/backstage/11508"
 	circleCIFailure = "CircleCI failure"
 	wfBuild         = "wf-build"
-	neverRebuilt    = "a tag is never rebuilt"
+	neverRebuilt    = "rerun the failed workflow from failed on CircleCI"
 )
 
 // fakeTagPipelines is CircleCI as the watch reads it: one project's
@@ -82,8 +82,8 @@ func TestReadReleaseDecidesFromTheTagPipeline(t *testing.T) {
 	tagPipeline := circleciclient.Pipeline{ID: pipelineTag, Number: 11508, CreatedAt: t0, VCS: circleciclient.PipelineVCS{Tag: tag, Revision: sha}}
 	branchPipeline := circleciclient.Pipeline{ID: pipelineBranch, Number: 11509, CreatedAt: t0.Add(2 * time.Minute), VCS: circleciclient.PipelineVCS{Branch: "changesets-ghcommit-temp/changeset-release/main", Revision: sha}}
 	failedBuild := circleciclient.Workflow{ID: wfBuild, Name: workflowBuild, Status: "failed", PipelineNumber: 11508, CreatedAt: t0}
-	greenSetup := circleciclient.Workflow{ID: "wf-setup", Name: "setup", Status: stateSuccess, PipelineNumber: 11508, CreatedAt: t0}
-	redJobs := []circleciclient.Job{{Name: "node-build", Status: stateSuccess}, {Name: "build-image-amd64", Status: statusTimedOut}, {Name: "build-image-arm64", Status: statusTimedOut}, {Name: "push-to-registries-release", Status: "not_run"}}
+	greenSetup := circleciclient.Workflow{ID: "wf-setup", Name: setupJob, Status: stateSuccess, PipelineNumber: 11508, CreatedAt: t0}
+	redJobs := []circleciclient.Job{{Name: "node-build", Status: stateSuccess}, {Name: amd64Leg, Status: statusTimedOut}, {Name: "build-image-arm64", Status: statusTimedOut}, {Name: releaseJobName, Status: "not_run"}}
 	branchRed := circleciclient.Workflow{ID: "wf-branch", Name: workflowBuild, Status: "failed", PipelineNumber: 11509, CreatedAt: t0.Add(2 * time.Minute)}
 
 	cases := []struct {
@@ -129,7 +129,7 @@ func TestReadReleaseDecidesFromTheTagPipeline(t *testing.T) {
 		{
 			name: "watching: a workflow that failed while another runs is red at once",
 			fake: &fakeTagPipelines{project: org + "/" + name, pipelines: []circleciclient.Pipeline{tagPipeline},
-				workflows: map[string][]circleciclient.Workflow{pipelineTag: {failedBuild, {ID: "wf-run", Name: "setup", Status: statusRunning, CreatedAt: t0}}},
+				workflows: map[string][]circleciclient.Workflow{pipelineTag: {failedBuild, {ID: "wf-run", Name: setupJob, Status: statusRunning, CreatedAt: t0}}},
 				jobs:      map[string][]circleciclient.Job{wfBuild: redJobs}},
 			want: inventory.ReleaseWatch{State: inventory.ReleaseRed, FailedJobs: []string{"build-image-amd64 (timed out)", "build-image-arm64 (timed out)"},
 				Pipeline: &inventory.ReleasePipeline{Number: 11508, URL: backstage11508, Workflow: backstage11508 + "/workflows/" + wfBuild}},
@@ -253,7 +253,7 @@ func TestReleaseStepFromTheWatch(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			sr := releaseStep(slug, tag, statuses, nil, tc.w)
+			sr := releaseStep(slug, tag, statuses, nil, nil, tc.w)
 			if sr.Verdict != tc.verdict || !strings.Contains(sr.Summary, tc.summary) {
 				t.Errorf("verdict=%s summary=%q, want %s containing %q", sr.Verdict, sr.Summary, tc.verdict, tc.summary)
 			}

@@ -180,6 +180,7 @@ const (
 	testForeignRuleset = "foreign-ruleset"
 	testMissedTagBuild = "missed-tag-build"
 	testRulesetFix     = "declare what it enforces in the entry and delete it, or keep it knowingly"
+	testMissedTagText  = "bumblebee-repo: release v0.2.9 has no pipeline — cut the next tag"
 )
 
 var (
@@ -246,17 +247,17 @@ func TestCompletionsVerifyAgainstTheLiveCheck(t *testing.T) {
 		{name: "the live check skipped the step: the run's finding stands",
 			rec: checked(record(change(inventory.ChangeChanged), releaseFindingStep),
 				reconcile.StepResult{Step: reconcile.StepRelease, Verdict: reconcile.VerdictSkipped, Summary: "no CircleCI client to verify the pipeline"}),
-			want: "bumblebee-repo: release v0.2.9 has no pipeline — cut the next tag"},
+			want: testMissedTagText},
 		{name: "the live check failed the step: the run's finding stands",
 			rec: checked(record(change(inventory.ChangeChanged), releaseFindingStep),
 				reconcile.StepResult{Step: reconcile.StepRelease, Verdict: reconcile.VerdictFailed, Summary: "CircleCI answered 502"}),
-			want: "bumblebee-repo: release v0.2.9 has no pipeline — cut the next tag"},
+			want: testMissedTagText},
 		{name: "the live check has no result for the step: the run's finding stands",
 			rec:  checked(record(change(inventory.ChangeChanged), releaseFindingStep), protectionOK),
-			want: "bumblebee-repo: release v0.2.9 has no pipeline — cut the next tag"},
+			want: testMissedTagText},
 		{name: "no live check at all: the run's finding stands",
 			rec:  record(change(inventory.ChangeChanged), releaseFindingStep),
-			want: "bumblebee-repo: release v0.2.9 has no pipeline — cut the next tag"},
+			want: testMissedTagText},
 		{name: "a failed step is the run's own and is not verified away",
 			rec:  checked(record(change(inventory.ChangeChanged), failedStep), reconcile.StepResult{Step: reconcile.StepCircleCI, Verdict: reconcile.VerdictOK}),
 			want: "bumblebee-repo: the circleci step failed (CircleCI answered 502) — look at the run, fix the cause and reconcile again"},

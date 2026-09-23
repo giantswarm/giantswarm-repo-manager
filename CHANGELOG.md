@@ -74,6 +74,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- The engine is devctl v8.91.7, from v8.89.0: the embedded schema declares `gen.ci.chartReleaseGateJob`
+  (devctl#2382), so an entry that sets it, giantswarm/agent-platform's, is validated and checked instead of refused as
+  `entry-refused` with no set-up checks; a created repository's scaffold passes the key to `gen circleci`
+  (devctl#2383), which gates the release chart push on a repo-owned job (devctl#2363); the generated CircleCI
+  configuration pins architect orb 10.6.3 (devctl#2362).
 - The engine is devctl v8.89.0, from v8.87.3: the circleci step verifies CircleCI's webhook (devctl#2358), a chart
   scaffold carries the smoke test the app test suite runs (devctl#2356), and the `plans` flavour with the template
   `giantswarm/template-plans` (devctl#2355).

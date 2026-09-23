@@ -9,6 +9,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- The engine is devctl v8.87.1, from v8.86.1: a ruleset's bypass list is compared only when the identity can read
+  it (GitHub returns `bypass_actors` to write access alone), the summary saying `bypass actors not readable by this
+  identity, not compared` otherwise, so a devctl App id passed to the read-mode engine no longer reads every aligned
+  repository as bypass-list drift (devctl#2346); a disabled ruleset raises no `foreign-ruleset` finding (devctl#2344);
+  the entry declares the rulesets a team keeps (devctl#2349).
+
 ### Fixed
 
 - The engine's read-mode checks pass no devctl App id by default (`inventory.engine.devctlAppID: 0`): GitHub shows a

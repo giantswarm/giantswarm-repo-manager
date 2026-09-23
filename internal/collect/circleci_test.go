@@ -10,6 +10,9 @@ import (
 	"github.com/giantswarm/giantswarm-repo-manager/internal/inventory"
 )
 
+// followX is the engine's change that follows the test repository.
+const followX = "follow giantswarm/x"
+
 // TestCircleCIDerivation: the record's CircleCI state from the head's
 // statuses and the reconciler's circleci step — every combination names what
 // it knows and what stays unknown, nothing is guessed.
@@ -70,9 +73,9 @@ func TestCircleCIDerivation(t *testing.T) {
 			inventory.CircleCI{Followed: true, SetupWorkflows: &yes, Webhook: &no, Source: inventory.CircleCISourceBoth}},
 		{"run could not read the hooks: webhook unknown", head(false), step(reconcile.ModeCheck, reconcile.StepResult{Verdict: reconcile.VerdictReported, Summary: convergedCircleCI + ", webhook not readable by this identity", Findings: []reconcile.Finding{unreadable}}),
 			inventory.CircleCI{Followed: true, SetupWorkflows: &yes, Source: inventory.CircleCISourceBoth, Unknown: []string{webhook}}},
-		{"repair run that followed: the hook CircleCI did not install is missing", head(false), step(reconcile.ModeRepair, reconcile.StepResult{Verdict: reconcile.VerdictRepaired, Changes: []string{"follow giantswarm/x"}, Findings: []reconcile.Finding{missing}}),
+		{"repair run that followed: the hook CircleCI did not install is missing", head(false), step(reconcile.ModeRepair, reconcile.StepResult{Verdict: reconcile.VerdictRepaired, Changes: []string{followX}, Findings: []reconcile.Finding{missing}}),
 			inventory.CircleCI{Followed: true, SetupWorkflows: &yes, Webhook: &no, Source: inventory.CircleCISourceBoth}},
-		{"check run: follow planned, settings and webhook unread", head(false), run(reconcile.ModeCheck, reconcile.VerdictDrift, "follow giantswarm/x", "enable setup workflows", "create a deploy key"),
+		{"check run: follow planned, settings and webhook unread", head(false), run(reconcile.ModeCheck, reconcile.VerdictDrift, followX, "enable setup workflows", "create a deploy key"),
 			inventory.CircleCI{Source: inventory.CircleCISourceBoth, Unknown: []string{setup, webhook}}},
 		{"check run: followed, setup workflows off", head(false), run(reconcile.ModeCheck, reconcile.VerdictDrift, "enable setup workflows"),
 			inventory.CircleCI{Followed: true, SetupWorkflows: &no, Source: inventory.CircleCISourceBoth, Unknown: []string{webhook}}},
@@ -80,14 +83,14 @@ func TestCircleCIDerivation(t *testing.T) {
 			inventory.CircleCI{Followed: true, SetupWorkflows: &no, Webhook: &no, Source: inventory.CircleCISourceBoth}},
 		{"check run: followed, only a key missing", head(false), run(reconcile.ModeCheck, reconcile.VerdictDrift, "create a deploy key"),
 			inventory.CircleCI{Followed: true, SetupWorkflows: &yes, Source: inventory.CircleCISourceBoth, Unknown: []string{webhook}}},
-		{"repair run: everything holds after it", head(false), run(reconcile.ModeRepair, reconcile.VerdictRepaired, "follow giantswarm/x", "enable setup workflows"),
+		{"repair run: everything holds after it", head(false), run(reconcile.ModeRepair, reconcile.VerdictRepaired, followX, "enable setup workflows"),
 			inventory.CircleCI{Followed: true, SetupWorkflows: &yes, Source: inventory.CircleCISourceBoth, Unknown: []string{webhook}}},
 		{"failed step: the error, nothing known", head(false), run(reconcile.ModeRepair, reconcile.VerdictFailed),
 			inventory.CircleCI{Source: inventory.CircleCISourceBoth, Unknown: []string{setup, webhook}, Error: "the reconciler's circleci step failed: the step's summary"}},
 		{"skipped step (no client in that run) counts as no run", head(false, circleA), run(reconcile.ModeCheck, reconcile.VerdictSkipped),
 			inventory.CircleCI{Followed: true, Source: inventory.CircleCISourceStatuses, Unknown: []string{setup, webhook},
 				Head: &inventory.HeadStatus{State: stateSuccess, Contexts: []string{circleA}, At: now}}},
-		{"statuses beat a check run that planned the follow", head(false, circleA), run(reconcile.ModeCheck, reconcile.VerdictDrift, "follow giantswarm/x"),
+		{"statuses beat a check run that planned the follow", head(false, circleA), run(reconcile.ModeCheck, reconcile.VerdictDrift, followX),
 			inventory.CircleCI{Followed: true, Source: inventory.CircleCISourceBoth, Unknown: []string{setup, webhook},
 				Head: &inventory.HeadStatus{State: stateSuccess, Contexts: []string{circleA}, At: now}}},
 		{"no default branch", &repoNode{}, nil,

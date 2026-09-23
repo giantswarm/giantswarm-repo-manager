@@ -2,54 +2,65 @@ package tools
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
 
 	"github.com/giantswarm/giantswarm-repo-manager/internal/inventory"
 	"github.com/giantswarm/giantswarm-repo-manager/internal/review"
+	"github.com/giantswarm/giantswarm-repo-manager/internal/teamfiles"
 )
 
 // Released is the release watch's hook when it settles a release nothing was
 // published for — the tag's own pipeline red, or no pipeline within the
 // grace period: the one sentence about it to the owning team's standup
 // channel, read from its policy file as the unattended identity, linking
-// the failed workflow. It returns the sentence posted, empty when nothing
-// reached the channel; the watch stores it as the release's Told, so the
-// team hears about a release once, and a later pass over the same red tag
-// posts nothing. A team without a policy file is not messaged. Every way
-// out logs why.
-func (ts *Tools) Released(ctx context.Context, rec *inventory.Record) string {
+// the failed workflow. It returns the sentence and whether it reached the
+// channel; the watch stores the sentence as the release's Told, so the team
+// hears about a release once, and a later pass over the same red tag posts
+// nothing. A team without a policy file is not messaged, and neither is
+// anyone without a team-review endpoint: both are final, so the sentence is
+// returned as told without a message and the watch stops asking — a red
+// release is read again every pass until the next tag, and would otherwise
+// cost a policy read and a warning each time. Every way out logs why; what
+// may change by the next pass (the identity, a read GitHub refused, the
+// gateway) returns nothing and is retried.
+func (ts *Tools) Released(ctx context.Context, rec *inventory.Record) (told string, posted bool) {
 	t := ts.t
 	n, ok := ReleaseNotice(rec)
 	if !ok {
-		return ""
+		return "", false
 	}
 	if rec.Declaration == nil {
 		t.d.Log.Info("release notice not delivered", "repository", rec.Repository, "reason", "the team files do not declare the repository")
-		return ""
+		return "", false
 	}
 	team := rec.Declaration.Team
 	if t.d.Review == nil {
-		t.d.Log.Info("release notice not delivered", "repository", rec.Repository, "team", team, "reason", review.ErrNotConfigured)
-		return ""
+		t.d.Log.Info("release notice not delivered", "repository", rec.Repository, "team", team, "reason", review.ErrNotConfigured, "text", n.Text)
+		return n.Text, false
 	}
 	repo, err := t.unattended()
 	if err != nil {
 		t.d.Log.Warn("release notice not delivered", "repository", rec.Repository, "team", team, "error", err)
-		return ""
+		return "", false
 	}
 	channel, err := t.policyChannel(ctx, repo, team, false)
 	if err != nil {
+		if errors.Is(err, teamfiles.ErrFileNotFound) {
+			t.d.Log.Info("release notice not delivered", "repository", rec.Repository, "team", team, "reason", "the team has no policy file and is not messaged", "text", n.Text)
+			return n.Text, false
+		}
 		t.d.Log.Warn("release notice not delivered", "repository", rec.Repository, "team", team, "reason", err.Error())
-		return ""
+		return "", false
 	}
 	if _, err := t.d.Review.Notify(ctx, review.Notice{Team: team, Channel: channel, Text: n.Text, Link: n.Link}); err != nil {
 		t.d.Log.Warn("release notice not delivered", "repository", rec.Repository, "team", team, "error", err)
-		return ""
+		return "", false
 	}
 	t.d.Log.Info("release notice posted", "repository", rec.Repository, "team", team, "channel", channel, "tag", rec.Setup.Release.Tag, "text", n.Text)
-	return n.Text
+	return n.Text, true
 }
 
 // ReleaseNotice is the sentence for a settled release nothing was published

@@ -9,6 +9,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- The release watch stops asking about a release its team is never told of: a team without a policy file is not
+  messaged, and neither is an installation without a team-review endpoint, so the sentence is recorded as told and the
+  next pass over the same red tag reads the pipeline without a policy read and a warning each time (before, kyverno-app
+  v0.25.0 — red, team-shield without a policy file — warned on every pass). What may change by the next pass (the
+  identity, a read GitHub refused, the gateway) is still retried.
+
 ### Added
 
 - A release nothing was published for is told to the team once, within minutes, whoever merged and however

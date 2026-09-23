@@ -147,6 +147,30 @@ func TestReleaseWatchTellsTheTeamOnce(t *testing.T) {
 		t.Errorf("findings of the missed build: %+v", f)
 	}
 
+	// A team without a policy file is not messaged, and the watch stops
+	// asking: the sentence is recorded as told, no notice reaches the
+	// gateway, the next pass reads the red release without a second try.
+	policyPath := "repository-setup/" + team + ".yaml"
+	st.ghs.files.mu.Lock()
+	policy := st.ghs.files.files[policyPath]
+	delete(st.ghs.files.files, policyPath)
+	st.ghs.files.mu.Unlock()
+	o.release(repoPresent, "v1.4.0", st.now().Add(-5*time.Minute), 44)
+	st.cc.pipeline(repoPresent, tag("v1.4.0"), st.now().Add(-4*time.Minute), "failed")
+	if p := st.watchReleases(t); p.Started != 1 || p.Settled != 1 || p.Told != 0 {
+		t.Errorf("no policy file: %+v", p)
+	}
+	rec = record()
+	if w := rec.Setup.Release; w.State != inventory.ReleaseRed || !strings.HasPrefix(w.Told, repoPresent+": release v1.4.0 (pull request #44) is red") {
+		t.Errorf("a team without a policy file: the sentence is recorded, not posted: %+v", w)
+	}
+	if len(notices()) != 2 {
+		t.Errorf("a team without a policy file hears nothing: %v", notices())
+	}
+	st.ghs.files.mu.Lock()
+	st.ghs.files.files[policyPath] = policy
+	st.ghs.files.mu.Unlock()
+
 	// A private repository read without a token: CircleCI answers 404, the
 	// release is unchecked, nothing is told.
 	o.private = map[string]bool{repoLegacy: true}

@@ -93,8 +93,8 @@ type Collector struct {
 	reconciled func(context.Context, *inventory.Record)
 	conflicted func(context.Context, *inventory.Record, *github.PullRequest)
 	// released tells the team about a release nothing was published for and
-	// returns the sentence posted (releases.go).
-	released func(context.Context, *inventory.Record) string
+	// returns the sentence and whether it reached the channel (releases.go).
+	released func(context.Context, *inventory.Record) (string, bool)
 	opts     Options
 	reader   *gh.Reader
 	gql      *graphQL

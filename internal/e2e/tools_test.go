@@ -523,7 +523,7 @@ func TestUpdateRepositoryReplacesOneEntry(t *testing.T) {
 	st := newStack(t)
 	c := st.as(t, aliceToken)
 	entry := map[string]any{"name": repoPresent, kComponentType: kService, kDescription: "now described",
-		kGen: map[string]any{kLanguage: kGo, kFlavours: []any{kApp}, kCI: map[string]any{kChartName: repoPresent}}}
+		kGen: map[string]any{kLanguage: kGo, kFlavours: []any{kApp}, kCI: map[string]any{kGenerate: true, kChartName: repoPresent}}}
 	var plan tools.Plan
 	st.callJSON(t, c, tools.ToolUpdateRepository, map[string]any{argDryRun: true, kRepository: repoPresent, argEntry: entry}, &plan)
 	if !plan.Accepted || !strings.Contains(plan.Entry, "now described") || strings.Contains(plan.Before, "described") || plan.Team != team {

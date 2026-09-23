@@ -282,8 +282,11 @@ const adoptHint = " — the repository has a history, so it is not a creation of
 // whose default branch carries at most one commit — the caller's own
 // creations interrupted after the create or the scaffold step. Anyone else's
 // repository stays refused, and so does one with a history, its refusal
-// naming adopt_repository. The ModeExisting verdicts replace the resumed
-// entries; the guard notices are the creation's.
+// naming adopt_repository. The entries are validated as the creation
+// rendered them, defaults written out (gen.ci.generate): a resumed creation
+// is still a creation, and an existing-mode read takes an entry as declared.
+// The ModeExisting verdicts replace the resumed entries; the guard notices
+// are the creation's.
 func (t *tools) resumed(ctx context.Context, p *person, req reposetup.Request, res *reposetup.Result) (*reposetup.Result, []string, error) {
 	var names []string
 	for i, e := range res.Entries {
@@ -315,7 +318,11 @@ func (t *tools) resumed(ctx context.Context, p *person, req reposetup.Request, r
 	if len(names) == 0 {
 		return res, nil, nil
 	}
-	req.Names, req.Mode = names, reposetup.ModeExisting
+	tf, err := renderedTeamFile(req.TeamFile.Team, res.Entries, names)
+	if err != nil {
+		return nil, nil, err
+	}
+	req.TeamFile, req.Names, req.Mode = tf, names, reposetup.ModeExisting
 	existing, err := t.validator().Validate(ctx, req)
 	if err != nil {
 		return nil, nil, err
@@ -332,6 +339,27 @@ func (t *tools) resumed(ctx context.Context, p *person, req reposetup.Request, r
 		res.Accepted = res.Accepted && res.Entries[i].Accepted
 	}
 	return res, names, nil
+}
+
+// renderedTeamFile is a team file of the named entries as the creation's dry
+// run rendered them: the entry as it would be written, the creation defaults
+// out.
+func renderedTeamFile(team string, entries []reposetup.Entry, names []string) (*reposetup.TeamFile, error) {
+	resumed := make(map[string]bool, len(names))
+	for _, n := range names {
+		resumed[n] = true
+	}
+	var b strings.Builder
+	for _, e := range entries {
+		if !resumed[e.Name] {
+			continue
+		}
+		b.WriteString(e.Rendered)
+		if !strings.HasSuffix(e.Rendered, "\n") {
+			b.WriteByte('\n')
+		}
+	}
+	return reposetup.ParseTeamFile(team, strings.NewReader(b.String()))
 }
 
 // planCreation is the creation as the caller, in check mode: the engine

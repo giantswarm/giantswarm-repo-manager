@@ -9,8 +9,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- The engine's read-mode checks run with the devctl GitHub App's numeric id (`--devctl-app-id`, `DEVCTL_APP_ID`; the
+  chart's `inventory.engine.devctlAppID`, default 5025978, the App of the reconciler in giantswarm/github), so the
+  protection step compares the ruleset `devctl: default branch` in full, its bypass list included (the devctl App, the
+  owning team and the repository admins for pull requests, as the reconciler writes them), and plans a repository still
+  on classic protection as the reconciler would: create the ruleset, remove the classic protection. The check writes
+  nothing. The engine is devctl v8.86.1, whose protection step reads the ruleset first without the id and compares
+  the rules alone (devctl#2341); on devctl 8.85.x it reported every aligned repository as `protection drift: protect
+  main …` with the advisory
+  `rulesets-not-enabled`, "not converged", although the reconciler's nightly run had written the ruleset and removed the
+  classic protection. The create path (`create_repository`, repair mode as the person) is unchanged: a new repository
+  gets classic protection, which the reconciler's next run moves to the ruleset.
+
 ### Fixed
 
+- `create_repository` resumes an interrupted creation with the entry as the creation renders it, defaults written out
+  (`gen.ci.generate: true`). Since devctl v8.85.4 an existing-mode validation reads an entry as declared, so a resume of
+  an entry whose `gen.ci` block leaves `generate` unset was refused (`gen.ci.generate: required`) where the first
+  attempt had accepted it; `update_repository` of such an entry is refused as the schema says, the refusal naming the
+  field.
 - A reconciler run's findings reach the team's standup channel only when they are news, after three
   failure modes filled the channel with 26 messages in two bursts of which roughly four were chores. A
   finding of kind `pending-pull-request` is no longer posted: the `codeowners` step opens that pull

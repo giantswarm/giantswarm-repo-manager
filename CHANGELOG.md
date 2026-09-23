@@ -9,8 +9,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- A release nothing was published for is told to the team once, within minutes, whoever merged and however
+  ([#107](https://github.com/giantswarm/giantswarm-repo-manager/issues/107)). The release watch
+  (`inventory.releases.interval`, default 5m; `"0"` off) follows the latest release of every declared repository
+  from its tag to the end of the tag's own CircleCI pipeline: one GraphQL query per pass over the most recently
+  pushed repositories, and for every release still running the tag's pipeline on CircleCI, found by its `vcs.tag` —
+  never a branch pipeline at the same commit, which the commit's statuses cannot tell apart — its workflows (the
+  newest run per name) and the jobs of a failed one. A red pipeline is one sentence to the team's `standupChannel`
+  naming the tag, the pull request behind it, the failed jobs and how they failed, the rerun from failed as the fix
+  and `devctl release wait` to confirm, linking the failed workflow; a tag without a pipeline
+  `inventory.releases.grace` (default 10m) after its creation is the missed build, told the same way. The record's
+  `setup.release` holds the watch's state and the sentence told, so a later pass over the same red tag says nothing,
+  a rerun that goes green turns the record built silently, and the next tag is a new watch; the record's `release`
+  step and findings (`red-release`, `missed-tag-build`) follow the watch once it has read the tag, so the Repositories
+  page agrees with the notice and a branch pipeline at the release commit no longer reads as `red-release` for a
+  watched repository ([#106](https://github.com/giantswarm/giantswarm-repo-manager/issues/106) for public
+  repositories). Public repositories are read without a token; a private one needs `circleci.existingSecret` (a
+  CircleCI API token under `token`) and reads `unchecked` without it — nothing is posted. `get_info` reports
+  `circleci.tagPipelines`: anonymous, token or off.
+
 ### Changed
 
+- The engine is devctl v8.87.3, from v8.87.1: the CircleCI client reads public projects without a token
+  (`Config.Anonymous`), the engine's release step counts only the newest run of every workflow, and the `red-release`
+  fix names the rerun from failed (devctl#2353).
 - The engine is devctl v8.87.1, from v8.86.1: a ruleset's bypass list is compared only when the identity can read
   it (GitHub returns `bypass_actors` to write access alone), the summary saying `bypass actors not readable by this
   identity, not compared` otherwise, so a devctl App id passed to the read-mode engine no longer reads every aligned

@@ -27,6 +27,8 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/giantswarm/devctl/v8/pkg/circleciclient"
+
 	"github.com/giantswarm/giantswarm-repo-manager/internal/collect"
 	"github.com/giantswarm/giantswarm-repo-manager/internal/gh"
 	"github.com/giantswarm/giantswarm-repo-manager/internal/inventory"
@@ -53,6 +55,8 @@ type options struct {
 	teamFilesRepository, teamFilesRef                                  string
 	reconcilerWorkflow                                                 string
 	reconcilerPollInterval                                             time.Duration
+	releasesInterval, releasesGrace                                    time.Duration
+	circleciToken, circleciAPIURL                                      string
 	reviewsURL, reviewsTokenFile, reviewsChannels, reviewsDebugChannel string
 
 	oauthEnabled                           bool
@@ -83,6 +87,10 @@ func parseFlags(args []string) (*options, error) {
 	f.Int64Var(&o.devctlAppID, "devctl-app-id", envInt64("DEVCTL_APP_ID"), "Numeric id of the devctl GitHub App, the reconciler's bypass actor on the ruleset devctl: default branch. Set it only for a read identity that sees a ruleset's bypass actors (the inventory App does not: GitHub shows them to identities that administer the repository); 0, the default, compares the rules alone and reports the bypass list as not compared (DEVCTL_APP_ID)")
 	f.StringVar(&o.teamFilesRepository, "team-files-repository", envOr("TEAM_FILES_REPOSITORY", teamfiles.DefaultRepository), "owner/name of the repository that holds the team files and policy files (TEAM_FILES_REPOSITORY)")
 	f.StringVar(&o.teamFilesRef, "team-files-ref", envOr("TEAM_FILES_REF", teamfiles.DefaultRef), "Branch the team files are read from and pull requests target (TEAM_FILES_REF)")
+	f.DurationVar(&o.releasesInterval, "releases-interval", envDuration("RELEASES_INTERVAL", collect.DefaultReleaseInterval), "Follow the latest release of every declared repository from its tag to the end of the tag's own CircleCI pipeline, reading every interval; a red pipeline, or none within the grace period, is one notice to the team's standup channel, told once; 0 turns the watch off (RELEASES_INTERVAL)")
+	f.DurationVar(&o.releasesGrace, "releases-grace", envDuration("RELEASES_GRACE", collect.DefaultReleaseGrace), "How long after its creation a release may have no CircleCI pipeline before it is a missed build (RELEASES_GRACE)")
+	f.StringVar(&o.circleciToken, "circleci-token", envOr("CIRCLECI_TOKEN", ""), "CircleCI API token for the release watch's reads; empty reads anonymously, which CircleCI answers for public projects alone, and a private repository's release reads unchecked (CIRCLECI_TOKEN)")
+	f.StringVar(&o.circleciAPIURL, "circleci-api-url", envOr("CIRCLECI_API_URL", ""), "CircleCI API v2 URL; empty is https://circleci.com/api/v2 (CIRCLECI_API_URL)")
 	f.StringVar(&o.reviewsURL, "reviews-url", envOr("REVIEWS_URL", ""), "klaus-gateway's base URL for the team-review endpoint (POST /reviews, /notices); empty leaves the asks undelivered (REVIEWS_URL)")
 	f.StringVar(&o.reviewsTokenFile, "reviews-token-file", envOr("REVIEWS_TOKEN_FILE", "/var/run/secrets/klaus-gateway/token"), "Projected ServiceAccount token (audience klaus-gateway) sent to the team-review endpoint (REVIEWS_TOKEN_FILE)")
 	f.StringVar(&o.reviewsChannels, "reviews-channels", envOr("REVIEWS_CHANNELS", ""), "Comma-separated name=ID pairs mapping a policy file's slackChannel to its Slack channel ID (REVIEWS_CHANNELS)")
@@ -142,11 +150,25 @@ func run(ctx context.Context, o *options, log *slog.Logger) error {
 		defer s.Close()
 		store, deps.Inventory = s, s
 	}
+	releases := collect.ReleaseOptions{Interval: o.releasesInterval, Grace: o.releasesGrace, Anonymous: o.circleciToken == ""}
+	deps.TagPipelines = tools.TagPipelinesOff
+	if o.releasesInterval > 0 {
+		cc, err := circleciclient.New(circleciclient.Config{Token: o.circleciToken, Anonymous: o.circleciToken == "", BaseURL: circleciclient.BaseURLFromAPIURL(o.circleciAPIURL)})
+		if err != nil {
+			return fmt.Errorf("circleci client: %w", err)
+		}
+		releases.CircleCI = cc
+		deps.TagPipelines = tools.TagPipelinesToken
+		if releases.Anonymous {
+			deps.TagPipelines = tools.TagPipelinesAnonymous
+		}
+	}
 	if reader != nil && deps.Inventory != nil {
 		deps.Collector = collect.New(collect.Options{
 			Org: o.org, EngineChecks: o.sweepEngineChecks,
 			Concurrency: o.sweepConcurrency, BudgetFloor: o.graphqlBudgetFloor,
 			Reconciler: collect.ReconcilerOptions{Repository: o.teamFilesRepository, Workflow: o.reconcilerWorkflow, PollInterval: o.reconcilerPollInterval},
+			Releases:   releases,
 		}, reader, deps.Inventory, collect.NewEngine(o.org, reader, o.devctlAppID), log)
 	}
 	if o.sweepOnce {
@@ -170,6 +192,7 @@ func run(ctx context.Context, o *options, log *slog.Logger) error {
 	if deps.Collector != nil {
 		deps.Collector.OnReconciled(ts.Reconciled)
 		deps.Collector.OnConflict(ts.Conflicted)
+		deps.Collector.OnReleased(ts.Released)
 	}
 	srv, err := server.New(cfg, ts.MCPServer(), log)
 	if err != nil {
@@ -189,6 +212,7 @@ func run(ctx context.Context, o *options, log *slog.Logger) error {
 			}
 			if deps.Collector != nil {
 				go deps.Collector.RunReconcilerPoll(runCtx)
+				go deps.Collector.RunReleaseWatch(runCtx)
 				deps.Collector.RunSchedule(runCtx, o.sweepInterval)
 			}
 		}()
@@ -203,7 +227,7 @@ func run(ctx context.Context, o *options, log *slog.Logger) error {
 	log.Info("giantswarm-repo-manager starting", "version", deps.Version, "engine", tools.EngineVersion(), "listen", o.listen, "mcp", o.mcpPath,
 		"oauth", o.oauthEnabled, "authorizationServer", deps.AuthorizationServer, "githubApp", deps.App != nil, "reads", readsAs,
 		"inventory", o.valkeyAddr, "inventoryConnectTimeout", o.connectTimeout, "collector", deps.Collector != nil, "sweepInterval", o.sweepInterval,
-		"reconcilerPollInterval", o.reconcilerPollInterval, "reconcilerWorkflow", o.reconcilerWorkflow,
+		"reconcilerPollInterval", o.reconcilerPollInterval, "reconcilerWorkflow", o.reconcilerWorkflow, "releasesInterval", o.releasesInterval, "tagPipelines", deps.TagPipelines,
 		"engineChecks", o.sweepEngineChecks, "sweepTeams", o.sweepTeams,
 		"teamFiles", o.teamFilesRepository+"@"+o.teamFilesRef, "reviews", o.reviewsURL, "reviewsDebugChannel", o.reviewsDebugChannel)
 	err = srv.Run(runCtx)

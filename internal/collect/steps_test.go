@@ -56,7 +56,7 @@ func TestFillClientlessSteps(t *testing.T) {
 	truncated := &inventory.CircleCI{Source: inventory.CircleCISourceStatuses, Unknown: []string{inventory.CircleCIFactSetupWorkflows, inventory.CircleCIFactFollowed}}
 	both := &inventory.CircleCI{Followed: true, SetupWorkflows: &yes, Head: head, Source: inventory.CircleCISourceBoth}
 	green := &inventory.HeadStatus{State: stateSuccess, Contexts: []string{releaseJob}, At: built}
-	red := &inventory.HeadStatus{State: "failure", Contexts: []string{releaseJob}, At: built}
+	red := &inventory.HeadStatus{State: stateFailure, Contexts: []string{releaseJob}, At: built}
 	running := &inventory.HeadStatus{State: "pending", Contexts: []string{"ci/circleci: go-build", releaseJob}, At: built}
 
 	type want struct {

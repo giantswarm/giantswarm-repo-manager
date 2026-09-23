@@ -83,6 +83,10 @@ type Deps struct {
 	// Review is klaus-gateway's team-review endpoint; nil leaves the asks
 	// undelivered and reported as such.
 	Review *review.Client
+	// TagPipelines says how the release watch reads a tag's pipeline on
+	// CircleCI, for get_info: TagPipelinesAnonymous (no token; public
+	// projects), TagPipelinesToken, or TagPipelinesOff.
+	TagPipelines string
 	// Scaffold renders the scaffold create_repository pushes as the caller.
 	// nil is the engine's renderer over the templates on GitHub, downloaded
 	// with the caller's token (giantswarm/template is private); tests set a
@@ -114,7 +118,7 @@ func (ts *Tools) MCPServer() *mcpserver.MCPServer {
 		mcpserver.WithInstructions("Giant Swarm's repository set-up service. The team files in giantswarm/github (repositories/team-*.yaml) are the desired state of every repository; GitHub is the reality. Call get_info first: it reports who you are to this server (the GitHub login of the token muster put on the call — your own authorization of the App giantswarm-repo-manager), the identity of the unattended reads — the read-only App giantswarm-repo-manager-inventory — and the inventory store. The inventory (list_repositories, get_repository) is one record per repository of the org — declaration, GitHub reality, set-up state, findings — refreshed by a scheduled sweep, after every reconciler run and on refresh_repository; every record carries its age. Every write tool takes dryRun and mode; the only write mode is commit — a team-file pull request opened as you — and apply is refused."),
 	)
 	s.AddTool(mcp.NewTool(ToolGetInfo,
-		mcp.WithDescription("Read-only. Report the service version and how this call is authenticated: the caller (the GitHub login and id GET /user answered for the bearer muster put on the call — the person's own user token through the App giantswarm-repo-manager) and the authorization server pinned for it; whether your credential reaches the team files (teamFiles.readable); the identity of the unattended inventory reads (the read-only App giantswarm-repo-manager-inventory, or not configured) and the inventory store; where the inventory's CircleCI facts come from (commit statuses and the reconciler's run artifact — this server holds no CircleCI token); the team-review endpoint (reviews.configured, and reviews.debugChannel when one channel receives every ask and notice instead of the teams' channels); the engine (devctl reposetup package) and the write modes. Call first."),
+		mcp.WithDescription("Read-only. Report the service version and how this call is authenticated: the caller (the GitHub login and id GET /user answered for the bearer muster put on the call — the person's own user token through the App giantswarm-repo-manager) and the authorization server pinned for it; whether your credential reaches the team files (teamFiles.readable); the identity of the unattended inventory reads (the read-only App giantswarm-repo-manager-inventory, or not configured) and the inventory store; where the inventory's CircleCI facts come from (commit statuses and the reconciler's run artifact, and for the latest release the release watch's read of the tag's own pipeline — circleci.tagPipelines says whether it reads anonymously, which CircleCI answers for public projects, or with a configured token); the team-review endpoint (reviews.configured, and reviews.debugChannel when one channel receives every ask and notice instead of the teams' channels); the engine (devctl reposetup package) and the write modes. Call first."),
 		mcp.WithReadOnlyHintAnnotation(true),
 	), t.getInfo)
 	t.registerInventory(s)
@@ -131,6 +135,14 @@ func (ts *Tools) MCPServer() *mcpserver.MCPServer {
 type tools struct {
 	d      Deps
 	probes probes
+}
+
+// tagPipelines is how the release watch reads CircleCI; off when unset.
+func (d Deps) tagPipelines() string {
+	if d.TagPipelines == "" {
+		return TagPipelinesOff
+	}
+	return d.TagPipelines
 }
 
 // reconcilerWorkflow is the reconciler's workflow file.
@@ -218,7 +230,18 @@ type CircleCIInfo struct {
 	// Source is statuses+artifact: the `ci/circleci:` commit statuses on the
 	// default branch head and the reconciler's run artifact; no token.
 	Source string `json:"source"`
+	// TagPipelines is how the release watch reads the latest release's tag
+	// pipeline: anonymous (no token: public projects, a private one reads
+	// unchecked), token, or off.
+	TagPipelines string `json:"tagPipelines"`
 }
+
+// How the release watch reads CircleCI.
+const (
+	TagPipelinesAnonymous = "anonymous"
+	TagPipelinesToken     = "token"
+	TagPipelinesOff       = "off"
+)
 
 // ReviewsInfo is the team-review endpoint: whether asks and notices are
 // delivered at all, and the debug channel when one receives them all.
@@ -252,7 +275,7 @@ func (t *tools) getInfo(ctx context.Context, _ mcp.CallToolRequest) (*mcp.CallTo
 		Version:    t.d.Version,
 		ToolPrefix: ToolPrefix,
 		GitHub:     GitHubInfo{APIURL: apiURL(t.d.GitHubAPIURL)},
-		CircleCI:   CircleCIInfo{Source: inventory.CircleCISourceBoth},
+		CircleCI:   CircleCIInfo{Source: inventory.CircleCISourceBoth, TagPipelines: t.d.tagPipelines()},
 		Reviews:    ReviewsInfo{Configured: t.d.Review != nil, DebugChannel: t.d.Review.DebugChannel()},
 		Engine:     EngineInfo{Module: engineModule, Version: EngineVersion(), Package: engineModule + "/pkg/reposetup"},
 		Capabilities: Capabilities{

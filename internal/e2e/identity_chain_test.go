@@ -22,6 +22,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/giantswarm/devctl/v8/pkg/circleciclient"
+
 	"github.com/alicebob/miniredis/v2"
 	"github.com/mark3labs/mcp-go/client"
 	"github.com/mark3labs/mcp-go/client/transport"
@@ -61,6 +63,7 @@ const (
 type stack struct {
 	ghs     *fakeGitHub
 	gw      *fakeGateway
+	cc      *fakeCircleCI
 	srv     *httptest.Server
 	app     *gh.App
 	store   *inventory.Store
@@ -75,8 +78,25 @@ type stack struct {
 // newCollector builds another collector over the same store and fakes, with
 // a GraphQL budget floor.
 func (st *stack) newCollector(floor int) *collect.Collector {
+	// The release watch reads the fake CircleCI anonymously, as the manager
+	// does without a token.
+	cc, err := circleciclient.New(circleciclient.Config{Anonymous: true, BaseURL: st.cc.URL})
+	if err != nil {
+		panic(err)
+	}
 	return collect.New(collect.Options{Org: org, EngineChecks: true, Concurrency: 2, BudgetFloor: floor, Now: st.now,
-		Reconciler: collect.ReconcilerOptions{Repository: org + "/github"}}, st.app.Reader(), st.store, st.checker, st.log)
+		Reconciler: collect.ReconcilerOptions{Repository: org + "/github"},
+		Releases:   collect.ReleaseOptions{Interval: time.Minute, Grace: 10 * time.Minute, CircleCI: cc, Anonymous: true}}, st.app.Reader(), st.store, st.checker, st.log)
+}
+
+// watchReleases runs one pass of the release watch.
+func (st *stack) watchReleases(t *testing.T) *collect.ReleasePoll {
+	t.Helper()
+	p, err := st.col.WatchReleases(context.Background())
+	if err != nil {
+		t.Fatalf("release watch: %v", err)
+	}
+	return p
 }
 
 // now is the collectors' clock.
@@ -144,7 +164,7 @@ func newStackWith(t *testing.T, debugChannel string) *stack {
 	if err != nil {
 		t.Fatal(err)
 	}
-	st := &stack{ghs: ghs, gw: gw, app: app, store: store, checker: &fakeChecker{}, log: log}
+	st := &stack{ghs: ghs, gw: gw, cc: newFakeCircleCI(t), app: app, store: store, checker: &fakeChecker{release: ghs.org.latestTag}, log: log}
 	st.col = st.newCollector(0)
 	reviews, err := review.New(review.Config{BaseURL: gws.URL, TokenFile: tokenFile, DebugChannel: debugChannel,
 		Channels: map[string]string{teamPlaneteers: planeteersChannel, "standup-planeteers": planeteersStandup, debugChannelName: debugChannelID}})
@@ -157,6 +177,7 @@ func newStackWith(t *testing.T, debugChannel string) *stack {
 		Scaffold: fakeScaffold{}})
 	st.col.OnReconciled(ts.Reconciled)
 	st.col.OnConflict(ts.Conflicted)
+	st.col.OnReleased(ts.Released)
 	mcpSrv := ts.MCPServer()
 
 	s, err := server.New(server.Config{Addr: "127.0.0.1:0", MCPPath: "/mcp",

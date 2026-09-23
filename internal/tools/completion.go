@@ -132,7 +132,10 @@ type Completion struct {
 // step opened that pull request in this very run, the bot-PR sweep merges
 // it, and telling the team to merge it asks for work the automation is
 // already doing. And a finding the record's live check no longer reports
-// was fixed between the run and the poll ([verified]).
+// was fixed between the run and the poll ([verified]). The release step's
+// findings are the release watch's to tell for a repository whose releases
+// it reads ([releaseWatched]): one sentence per release, from the tag's own
+// pipeline.
 //
 // The caller decides what of this the team has heard before: a finding
 // carries [Completion.Finding] and is matched against Setup.Told.
@@ -149,11 +152,27 @@ func Completions(rec *inventory.Record) []Completion {
 		if st.Verdict == reconcile.VerdictFailed {
 			out = append(out, Completion{Text: failureSentence(rec.Name, st), Link: run.RunURL})
 		}
+		if st.Step == reconcile.StepRelease && releaseWatched(rec) {
+			// The release watch tells the team about the latest release —
+			// red, or never built — once, from the tag's own pipeline and
+			// linking it; the run's release findings would say the same
+			// thing a second time, from the commit's statuses.
+			continue
+		}
 		for _, f := range verified(rec.Setup.Checks, st) {
 			out = append(out, Completion{Text: findingSentence(rec.Name, f), Link: run.RunURL, Finding: true})
 		}
 	}
 	return out
+}
+
+// releaseWatched says whether the release watch reads this repository's
+// releases: it has a release and could reach its pipeline. A release the
+// watch cannot read — a private repository without a CircleCI token — is
+// unchecked, and the run's findings about it stay the team's news.
+func releaseWatched(rec *inventory.Record) bool {
+	w := rec.Setup.Release
+	return w != nil && w.State != inventory.ReleaseUnchecked
 }
 
 // CompletionText is the run's messages as one text, a sentence per line;

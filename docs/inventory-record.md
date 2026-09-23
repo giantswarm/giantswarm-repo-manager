@@ -12,6 +12,7 @@ is what `get_repository` and `refresh_repository` return.
 | Schedule (`inventory.sweep.interval`, default `24h`) | Full sweep: every repository of the org, records of repositories that are neither on GitHub nor declared are removed; the summary is stored | `sweep` |
 | Reconciler poll (`inventory.reconciler.pollInterval`, default `5m`; every 30 s while an Align now is pending) | One repository per `reconcile-<name>` artifact of a completed reconciler run, read from GitHub as the inventory App; the run is stored as `setup.lastRun` | `reconciler` |
 | Tool `refresh_repository` | One repository on demand | `refresh` |
+| Release watch (`inventory.releases.interval`, default `5m`) | The latest release of a declared repository, from its tag to the end of the tag's own CircleCI pipeline: `setup.release` and the record's `release` step and findings are written; the rest of the record is untouched | the record's `source` is unchanged |
 
 Every read fills `age` (now minus `refreshedAt`). A refresh rebuilds the whole record except `setup.lastRun`, which
 survives; a sweep with `engineChecks: false` also keeps the previous `setup.checks`. A record stored by an earlier
@@ -149,7 +150,14 @@ the message to the team's standup channel is rendered from (README, "Asks and me
     "pendingRun": {"dispatchedAt": "…", "by": "alice", "kind": "created", "pullRequest": {"number": 4711, "url": "…"},   // a run expected: kind dispatched (an Align now) or the pull request's kind
                    "mergedAt": "…", "conflictsSince": "…"},   // the merge, once read; the pull request found conflicting with its base (mergeable: false), until it is re-rendered
     "missingRun": {"dispatchedAt": "…", "by": "alice", "kind": "dispatched", "noticedAt": "…", "runsUrl": "…",   // one given up: its run completed without a report,
-                   "runUrl": "…", "conclusion": "failure"}                                                        // named here, or none reported in 15 min (no runUrl)
+                   "runUrl": "…", "conclusion": "failure"},                                                       // named here, or none reported in 15 min (no runUrl)
+    "told": ["…"],                      // the findings' sentences the team has heard, told once
+    "release": {"tag": "v2.58.8", "createdAt": "…", "pullRequest": {"number": 2567, "url": "…"},   // the latest release as the release watch follows it
+                "state": "red",         // watching | built | red | unbuilt (no pipeline within the grace period) | unchecked (reason says why: private without a token, not a vX.Y.Z tag, no pipeline on the branch)
+                "pipeline": {"number": 11508, "url": "…", "workflow": "…"},   // the tag's own pipeline; workflow is the failed workflow's page
+                "failedJobs": ["build-image-arm64 (timed out)"],
+                "checkedAt": "…", "settledAt": "…",
+                "told": "backstage: release v2.58.8 (pull request #2567) is red, …", "toldAt": "…"}   // the sentence the team heard, once
   },
   "findings": [
     {"kind": "default-icon", "message": "…", "fix": "…", "source": "engine"}
@@ -168,8 +176,9 @@ report — the fix names the run — or did not report within 15 minutes — the
 engine's kinds pass through with `source: engine`:
 `entry-refused` and `gen-circleci-refused` (the engine refuses the entry — `setup.checks` is its `Refused` result, the
 `entry` step reported and no step run, one finding per problem naming the field to fix), `repository-missing`, `renamed`,
-`abs-prerequisite`, `default-icon`, `red-release`, `renovate-missing`, `archived-undeclared`, `pending-pull-request`,
-`unchecked`.
+`abs-prerequisite`, `default-icon`, `red-release`, `missed-tag-build`, `renovate-missing`, `archived-undeclared`,
+`pending-pull-request`, `unchecked`. `red-release` and `missed-tag-build` come from the release watch's read of the
+tag's own pipeline once it has followed the tag (`setup.release`), else from the tag commit's statuses.
 
 ### Renovate state
 

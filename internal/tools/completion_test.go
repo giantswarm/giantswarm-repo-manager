@@ -364,3 +364,21 @@ func TestAFindingThatDoesNotReachTheChannelStaysUntold(t *testing.T) {
 		t.Errorf("a refused notice: posted %q, told %q", *posted, told)
 	}
 }
+
+// TestCompletionsLeaveReleaseFindingsToTheWatch: the release watch tells the
+// team about the latest release from the tag's own pipeline, once; a run's
+// release finding on a repository the watch reads is not told a second time,
+// and stays the run's news where the watch cannot read the pipeline — a
+// private repository without a CircleCI token, unchecked.
+func TestCompletionsLeaveReleaseFindingsToTheWatch(t *testing.T) {
+	watched := record(change(inventory.ChangeChanged), releaseFindingStep)
+	watched.Setup.Release = &inventory.ReleaseWatch{Tag: "v0.1.0", State: inventory.ReleaseUnbuilt}
+	if got := CompletionText(watched); got != "" {
+		t.Errorf("a watched repository's release finding is the watch's to tell, got %q", got)
+	}
+	unchecked := record(change(inventory.ChangeChanged), releaseFindingStep)
+	unchecked.Setup.Release = &inventory.ReleaseWatch{Tag: "v0.1.0", State: inventory.ReleaseUnchecked, Reason: "private"}
+	if got := CompletionText(unchecked); got != testMissedTagText {
+		t.Errorf("an unchecked release stays the run's news:\ngot  %q\nwant %q", got, testMissedTagText)
+	}
+}

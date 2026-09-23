@@ -87,7 +87,28 @@ A run nobody's change is behind — an Align now,
 the schedule, an artifact without a `change` block — posts nothing, findings and failures included: the
 reconciler doing its job is not news, and the nightly's findings would repeat every night; they stay on the
 record and in the run's summary per team. An edit a person made (`changed`) posts its failed steps and
-findings alone. Both channels come from the team's policy file (`repository-setup/<team>.yaml`);
+findings alone.
+
+**A release nothing was published for is told once, within minutes.** The release watch
+(`inventory.releases.interval`, default 5m) follows the latest release of every declared repository from
+its tag to the end of the tag's own CircleCI pipeline: one GraphQL query per pass over the most recently
+pushed repositories (a tag follows the push of its commit within minutes), and for every release still
+running the tag's pipeline on CircleCI — found by its `vcs.tag`, never a branch pipeline at the same
+commit, which the commit's statuses cannot tell apart — its workflows (the newest run per name: a rerun
+from failed is a second run of the same name) and the jobs of a failed one. A red pipeline is one
+sentence to the team's `standupChannel`, naming the tag, the pull request behind it, the failed jobs and
+how they failed, the rerun from failed as the fix and `devctl release wait` to confirm, linking the failed
+workflow: `backstage: release v2.58.8 (pull request #2567) is red, the tag pipeline 11508 failed in
+build-image-arm64 (timed out) — rerun the workflow from failed on CircleCI, then devctl release wait
+giantswarm/backstage v2.58.8 confirms it`. A tag without a pipeline `inventory.releases.grace` (default
+10m) after its creation is the missed build, told the same way, linking the project's pipelines. What was
+told is the record's `setup.release.told`, so the team hears about a release once: a later pass over the
+same red tag says nothing, a rerun that goes green turns the record built silently, and the next tag is a
+new watch. The record's `release` step and findings (`red-release`, `missed-tag-build`) follow the watch
+once it has read the tag, so the Repositories page and `devctl repo status` say what the notice said. A
+public repository's pipeline is read without a token, as CircleCI answers it; a private one needs
+`circleci.existingSecret`, and reads `unchecked` without it — nothing is posted. A team without a policy
+file hears nothing. Both channels come from the team's policy file (`repository-setup/<team>.yaml`);
 a file without either is refused, nothing stands in. A channel name is mapped to its Slack ID through
 `reviews.channels` (the gateway takes IDs). Authentication is this pod's projected ServiceAccount token
 (audience `klaus-gateway`). An undelivered ask is reported in the result; approving on GitHub is equivalent.
@@ -161,6 +182,14 @@ the budget runs low. The record and its findings are described in
 [`docs/inventory-record.md`](docs/inventory-record.md).
 
 ## What the tests prove
+
+- The release watch (`internal/e2e/releases_test.go`, against a fake CircleCI API and the fake gateway): a green tag
+  pipeline beside a red branch pipeline at the same commit is built and silent; a red tag pipeline is one notice to
+  the team's standup channel naming the tag, the pull request, the failed jobs with how they failed and the rerun,
+  linking the failed workflow, and nothing on the next pass; a rerun from failed that goes green turns the record
+  built without a word; a tag without a pipeline is a missed build after the grace period, told once; a private
+  repository read without a token is unchecked and silent; a refresh keeps what the watch knows and writes the
+  record's release step from the tag's pipeline. Three CircleCI reads per red release, two per green one.
 
 - **The tools** (`internal/e2e/tools_test.go`, a fake giantswarm/github with contents, git data, pull requests,
   reviews and dispatches, a fake klaus-gateway): `validate_repository` renders an accepted entry with its template and

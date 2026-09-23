@@ -23,6 +23,16 @@
             "type": "object",
             "additionalProperties": true
         },
+        "circleci": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+                "existingSecret": {
+                    "type": "string",
+                    "description": "Existing Secret with a CircleCI API token under `token`, for the release watch to read the tag pipelines of private repositories (a personal token of a read-only identity: CircleCI has no scoped tokens). Empty reads anonymously, which CircleCI answers for public projects alone; a private repository's release then reads `unchecked` and the team hears nothing about it."
+                }
+            }
+        },
         "cluster": {
             "type": "object",
             "additionalProperties": true
@@ -156,6 +166,20 @@
                         "workflow": {
                             "type": "string",
                             "description": "The reconciler's workflow file in `teamFiles.repository`: the one `align_repository` dispatches and the poller reads the runs of."
+                        }
+                    }
+                },
+                "releases": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "properties": {
+                        "grace": {
+                            "type": "string",
+                            "description": "How long after its creation a release may have no CircleCI pipeline before it is a missed build (`missed-tag-build`, told once)."
+                        },
+                        "interval": {
+                            "type": "string",
+                            "description": "Follow the latest release of every declared repository from its tag to the end of the tag's own CircleCI pipeline, reading every interval (a Go duration): one GraphQL query over the most recently pushed repositories per pass, and CircleCI reads for the releases still running. A red pipeline, or none within `grace`, is one notice to the owning team's `standupChannel`, told once; a rerun that goes green is silent. `\"0\"` turns the watch off. Public repositories are read without a token; a private one needs `circleci.existingSecret`, else its release reads `unchecked`."
                         }
                     }
                 },

@@ -44,6 +44,9 @@ type Options struct {
 	BudgetFloor int
 	// Reconciler says where the reconciler's runs are read from.
 	Reconciler ReconcilerOptions
+	// Releases tunes the release watch: the latest release of every declared
+	// repository followed on CircleCI by its tag's own pipeline.
+	Releases ReleaseOptions
 	// Now is the clock; nil is time.Now.
 	Now func() time.Time
 }
@@ -74,6 +77,7 @@ func (o *Options) defaults() {
 		o.Now = time.Now
 	}
 	o.Reconciler.defaults()
+	o.Releases.defaults()
 }
 
 // Checker runs the engine's checks in read mode for one accepted declaration.
@@ -88,13 +92,16 @@ var ErrSweepRunning = errors.New("a sweep is already running")
 type Collector struct {
 	reconciled func(context.Context, *inventory.Record)
 	conflicted func(context.Context, *inventory.Record, *github.PullRequest)
-	opts       Options
-	reader     *gh.Reader
-	gql        *graphQL
-	store      *inventory.Store
-	checker    Checker
-	log        *slog.Logger
-	now        func() time.Time
+	// released tells the team about a release nothing was published for and
+	// returns the sentence posted (releases.go).
+	released func(context.Context, *inventory.Record) string
+	opts     Options
+	reader   *gh.Reader
+	gql      *graphQL
+	store    *inventory.Store
+	checker  Checker
+	log      *slog.Logger
+	now      func() time.Time
 	// blobs fetches artifact blobs from their signed URLs: no token.
 	blobs   *http.Client
 	running atomic.Bool
@@ -105,6 +112,11 @@ type Collector struct {
 	srcMu    sync.Mutex
 	srcCache *sources
 	srcAt    time.Time
+
+	// watching are the repositories whose release the watch follows between
+	// passes; nil until the first pass seeds it from the store.
+	watchMu  sync.Mutex
+	watching map[string]bool
 }
 
 // New builds a collector; checker may be nil.
@@ -198,6 +210,7 @@ func (c *Collector) Sweep(ctx context.Context) (*inventory.SweepSummary, error) 
 	kept := map[string]bool{}
 	for _, r := range records {
 		r.Finalize()
+		c.keepRelease(ctx, r)
 		r.RefreshedAt, r.Source = c.now(), inventory.SourceSweep
 		if err := c.store.Put(ctx, r); err != nil {
 			return nil, err

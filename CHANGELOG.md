@@ -11,6 +11,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- The record's release step no longer counts another pipeline's statuses on the tag commit
+  ([#106](https://github.com/giantswarm/giantswarm-repo-manager/issues/106)). For a repository whose tag pipeline the
+  release watch cannot read (private, no `circleci.existingSecret`), the step stands in with the commit's `ci/circleci:`
+  statuses, and a commit status is per commit, not per pipeline: a branch pipeline that built the release commit — a
+  bot's temporary branch, a branch pushed at the tag days later — posted its jobs' statuses beside the tag pipeline's,
+  and the step read them as the tag's (backstage v2.58.8: `red-release` from two branch legs beside a green tag
+  pipeline; tunnelport v1.6.7: `red-release` from a canceled branch pipeline six days after the tag). The record now
+  keeps the declaration's jobs with their filters (`ci.jobs`) and each status's state (`failed`, `pending` beside
+  `contexts`), and the step reads the statuses against the declaration: a job the pipeline never runs on the tag is a
+  branch pipeline's and is ignored; a failed job that runs on the tag alone is the tag pipeline's failure, named alone
+  in the finding; a failed job that runs on branches too cannot be attributed beside a branch pipeline's statuses, and
+  the release reads `unchecked` with the token as the fix rather than red or green. Without a branch pipeline's
+  statuses every failure is the tag pipeline's, as before. The `circleci` step's sentence about the default branch
+  head counts the branch's own statuses the same way.
+
 - The release watch stops asking about a release its team is never told of: a team without a policy file is not
   messaged, and neither is an installation without a team-review endpoint, so the sentence is recorded as told and the
   next pass over the same red tag reads the pipeline without a policy read and a warning each time (before, kyverno-app

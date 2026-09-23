@@ -106,7 +106,7 @@ the message to the team's standup channel is rendered from (README, "Asks and me
                          "onboarding": [{"number": 1, "title": "Configure Renovate", "author": "renovate", "createdAt": "…"}]},
     "openIssues": 1,
     "latestRelease": {"tag": "v1.0.0", "publishedAt": "…",
-                      "build": {"state": "success", "contexts": ["ci/circleci: push-to-registries-release"], "at": "…"}},  // the tag commit's ci/circleci: statuses: whether CircleCI built the release; buildTruncated when more contexts than read and none CircleCI's
+                      "build": {"state": "success", "contexts": ["ci/circleci: push-to-registries-release"], "at": "…"}},  // the tag commit's ci/circleci: statuses: whether CircleCI built the release; failed and pending list the contexts in those states; buildTruncated when more contexts than read and none CircleCI's
     "codeownersTeams": ["team-bumblebee"],
     "unknownCodeownersTeams": [],       // CODEOWNERS teams the org does not have
     "has": {"renovate": true, "dependabot": false, "circleci": true, "workflows": true, "dockerfile": true, "helm": true, "readme": true, "codeowners": true}
@@ -114,7 +114,7 @@ the message to the team's standup channel is rendered from (README, "Asks and me
   "circleci": {                         // absent when the repository is gone; no CircleCI token is involved
     "followed": true,                   // ci/circleci: statuses on the head, or the reconciler's circleci step found the project followed
     "setupWorkflows": true,             // from the reconciler's run artifact only; absent and named in unknown until a run tells
-    "head": {"state": "success", "contexts": ["ci/circleci: go-build", "ci/circleci: push-to-registries"], "at": "…"},  // the default branch head's ci/circleci: statuses (worst state)
+    "head": {"state": "success", "contexts": ["ci/circleci: go-build", "ci/circleci: push-to-registries"], "at": "…"},  // the default branch head's ci/circleci: statuses (worst state; failed and pending list the contexts in those states)
     "source": "statuses+artifact",      // statuses | artifact | statuses+artifact: the sources that answered
     "unknown": [],                      // the facts no source yields: setupWorkflows, followed (status contexts truncated, none CircleCI's)
     "error": ""                         // the reconciler's circleci step failing, as its run reported it
@@ -129,6 +129,7 @@ the message to the team's standup channel is rendered from (README, "Asks and me
     "chinaPush": "split",               // split (sync-china-registry) | inline | custom (registries-data) | none
     "signing": "signed",                // signed | unsigned | unknown | none (nothing pushed)
     "signingReason": "",                // why unsigned: a private repository, sign: false, an orb before 8.2.0
+    "jobs": [{"name": "push-to-registries-release", "tagsOnly": ["/^v.*/"], "branchesIgnore": ["/.*/"]}],  // the workflows' jobs under the names CircleCI posts, with the filters that decide which refs run them: how a commit status is told to be the tag pipeline's or a branch pipeline's
     "error": ""                         // a file that did not parse
   },
   "renovate": {
@@ -178,7 +179,11 @@ engine's kinds pass through with `source: engine`:
 `entry` step reported and no step run, one finding per problem naming the field to fix), `repository-missing`, `renamed`,
 `abs-prerequisite`, `default-icon`, `red-release`, `missed-tag-build`, `renovate-missing`, `archived-undeclared`,
 `pending-pull-request`, `unchecked`. `red-release` and `missed-tag-build` come from the release watch's read of the
-tag's own pipeline once it has followed the tag (`setup.release`), else from the tag commit's statuses.
+tag's own pipeline once it has followed the tag (`setup.release`), else from the tag commit's statuses read against
+`ci.jobs`: a status of a job the pipeline never runs on the tag is a branch pipeline's at the same commit and is
+ignored, a failed job that runs on the tag alone is the tag pipeline's failure, and a failed job that runs on branches
+too beside a branch pipeline's statuses cannot be attributed — the release reads `unchecked`, the CircleCI token
+(`circleci.existingSecret`) being the fix.
 
 ### Renovate state
 

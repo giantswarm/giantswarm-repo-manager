@@ -181,13 +181,22 @@ const (
 	CircleCIFactSetupWorkflows = "setupWorkflows"
 )
 
-// HeadStatus is the default branch head's `ci/circleci:` commit statuses.
+// HeadStatus is a commit's `ci/circleci:` commit statuses: the default
+// branch head's, or a release's tag commit's. A status is per commit, not
+// per pipeline: every pipeline that built the commit posted its jobs'
+// statuses here, and the reader tells them apart by the jobs' names against
+// the declaration (CI.Jobs).
 type HeadStatus struct {
 	// State is the worst state among the contexts: failure, error, pending,
 	// expected or success.
 	State string `json:"state"`
 	// Contexts are the status contexts, `ci/circleci: <job>`, sorted.
 	Contexts []string `json:"contexts"`
+	// Failed are the contexts in failure or error, Pending those in pending
+	// or expected, each sorted; the rest are success. Both absent on a record
+	// read before they were kept.
+	Failed  []string `json:"failed,omitempty"`
+	Pending []string `json:"pending,omitempty"`
 	// At is when the newest of them was posted.
 	At time.Time `json:"at"`
 }
@@ -735,6 +744,9 @@ type CI struct {
 	// are not signed.
 	Signing       string `json:"signing"`
 	SigningReason string `json:"signingReason,omitempty"`
+	// Jobs are the workflows' jobs with the refs that run them, the way to
+	// tell whose a commit status is; empty when no file parsed.
+	Jobs []CIJob `json:"jobs,omitempty"`
 	// Error names a file that did not parse.
 	Error string `json:"error,omitempty"`
 }

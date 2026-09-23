@@ -402,7 +402,7 @@ const workflowNotRun = "not_run"
 // failedJobStatuses are the CircleCI job statuses that are failures, as
 // devctl's release wait counts them.
 var failedJobStatuses = map[string]string{
-	"failed": "failed", "error": "error", "canceled": "canceled", "timedout": "timed out",
+	"failed": "failed", statusError: statusError, "canceled": "canceled", "timedout": "timed out",
 	"infrastructure_fail": "infrastructure failure", "unauthorized": "unauthorized",
 }
 

@@ -41,6 +41,29 @@ func TestCIFactsGenerated(t *testing.T) {
 	if ci.ChinaPush != inventory.ChinaPushSplit || ci.Signing != inventory.SigningSigned || ci.SigningReason != "" {
 		t.Errorf("china %s signing %s %q", ci.ChinaPush, ci.Signing, ci.SigningReason)
 	}
+	// The jobs with their filters, under the names CircleCI posts: the setup
+	// job of config.yml, the generated workflow's jobs, custom.yml's.
+	jobs := map[string]inventory.CIJob{}
+	for _, j := range ci.Jobs {
+		jobs[j.Name] = j
+	}
+	for name, want := range map[string]struct{ tag, branch, anyBranch bool }{
+		setupJob:              {true, true, true},
+		"go-build":            {true, true, true},
+		"push-to-registries":  {false, false, true},
+		releaseJobName:        {true, false, false},
+		"execute-chart-tests": {false, false, true},
+		"push-chart-release":  {true, false, false},
+	} {
+		j, ok := jobs[name]
+		if !ok {
+			t.Errorf("job %s not read; jobs: %+v", name, ci.Jobs)
+			continue
+		}
+		if j.RunsOnTag("v1.2.3") != want.tag || j.RunsOnBranch(mainBranch) != want.branch || j.RunsOnBranches() != want.anyBranch {
+			t.Errorf("%s: tag %v main %v branches %v, want %+v (%+v)", name, j.RunsOnTag("v1.2.3"), j.RunsOnBranch(mainBranch), j.RunsOnBranches(), want, j)
+		}
+	}
 	// The same pipeline on a private repository: cosign skips it at runtime.
 	if ci := parseCI(texts, false); ci.Signing != inventory.SigningUnsigned || !strings.Contains(ci.SigningReason, "private repository") {
 		t.Errorf("private: signing %s %q", ci.Signing, ci.SigningReason)

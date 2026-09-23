@@ -94,6 +94,7 @@ func parseCI(texts map[string]string, public bool) *inventory.CI {
 		jobs = append(jobs, workflowJobs(doc)...)
 	}
 	ci.Error = strings.Join(errs, "; ")
+	ci.Jobs = ciJobs(jobs)
 
 	var pushes, builds, goBuilds, charts []jobUse
 	sync := false
@@ -279,6 +280,43 @@ func signing(orb string, pushes, charts []jobUse, public bool) (string, string) 
 		return inventory.SigningUnsigned, "private repository: cosign signs public images and charts only"
 	}
 	return inventory.SigningSigned, ""
+}
+
+// ciJobs are the workflows' jobs with their filters, as the record keeps
+// them to tell whose a commit status is.
+func ciJobs(jobs []jobUse) []inventory.CIJob {
+	out := make([]inventory.CIJob, 0, len(jobs))
+	for _, j := range jobs {
+		cj := inventory.CIJob{Name: jobName(j)}
+		if filters, _ := j.params["filters"].(map[string]any); filters != nil {
+			if b, _ := filters["branches"].(map[string]any); b != nil {
+				cj.BranchesOnly, cj.BranchesIgnore = patterns(b["only"]), patterns(b["ignore"])
+			}
+			if t, _ := filters["tags"].(map[string]any); t != nil {
+				cj.TagsOnly, cj.TagsIgnore = patterns(t["only"]), patterns(t["ignore"])
+			}
+		}
+		out = append(out, cj)
+	}
+	return out
+}
+
+// patterns is a filter's value as the configuration writes it: one pattern
+// or a list of them.
+func patterns(v any) []string {
+	switch x := v.(type) {
+	case string:
+		return []string{x}
+	case []any:
+		var out []string
+		for _, item := range x {
+			if s, ok := item.(string); ok {
+				out = append(out, s)
+			}
+		}
+		return out
+	}
+	return nil
 }
 
 // jobName is the job's `name` parameter, else the orb job's name.

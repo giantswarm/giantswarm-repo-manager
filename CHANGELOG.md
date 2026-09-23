@@ -11,6 +11,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- The `helm.sh/chart` label is valid for any chart version
+  ([#115](https://github.com/giantswarm/giantswarm-repo-manager/issues/115)). The label is `<name>-<version>` cut to 63
+  characters, and the cut of a long version (a branch build's `X.Y.Z-dev.<branch>.<date>.<time>.h<sha7>`, or the
+  `<tag>+<digest>` helm-controller installs) could end in `_` or `--.`, which trimming one `-` and one `.` left in
+  place, so the API server refused every labelled object; the whole run of `-`, `.` and `_` at the ends of the cut is
+  now trimmed. The chart's render assertions (`hack/verify-chart.sh`, `make helm-verify`) check the label for such
+  versions, and the new `chart` workflow runs them with `helm lint` on every change.
+
 - The record's release step no longer counts another pipeline's statuses on the tag commit
   ([#106](https://github.com/giantswarm/giantswarm-repo-manager/issues/106)). For a repository whose tag pipeline the
   release watch cannot read (private, no `circleci.existingSecret`), the step stands in with the commit's `ci/circleci:`

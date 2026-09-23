@@ -61,6 +61,7 @@ const (
 	kLanguage      = "language"
 	kGo            = "go"
 	kCI            = "ci"
+	kGenerate      = "generate"
 	kChannel       = "channel"
 	kVisibility    = "visibility"
 	kFile          = "file"

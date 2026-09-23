@@ -80,6 +80,7 @@ var teamFile = `# yaml-language-server: $schema=../repositories.schema.json
     language: go
     flavours: [app]
     ci:
+      generate: true
       chartName: ` + repoPresent + `
 - name: ` + repoGone + `
   componentType: service

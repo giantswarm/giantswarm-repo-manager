@@ -25,6 +25,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- `create_repository` resumes an interrupted creation with the entry as the creation renders it, defaults written out
+  (`gen.ci.generate: true`). Since devctl v8.85.4 an existing-mode validation reads an entry as declared, so a resume of
+  an entry whose `gen.ci` block leaves `generate` unset was refused (`gen.ci.generate: required`) where the first
+  attempt had accepted it; `update_repository` of such an entry is refused as the schema says, the refusal naming the
+  field.
+
 - The engine is devctl v8.82.7, from v8.82.1. Every declared repository read *not in sync* with `settings drift:
   allow_squash_merge false → true, allow_update_branch false → true, allow_auto_merge false → true, delete_branch_on_merge
   false → true` while the reconciler's run said `settings ok`: `GET /repos/{owner}/{repo}` carries the six merge settings for

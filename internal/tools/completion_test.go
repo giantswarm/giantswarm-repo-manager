@@ -3,13 +3,21 @@ package tools
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"log/slog"
+	"net/http"
+	"net/http/httptest"
+	"os"
+	"path/filepath"
+	"reflect"
+	"strconv"
 	"strings"
 	"testing"
 
 	"github.com/giantswarm/devctl/v8/pkg/reposetup/reconcile"
 
 	"github.com/giantswarm/giantswarm-repo-manager/internal/inventory"
+	"github.com/giantswarm/giantswarm-repo-manager/internal/review"
 )
 
 const (
@@ -165,5 +173,193 @@ func TestReconciledLogsWhyItStaysSilent(t *testing.T) {
 	ts.Reconciled(context.Background(), &inventory.Record{Repository: testRepository})
 	if logged := buf.String(); !strings.Contains(logged, "without a run") {
 		t.Errorf("record without a run: %q", logged)
+	}
+}
+
+const (
+	testForeignRuleset = "foreign-ruleset"
+	testMissedTagBuild = "missed-tag-build"
+	testRulesetFix     = "declare what it enforces in the entry and delete it, or keep it knowingly"
+)
+
+var (
+	// pendingPRStep is the codeowners step while the pull request the engine
+	// opened in this very run awaits its merge.
+	pendingPRStep = reconcile.StepResult{Step: reconcile.StepCodeowners, Verdict: reconcile.VerdictDrift,
+		Summary: "CODEOWNERS differs; pull request #7 awaits its merge",
+		Findings: []reconcile.Finding{{Kind: reconcile.FindingPendingPullRequest,
+			Message: "pull request #7 sets CODEOWNERS to @giantswarm/team-bumblebee", Fix: "merge the pull request"}}}
+	// releaseFindingStep is a release whose tag was never built.
+	releaseFindingStep = reconcile.StepResult{Step: reconcile.StepRelease, Verdict: reconcile.VerdictReported,
+		Findings: []reconcile.Finding{{Kind: testMissedTagBuild, Message: "release v0.2.9 has no pipeline", Fix: "cut the next tag"}}}
+)
+
+// ruleset is the protection step reporting one advisory finding per foreign
+// ruleset it left alone.
+func ruleset(names ...string) reconcile.StepResult {
+	st := reconcile.StepResult{Step: reconcile.StepProtection, Verdict: reconcile.VerdictReported}
+	for _, n := range names {
+		st.Findings = append(st.Findings, reconcile.Finding{Kind: testForeignRuleset, Advisory: true,
+			Message: "ruleset " + strconv.Quote(n) + " is not the engine's and is left alone", Fix: testRulesetFix})
+	}
+	return st
+}
+
+// checked gives the record the live read-mode check the collector runs in
+// the same refresh, with the steps as the check found them.
+func checked(rec *inventory.Record, steps ...reconcile.StepResult) *inventory.Record {
+	rec.Setup.Checks = &reconcile.Result{Repository: testRepository, Team: testTeam, Steps: steps}
+	return rec
+}
+
+// TestCompletionsSkipTheEnginesOwnPullRequest: the codeowners step opens the
+// pull request it reports, in the run that reports it, and the bot-PR sweep
+// merges it — telling the team to merge it asks for work nobody has to do.
+func TestCompletionsSkipTheEnginesOwnPullRequest(t *testing.T) {
+	if got := CompletionText(record(change(inventory.ChangeChanged), okStep, pendingPRStep)); got != "" {
+		t.Errorf("the finding alone should be silent, got %q", got)
+	}
+	want := "alice created a new repo: bumblebee-repo (app, go)\nbumblebee-repo: the repository has the default icon — upload one under Settings"
+	if got := CompletionText(record(change(inventory.ChangeCreated), pendingPRStep, findingStep)); got != want {
+		t.Errorf("beside another finding:\ngot  %q\nwant %q", got, want)
+	}
+}
+
+// TestCompletionsVerifyAgainstTheLiveCheck: the poller reads a run's
+// artifact minutes after the run finished. The live check the collector ran
+// in the same refresh is the state now, and decides what is still true.
+func TestCompletionsVerifyAgainstTheLiveCheck(t *testing.T) {
+	protectionOK := reconcile.StepResult{Step: reconcile.StepProtection, Verdict: reconcile.VerdictOK}
+	cases := []struct {
+		name string
+		rec  *inventory.Record
+		want string
+	}{
+		{name: "the live check no longer reports it: fixed between the run and the poll",
+			rec: checked(record(change(inventory.ChangeChanged), ruleset("protect-main")), protectionOK)},
+		{name: "the live check still reports it: told in the live check's words",
+			rec:  checked(record(change(inventory.ChangeChanged), ruleset("protect-main")), ruleset("protect-giantswarm")),
+			want: `bumblebee-repo: ruleset "protect-giantswarm" is not the engine's and is left alone — ` + testRulesetFix},
+		{name: "two reported, one gone: the one that stands",
+			rec:  checked(record(change(inventory.ChangeChanged), ruleset("protect-main", "protect-giantswarm")), ruleset("protect-main")),
+			want: `bumblebee-repo: ruleset "protect-main" is not the engine's and is left alone — ` + testRulesetFix},
+		{name: "the live check skipped the step: the run's finding stands",
+			rec: checked(record(change(inventory.ChangeChanged), releaseFindingStep),
+				reconcile.StepResult{Step: reconcile.StepRelease, Verdict: reconcile.VerdictSkipped, Summary: "no CircleCI client to verify the pipeline"}),
+			want: "bumblebee-repo: release v0.2.9 has no pipeline — cut the next tag"},
+		{name: "the live check failed the step: the run's finding stands",
+			rec: checked(record(change(inventory.ChangeChanged), releaseFindingStep),
+				reconcile.StepResult{Step: reconcile.StepRelease, Verdict: reconcile.VerdictFailed, Summary: "CircleCI answered 502"}),
+			want: "bumblebee-repo: release v0.2.9 has no pipeline — cut the next tag"},
+		{name: "the live check has no result for the step: the run's finding stands",
+			rec:  checked(record(change(inventory.ChangeChanged), releaseFindingStep), protectionOK),
+			want: "bumblebee-repo: release v0.2.9 has no pipeline — cut the next tag"},
+		{name: "no live check at all: the run's finding stands",
+			rec:  record(change(inventory.ChangeChanged), releaseFindingStep),
+			want: "bumblebee-repo: release v0.2.9 has no pipeline — cut the next tag"},
+		{name: "a failed step is the run's own and is not verified away",
+			rec:  checked(record(change(inventory.ChangeChanged), failedStep), reconcile.StepResult{Step: reconcile.StepCircleCI, Verdict: reconcile.VerdictOK}),
+			want: "bumblebee-repo: the circleci step failed (CircleCI answered 502) — look at the run, fix the cause and reconcile again"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := CompletionText(tc.rec); got != tc.want {
+				t.Errorf("got  %q\nwant %q", got, tc.want)
+			}
+		})
+	}
+}
+
+// TestCompletionsMarkFindings: the change sentence and a failed step are
+// about this run and are always told; a finding is told once.
+func TestCompletionsMarkFindings(t *testing.T) {
+	msgs := Completions(record(change(inventory.ChangeCreated), failedStep, findingStep))
+	if len(msgs) != 3 || msgs[0].Finding || msgs[1].Finding || !msgs[2].Finding {
+		t.Errorf("finding flags: %+v", msgs)
+	}
+}
+
+// notices is klaus-gateway's notice endpoint: it records the texts posted,
+// and refuses the ones named in refuse so a failed delivery can be told from
+// a suppressed one.
+func notices(t *testing.T, refuse map[string]bool) (*review.Client, *[]string) {
+	t.Helper()
+	var got []string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var n review.Notice
+		if err := json.NewDecoder(r.Body).Decode(&n); err != nil {
+			w.WriteHeader(http.StatusBadRequest)
+			return
+		}
+		if refuse[n.Text] {
+			w.WriteHeader(http.StatusInternalServerError)
+			return
+		}
+		got = append(got, n.Text)
+		w.WriteHeader(http.StatusCreated)
+		_ = json.NewEncoder(w).Encode(review.Posted{ID: "notice-1", Channel: n.Channel, TS: "1.2"})
+	}))
+	t.Cleanup(srv.Close)
+	tokenFile := filepath.Join(t.TempDir(), "token")
+	if err := os.WriteFile(tokenFile, []byte("sa-token\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	c, err := review.New(review.Config{BaseURL: srv.URL, TokenFile: tokenFile})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return c, &got
+}
+
+// runs replays consecutive reconciler runs over one repository, each with
+// its steps, carrying Setup.Told from one to the next as the record does,
+// and returns what reached the channel on each run.
+func runs(t *testing.T, client *review.Client, posted *[]string, steps ...[]reconcile.StepResult) [][]string {
+	t.Helper()
+	ts := &Tools{t: &tools{d: Deps{Log: slog.New(slog.NewTextHandler(new(bytes.Buffer), nil)), Review: client}}}
+	var told []string
+	var out [][]string
+	for _, st := range steps {
+		rec := record(change(inventory.ChangeChanged), st...)
+		rec.Setup.Told = told
+		before := len(*posted)
+		ts.remember(context.Background(), rec, ts.tell(context.Background(), rec, testTeam, "C0STANDUP001", Completions(rec)))
+		told = rec.Setup.Told
+		out = append(out, append([]string(nil), (*posted)[before:]...))
+	}
+	return out
+}
+
+// TestFindingsAreToldOnce: a standing finding asks for a decision or a
+// chore, which is on the record and on the page until someone does it. Every
+// merged change of the entry re-reports it; the team hears it once, and
+// again only after it has gone away and come back.
+func TestFindingsAreToldOnce(t *testing.T) {
+	client, posted := notices(t, nil)
+	main := `bumblebee-repo: ruleset "protect-main" is not the engine's and is left alone — ` + testRulesetFix
+	giantswarm := `bumblebee-repo: ruleset "protect-giantswarm" is not the engine's and is left alone — ` + testRulesetFix
+	got := runs(t, client, posted,
+		[]reconcile.StepResult{ruleset("protect-main")},                       // told
+		[]reconcile.StepResult{ruleset("protect-main")},                       // already told
+		[]reconcile.StepResult{ruleset("protect-main", "protect-giantswarm")}, // the new one alone
+		[]reconcile.StepResult{okStep},                                        // both gone
+		[]reconcile.StepResult{ruleset("protect-main")},                       // back: told again
+	)
+	want := [][]string{{main}, nil, {giantswarm}, nil, {main}}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("got  %q\nwant %q", got, want)
+	}
+}
+
+// TestAFindingThatDoesNotReachTheChannelStaysUntold: a finding is told when
+// it was posted, so a gateway that refuses it is retried by the next run.
+func TestAFindingThatDoesNotReachTheChannelStaysUntold(t *testing.T) {
+	main := `bumblebee-repo: ruleset "protect-main" is not the engine's and is left alone — ` + testRulesetFix
+	client, posted := notices(t, map[string]bool{main: true})
+	rec := record(change(inventory.ChangeChanged), ruleset("protect-main"))
+	ts := &Tools{t: &tools{d: Deps{Log: slog.New(slog.NewTextHandler(new(bytes.Buffer), nil)), Review: client}}}
+	told := ts.tell(context.Background(), rec, testTeam, "C0STANDUP001", Completions(rec))
+	if len(*posted) != 0 || len(told) != 0 {
+		t.Errorf("a refused notice: posted %q, told %q", *posted, told)
 	}
 }

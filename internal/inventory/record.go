@@ -249,6 +249,14 @@ type Setup struct {
 	// window: the finding reconcile-run-missing, until the next artifact,
 	// dispatch or creation.
 	MissingRun *MissingRun `json:"missingRun,omitempty"`
+	// Told is the findings the team has been told about in its channel, as
+	// the sentences they were told in. A finding already here is not told
+	// again, however many team-file changes follow: it asks for a decision
+	// or a chore, which is standing on the record and on the page until
+	// someone does it, not news on every edit of the entry. The set is what
+	// the last run's verified findings said, so a finding that goes away and
+	// comes back is told again.
+	Told []string `json:"told,omitempty"`
 }
 
 // LastRun is one reconciler run: the engine's result, the run, when, and

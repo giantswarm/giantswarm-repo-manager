@@ -15,9 +15,11 @@ import (
 // record (the poller read the run's artifact as lastRun): what the run tells
 // the team, to the owning team's standup channel, read from its policy file
 // as the unattended identity — one sentence about the change when a person
-// made one, one per failed step and per finding of that person's run; nothing
-// when the run has nothing to tell, and nothing at all for a run nobody's
-// change is behind (an Align now, the schedule). Nothing to approve. Every
+// made one, one per failed step and per finding of that person's run that is
+// news; nothing when the run has nothing to tell, and nothing at all for a
+// run nobody's change is behind (an Align now, the schedule). Nothing to
+// approve. What was told is written back to the record, so a standing
+// finding is told once and not again on the next change of the entry. Every
 // way out logs why: a record without a declaration — the team files do not
 // name the repository, read again after the run — has no team to tell and
 // stays silent under the team the artifact names.
@@ -54,12 +56,50 @@ func (ts *Tools) Reconciled(ctx context.Context, rec *inventory.Record) {
 		t.d.Log.Warn("completion message not delivered", "repository", rec.Repository, "team", team, "reason", err.Error())
 		return
 	}
+	told := ts.tell(ctx, rec, team, channel, msgs)
+	ts.remember(ctx, rec, told)
+}
+
+// tell posts what the team has not been told yet and returns the findings
+// the record has told after it: the ones already in Setup.Told and still
+// reported, plus the ones posted now. A finding whose message does not
+// reach the channel stays untold and is told by the next run.
+func (ts *Tools) tell(ctx context.Context, rec *inventory.Record, team, channel string, msgs []Completion) []string {
+	t := ts.t
+	known := set(rec.Setup.Told)
+	told := make([]string, 0, len(msgs))
 	for _, m := range msgs {
+		if m.Finding && known[m.Text] {
+			told = append(told, m.Text)
+			t.d.Log.Info("finding already told", "repository", rec.Repository, "team", team, "text", m.Text)
+			continue
+		}
 		if _, err := t.d.Review.Notify(ctx, review.Notice{Team: team, Channel: channel, Text: m.Text, Link: m.Link}); err != nil {
 			t.d.Log.Warn("completion message not delivered", "repository", rec.Repository, "team", team, "error", err)
 			continue
 		}
 		t.d.Log.Info("completion message posted", "repository", rec.Repository, "team", team, "channel", channel, "text", m.Text)
+		if m.Finding {
+			told = append(told, m.Text)
+		}
+	}
+	return told
+}
+
+// remember writes the told findings back to the record, so the next run over
+// the repository knows what the team has heard. The record was stored before
+// the hook ran; nothing else writes it in between.
+func (ts *Tools) remember(ctx context.Context, rec *inventory.Record, told []string) {
+	t := ts.t
+	if equal(rec.Setup.Told, told) {
+		return
+	}
+	rec.Setup.Told = told
+	if t.d.Inventory == nil {
+		return
+	}
+	if err := t.d.Inventory.Put(ctx, rec); err != nil {
+		t.d.Log.Warn("told findings not stored", "repository", rec.Repository, "error", err)
 	}
 }
 
@@ -69,19 +109,33 @@ func (ts *Tools) Reconciled(ctx context.Context, rec *inventory.Record) {
 type Completion struct {
 	Text string `json:"text"`
 	Link string `json:"link,omitempty"`
+	// Finding says the sentence is about a finding, not about the change or
+	// a failed step: a finding is told once, and again only after it has
+	// gone away and come back.
+	Finding bool `json:"finding,omitempty"`
 }
 
 // Completions renders what a run tells the team, in order: the sentence
 // about the change when a person made one — created, added, transferred,
-// archived, deleted or deprecated the repository — then one sentence per failed step
-// and per finding of that person's run, each with what to do. A run nobody's
-// change is behind — an Align now, the schedule, an artifact without a
-// change block — yields nothing, findings and failures included: the
-// reconciler doing its job is not news, and the nightly's findings would
-// repeat every night; they stay on the record and in the run's summary per
-// team. A converged edit (`changed`) yields nothing either. A finding of
-// kind `unchecked` — a check the reconciler's own token could not run — is
-// the platform's to fix, not the team's, and stays on the record too.
+// archived, deleted or deprecated the repository — then one sentence per
+// failed step and per finding of that person's run that is news, each with
+// what to do. A run nobody's change is behind — an Align now, the schedule,
+// an artifact without a change block — yields nothing, findings and failures
+// included: the reconciler doing its job is not news, and the nightly's
+// findings would repeat every night; they stay on the record and in the
+// run's summary per team. A converged edit (`changed`) yields nothing
+// either.
+//
+// Three kinds of finding never reach the team. `unchecked` — a check the
+// reconciler's own token could not run — is the platform's to fix, not the
+// team's. `pending-pull-request` is the engine's own repair in flight: the
+// step opened that pull request in this very run, the bot-PR sweep merges
+// it, and telling the team to merge it asks for work the automation is
+// already doing. And a finding the record's live check no longer reports
+// was fixed between the run and the poll ([verified]).
+//
+// The caller decides what of this the team has heard before: a finding
+// carries [Completion.Finding] and is matched against Setup.Told.
 func Completions(rec *inventory.Record) []Completion {
 	run := rec.Setup.LastRun
 	if !run.Change.PersonMade() {
@@ -95,11 +149,8 @@ func Completions(rec *inventory.Record) []Completion {
 		if st.Verdict == reconcile.VerdictFailed {
 			out = append(out, Completion{Text: failureSentence(rec.Name, st), Link: run.RunURL})
 		}
-		for _, f := range st.Findings {
-			if f.Kind == reconcile.FindingUnchecked {
-				continue
-			}
-			out = append(out, Completion{Text: findingSentence(rec.Name, f), Link: run.RunURL})
+		for _, f := range verified(rec.Setup.Checks, st) {
+			out = append(out, Completion{Text: findingSentence(rec.Name, f), Link: run.RunURL, Finding: true})
 		}
 	}
 	return out
@@ -114,6 +165,75 @@ func CompletionText(rec *inventory.Record) string {
 		lines = append(lines, m.Text)
 	}
 	return strings.Join(lines, "\n")
+}
+
+// verified is the step's findings worth telling the team, as the live check
+// has them. The poller reads a run's artifact minutes after the run
+// finished, and the collector runs the engine's read-mode checks over the
+// repository in the same refresh, immediately before this: those checks are
+// the state now, the artifact the state during the run.
+//
+// Per kind the step reported: when the live check ran the step, its findings
+// of that kind are the ones told — none when the finding was fixed in
+// between, and in the live check's words when it stands, so the sentence
+// describes the state now. When the live check did not run the step — it was
+// skipped for want of a client, it failed, the checks did not run at all —
+// the run's findings stand: an installation whose manager has no CircleCI
+// client skips the release step, and silence about a missed tag build would
+// be worse than a sentence from minutes ago. A kind the live check reports
+// and the run did not is left to the run that reports it.
+func verified(checks *reconcile.Result, st reconcile.StepResult) []reconcile.Finding {
+	live, ran := liveStep(checks, st.Step)
+	var out []reconcile.Finding
+	done := make(map[reconcile.FindingKind]bool, len(st.Findings))
+	for _, f := range st.Findings {
+		if !tellable(f.Kind) {
+			continue
+		}
+		if !ran {
+			out = append(out, f)
+			continue
+		}
+		// The live check answers for the whole kind at once: the step may
+		// report the same kind more than once (a repository with two
+		// rulesets of its own), and one of them may be gone.
+		if done[f.Kind] {
+			continue
+		}
+		done[f.Kind] = true
+		for _, l := range live.Findings {
+			if l.Kind == f.Kind {
+				out = append(out, l)
+			}
+		}
+	}
+	return out
+}
+
+// tellable says whether a finding of the kind is the team's news at all.
+func tellable(k reconcile.FindingKind) bool {
+	switch k {
+	case reconcile.FindingUnchecked, reconcile.FindingPendingPullRequest:
+		return false
+	}
+	return true
+}
+
+// liveStep is the live check's result for the step and whether the check
+// ran it: a step the check skipped or failed, one it has no result for, and
+// a record without checks all answer false — there is nothing to verify a
+// finding against.
+func liveStep(checks *reconcile.Result, step reconcile.Step) (reconcile.StepResult, bool) {
+	if checks == nil {
+		return reconcile.StepResult{}, false
+	}
+	for _, s := range checks.Steps {
+		if s.Step != step {
+			continue
+		}
+		return s, s.Verdict != reconcile.VerdictSkipped && s.Verdict != reconcile.VerdictFailed
+	}
+	return reconcile.StepResult{}, false
 }
 
 // changeSentence is the one sentence about the change for the team, empty
@@ -198,4 +318,26 @@ func changeKind(run *inventory.LastRun) string {
 		return "none"
 	}
 	return run.Change.Kind
+}
+
+// set is the strings as a lookup.
+func set(ss []string) map[string]bool {
+	m := make(map[string]bool, len(ss))
+	for _, s := range ss {
+		m[s] = true
+	}
+	return m
+}
+
+// equal says whether the two lists of told findings are the same, in order.
+func equal(a, b []string) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if a[i] != b[i] {
+			return false
+		}
+	}
+	return true
 }

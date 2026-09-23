@@ -11,6 +11,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- A reconciler run's findings reach the team's standup channel only when they are news, after three
+  failure modes filled the channel with 26 messages in two bursts of which roughly four were chores. A
+  finding of kind `pending-pull-request` is no longer posted: the `codeowners` step opens that pull
+  request in the very run that reports it and the bot-PR sweep merges it, so "merge the pull request" asks
+  for work nobody has to do — eight of the 26 were CODEOWNERS pull requests the engine had opened minutes
+  earlier, none of which a person merged after reading the message. A finding is verified against the
+  record's live check before it is posted: the poller reads a run's artifact up to five minutes after the
+  run finished, the collector runs the engine's read-mode checks in the same refresh, and per kind the
+  step reported the live check's findings are the ones posted, in its words — none when it found the step
+  clean, and the run's findings when it skipped the step, failed it or has no result for it, so
+  `missed-tag-build` and `red-release` still reach a team whose manager has no CircleCI client. One of the
+  26 told a team to merge a pull request a person had merged six minutes and forty-five seconds earlier.
+  And a finding is told once: `setup.told` holds the sentences the team has heard, so a standing decision
+  or chore is no longer re-posted on every merged change of the entry — ten of the 26 were advisory
+  `foreign-ruleset` findings across seven repositories, re-reported by an alignment opt-in that had
+  nothing to do with them — and is told again only after it has gone away and come back. Failed steps and
+  the sentence about the change are unchanged.
+
 - The engine is devctl v8.82.7, from v8.82.1. Every declared repository read *not in sync* with `settings drift:
   allow_squash_merge false → true, allow_update_branch false → true, allow_auto_merge false → true, delete_branch_on_merge
   false → true` while the reconciler's run said `settings ok`: `GET /repos/{owner}/{repo}` carries the six merge settings for

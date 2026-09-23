@@ -115,14 +115,15 @@ inventory:
   engine:
     # -- Numeric id of the devctl GitHub App (the App's settings page; not the
     # client id), the reconciler's bypass actor on the ruleset `devctl: default
-    # branch`: with it the engine's read-mode protection step compares the
-    # ruleset's bypass list too (the devctl App, the owning team and the
-    # repository admins for pull requests, as the reconciler writes them) and
-    # plans a repository still on classic protection as the reconciler would;
-    # the check writes nothing. The id is public. 0 compares the rules alone,
-    # the summary saying `bypass actors not compared`. Passed as
+    # branch`. 0, the default: the engine's read-mode protection step compares
+    # the ruleset's rules and leaves its bypass list uncompared, the summary
+    # saying `bypass actors not compared`. GitHub shows a ruleset's bypass
+    # actors to identities that administer the repository, and the inventory
+    # App reads: with the id the step would compare an empty list against the
+    # reconciler's and report every aligned repository as drifted. Set it only
+    # for a read identity that sees the bypass actors. Passed as
     # `DEVCTL_APP_ID`.
-    devctlAppID: 5025978
+    devctlAppID: 0
   reconciler:
     # -- Read the reconciler workflow's completed runs from GitHub as the
     # inventory App every interval (a Go duration) and store each run's

@@ -21,12 +21,12 @@ import (
 // it skips its circleci and release steps; the collector writes those two
 // from the record's own sources, the head's statuses and the reconciler's
 // run (fillClientlessSteps), so the result reads like the reconciler's.
-// The runner gets the devctl App's id, the reconciler's bypass actor on the
-// ruleset `devctl: default branch`, so the protection step compares the
-// ruleset's bypass list as the reconciler writes it and plans a repository
-// still on classic protection as the reconciler would; the check writes
-// nothing. Without the id the step compares the ruleset's rules alone and
-// says so in its summary.
+// The runner gets no devctl App id by default: GitHub shows a ruleset's bypass
+// actors to identities that administer the repository, and the read identity
+// reads, so the protection step compares the ruleset's rules alone and says
+// `bypass actors not compared` in its summary. With an id the step would
+// compare an empty list against the reconciler's and plan it on every
+// aligned repository; the id is for a read identity that sees the actors.
 type Engine struct {
 	org         string
 	reader      *gh.Reader

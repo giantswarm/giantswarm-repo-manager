@@ -153,9 +153,9 @@ default daily), one repository per artifact of each completed reconciler run (th
 GitHub as the inventory App every `inventory.reconciler.pollInterval`, default 5 min, every 30 s while an Align now is
 pending — nothing reaches the server from the workflow) and on demand (`refresh_repository`). GitHub is read as the App through
 GraphQL — repository metadata 20 a page (halved when GitHub cannot answer a page), default-branch history in aliased batches of 20 — and the engine's checks run
-in read mode per accepted declaration (`inventory.sweep.engineChecks`), with the devctl App's id
-(`inventory.engine.devctlAppID`, the reconciler's bypass actor on the ruleset `devctl: default branch`) so the
-protection step compares the ruleset's bypass list as the reconciler writes it. `--sweep-once` runs one sweep and prints the
+in read mode per accepted declaration (`inventory.sweep.engineChecks`); the protection step compares the
+ruleset's rules and reports its bypass list as not compared (`inventory.engine.devctlAppID` stays 0: GitHub shows a
+ruleset's bypass actors to identities that administer the repository, which the inventory App does not). `--sweep-once` runs one sweep and prints the
 summary (calls, GraphQL points, REST calls, duration); `inventory.sweep.graphqlBudgetFloor` stops a sweep cleanly when
 the budget runs low. The record and its findings are described in
 [`docs/inventory-record.md`](docs/inventory-record.md).

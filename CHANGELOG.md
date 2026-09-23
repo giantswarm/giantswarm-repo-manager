@@ -9,6 +9,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- The engine's read-mode checks pass no devctl App id by default (`inventory.engine.devctlAppID: 0`): GitHub shows a
+  ruleset's bypass actors to identities that administer the repository, and the inventory App reads, so with the id
+  (0.26.0) the protection step compared an empty list against the reconciler's three actors and reported every aligned
+  repository as `protection drift: bypass actors: App …, repository admins …, team …`, giantswarm/devctl included, whose
+  ruleset carries exactly those. The step compares the rules and says `bypass actors not compared` (devctl v8.86.1); the
+  id stays a setting for a read identity that sees the actors (devctl#2346 asks the engine to tell an unreadable list
+  from an empty one).
+
 ### Changed
 
 - The engine's read-mode checks run with the devctl GitHub App's numeric id (`--devctl-app-id`, `DEVCTL_APP_ID`; the

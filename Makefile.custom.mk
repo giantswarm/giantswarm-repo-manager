@@ -44,6 +44,10 @@ helm-lint: helm-deps ## Lint the chart.
 helm-template: helm-deps ## Render the chart with defaults.
 	helm template $(BINARY) $(CHART_DIR)
 
+.PHONY: helm-verify
+helm-verify: helm-deps ## Render assertions for the chart (hack/verify-chart.sh).
+	hack/verify-chart.sh
+
 .PHONY: helm-schema
 helm-schema: ## Regenerate values.schema.json (needs the helm schema plugin and schemalint).
 	helm schema --config $(CHART_DIR)/.schema.yaml

@@ -149,9 +149,10 @@ type Presence struct {
 // `ci/circleci:` commit statuses on the default branch head say whether
 // CircleCI builds the repository (it posts them for the projects it builds,
 // nothing else does), the reconciler's last run — its circleci step — says
-// whether the project is followed and setup workflows are on. Source names
-// the sources that answered, Unknown the facts none of them yields; the last
-// pipeline is not derivable and is not part of the record.
+// whether the project is followed, setup workflows are on and CircleCI's
+// webhook is installed. Source names the sources that answered, Unknown the
+// facts none of them yields; the last pipeline is not derivable and is not
+// part of the record.
 type CircleCI struct {
 	// Followed says CircleCI builds the repository: statuses on the head, or
 	// the reconciler's circleci step found (or made) the project followed.
@@ -159,13 +160,19 @@ type CircleCI struct {
 	// SetupWorkflows is the project's setup-workflows setting as the
 	// reconciler's last run saw or set it; nil when no run tells.
 	SetupWorkflows *bool `json:"setupWorkflows,omitempty"`
+	// Webhook says whether the repository carries the webhook CircleCI
+	// installs on the follow (active, push events), without which no push
+	// and no tag reaches CircleCI, as the reconciler's last run verified it;
+	// nil when no run tells.
+	Webhook *bool `json:"webhook,omitempty"`
 	// Head is the default branch head's CircleCI statuses; nil when it has
 	// none.
 	Head *HeadStatus `json:"head,omitempty"`
 	// Source is what answered: statuses, artifact, or statuses+artifact.
 	Source string `json:"source"`
 	// Unknown names the facts no source yields: followed (the head's status
-	// contexts were truncated and none was CircleCI's), setupWorkflows.
+	// contexts were truncated and none was CircleCI's), setupWorkflows,
+	// webhook.
 	Unknown []string `json:"unknown,omitempty"`
 	// Error is the reconciler's circleci step failing, as its run reported it.
 	Error string `json:"error,omitempty"`
@@ -179,6 +186,7 @@ const (
 
 	CircleCIFactFollowed       = "followed"
 	CircleCIFactSetupWorkflows = "setupWorkflows"
+	CircleCIFactWebhook        = "webhook"
 )
 
 // HeadStatus is a commit's `ci/circleci:` commit statuses: the default

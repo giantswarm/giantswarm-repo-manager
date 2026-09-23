@@ -110,14 +110,16 @@ func runStep(last *inventory.LastRun, step reconcile.Step) *reconcile.StepResult
 // reads CircleCI directly.
 const alignFix = "run Align now: the reconciler's check reads CircleCI directly, and for a repository that has not opted in to alignment (`align: true` in its entry) it changes nothing"
 
-// convergedCircleCI is the engine's summary of a converged circleci step.
+// convergedCircleCI is the engine's summary of a converged circleci step up
+// to its word on the webhook (webhookClause).
 const convergedCircleCI = "followed, setup workflows on, checkout key present"
 
 // circleCIStep is the circleci step from the record's CircleCI state: the
 // head's statuses say whether CircleCI builds the branch — the fact the
-// step is for — and the reconciler's run adds the settings it read when it
-// ran. The declaration (ci) tells the branch's own statuses from another
-// pipeline's at the head commit.
+// step is for — and the reconciler's run adds the settings and the webhook
+// it read when it ran, with its findings: a missing webhook keeps the step
+// from converging whatever else the run did. The declaration (ci) tells the
+// branch's own statuses from another pipeline's at the head commit.
 func circleCIStep(slug, branch string, cc *inventory.CircleCI, ci *inventory.CI, last *inventory.LastRun) reconcile.StepResult {
 	sr := reconcile.StepResult{Step: reconcile.StepCircleCI}
 	if cc == nil {
@@ -130,23 +132,26 @@ func circleCIStep(slug, branch string, cc *inventory.CircleCI, ci *inventory.CI,
 		// not built yet, not a project CircleCI does not build.
 		builds := buildsSentence(slug, branch, cc.Head, ci, false)
 		from := "reconciler run of " + last.Timestamp.UTC().Format(time.RFC3339)
+		sr.Findings = append([]reconcile.Finding(nil), run.Findings...)
 		switch run.Verdict {
 		case reconcile.VerdictFailed:
 			sr.Verdict = reconcile.VerdictFailed
 			sr.Summary = join("the reconciler's circleci step failed: "+run.Summary+" ("+from+")", builds)
-		case reconcile.VerdictOK, reconcile.VerdictRepaired:
-			sr.Verdict = reconcile.VerdictOK
-			sr.Summary = join(builds, convergedCircleCI+" ("+from+")")
-		case reconcile.VerdictReported:
-			sr.Verdict = reconcile.VerdictReported
-			sr.Summary = join(builds, convergedCircleCI+" ("+from+")")
-			sr.Findings = append([]reconcile.Finding(nil), run.Findings...)
-		default:
-			// Drift: the check found what a repair would do, and no repair ran
+		case reconcile.VerdictDrift:
+			// The check found what a repair would do, and no repair ran
 			// since — the reconciler's plan is the step's.
 			sr.Verdict = reconcile.VerdictDrift
 			sr.Summary = join(builds, "drift found by the "+from)
 			sr.Changes = append([]string(nil), run.Changes...)
+		default:
+			// Converged, reported or repaired: after the run the project is
+			// set up as far as the engine can set it up; what it cannot set
+			// up is a finding.
+			sr.Verdict = reconcile.VerdictOK
+			if len(sr.Findings) > 0 {
+				sr.Verdict = reconcile.VerdictReported
+			}
+			sr.Summary = join(builds, convergedCircleCI+webhookClause(cc.Webhook)+" ("+from+")")
 		}
 		return sr
 	}
@@ -169,6 +174,18 @@ func circleCIStep(slug, branch string, cc *inventory.CircleCI, ci *inventory.CI,
 		sr.Changes = []string{"follow " + slug, "enable setup workflows", "create a deploy key"}
 	}
 	return sr
+}
+
+// webhookClause is the converged summary's word on CircleCI's webhook, as
+// the engine words it; empty when no run tells.
+func webhookClause(present *bool) string {
+	switch {
+	case present == nil:
+		return ""
+	case *present:
+		return ", " + webhookPresent
+	}
+	return ", webhook missing"
 }
 
 // buildsSentence says what the head's `ci/circleci:` statuses tell; conclude

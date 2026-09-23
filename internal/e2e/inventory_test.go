@@ -59,7 +59,7 @@ func TestSweepFillsOneRecordPerRepository(t *testing.T) {
 	if s := present.Setup.Checks.Step(reconcile.StepRelease); s == nil || s.Verdict != reconcile.VerdictOK || !strings.HasPrefix(s.Summary, "release "+presentTag+" built: CircleCI success (2 jobs, ") {
 		t.Errorf("present release step: %+v", s)
 	}
-	if b := present.Reality.LatestRelease.Build; b == nil || b.State != "success" || len(b.Contexts) != 2 {
+	if b := present.Reality.LatestRelease.Build; b == nil || b.State != conclusionSuccess || len(b.Contexts) != 2 {
 		t.Errorf("present release build: %+v", b)
 	}
 	// The CI facts from the configuration on the default branch.

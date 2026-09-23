@@ -37,14 +37,38 @@ func fillClientlessSteps(res *reconcile.Result, rec *inventory.Record) {
 		*sr = circleCIStep(rec.Repository, rec.Reality.DefaultBranch, rec.CircleCI, last)
 	}
 	if sr := res.Step(reconcile.StepRelease); sr != nil && clientless(sr) {
-		*sr = releaseStep(rec.Repository, releaseTag(sr.Summary), rec.Reality.LatestRelease, last)
+		*sr = releaseStep(rec.Repository, releaseTag(sr.Summary), rec.Reality.LatestRelease, last, rec.Setup.Release)
 	}
+	converge(res)
+}
+
+// converge sets the result's Converged from its steps, the engine's rule:
+// no step drifted or failed and every finding is advisory.
+func converge(res *reconcile.Result) {
 	res.Converged = true
 	for i := range res.Steps {
 		if !res.Steps[i].Converges() {
 			res.Converged = false
 		}
 	}
+}
+
+// rewriteReleaseStep writes the record's release step from the release
+// watch's state, when the record has checks with a release step and the
+// watch has a release: the watch read the tag's own pipeline, which is the
+// answer the step asks for, and it read it after the checks ran. Converged
+// follows.
+func rewriteReleaseStep(rec *inventory.Record) {
+	w := rec.Setup.Release
+	if w == nil || rec.Setup.Checks == nil || rec.Reality == nil {
+		return
+	}
+	sr := rec.Setup.Checks.Step(reconcile.StepRelease)
+	if sr == nil {
+		return
+	}
+	*sr = releaseStep(rec.Repository, w.Tag, rec.Reality.LatestRelease, rec.Setup.LastRun, w)
+	converge(rec.Setup.Checks)
 }
 
 // finding is a finding of kind with its message and fix, advisory as the
@@ -166,13 +190,21 @@ func jobs(s *inventory.HeadStatus) string {
 	return "1 job"
 }
 
-// releaseStep is the release step for tag: the tag commit's `ci/circleci:`
+// releaseStep is the release step for tag. The release watch's state comes
+// first when it followed the tag: it read the tag's own pipeline on
+// CircleCI, which the commit's statuses cannot tell from a branch
+// pipeline's at the same commit. Else the tag commit's `ci/circleci:`
 // statuses say whether CircleCI built the release; the reconciler's run
 // stands in while the commit carries none and that run named the tag; a
 // commit without any CircleCI status is the missed tag build the engine
 // reports (finding missed-tag-build: a tag is never built for the person).
-func releaseStep(slug, tag string, rel *inventory.Release, last *inventory.LastRun) reconcile.StepResult {
+func releaseStep(slug, tag string, rel *inventory.Release, last *inventory.LastRun, w *inventory.ReleaseWatch) reconcile.StepResult {
 	sr := reconcile.StepResult{Step: reconcile.StepRelease}
+	if w != nil && w.Tag == tag {
+		if done, ok := watchedReleaseStep(slug, tag, w); ok {
+			return done
+		}
+	}
 	if rel != nil && rel.Tag == tag && rel.Build != nil {
 		b := rel.Build
 		at := b.At.UTC().Format(time.RFC3339)
@@ -228,6 +260,43 @@ func releaseStep(slug, tag string, rel *inventory.Release, last *inventory.LastR
 			"cut the next tag, or trigger the tag's pipeline by hand")}
 	}
 	return sr
+}
+
+// watchedReleaseStep is the release step from the release watch: built,
+// red (the finding red-release naming the failed jobs, the fix the rerun
+// from failed), unbuilt (the finding missed-tag-build), running (the
+// pipeline named). An unchecked release, or one watched without a pipeline
+// yet, is left to the other sources (ok false).
+func watchedReleaseStep(slug, tag string, w *inventory.ReleaseWatch) (reconcile.StepResult, bool) {
+	sr := reconcile.StepResult{Step: reconcile.StepRelease}
+	at := w.CheckedAt.UTC().Format(time.RFC3339)
+	confirm := fmt.Sprintf("then `devctl release wait %s %s` confirms it", slug, tag)
+	switch w.State {
+	case inventory.ReleaseBuilt:
+		sr.Verdict = reconcile.VerdictOK
+		sr.Summary = fmt.Sprintf("release %s built: the tag's pipeline %d succeeded (%s)", tag, w.Pipeline.Number, at)
+	case inventory.ReleaseRed:
+		sr.Verdict = reconcile.VerdictReported
+		sr.Summary = fmt.Sprintf("release %s: the tag's pipeline %d failed (%s)", tag, w.Pipeline.Number, at)
+		sr.Findings = []reconcile.Finding{finding(reconcile.FindingRedRelease,
+			fmt.Sprintf("the tag pipeline %d of %s %s failed in %s: nothing was published for the tag", w.Pipeline.Number, slug, tag, strings.Join(w.FailedJobs, ", ")),
+			"rerun the workflow from failed on CircleCI, "+confirm)}
+	case inventory.ReleaseUnbuilt:
+		sr.Verdict = reconcile.VerdictReported
+		sr.Summary = fmt.Sprintf("release %s: no CircleCI pipeline for the tag (%s)", tag, at)
+		sr.Findings = []reconcile.Finding{finding(reconcile.FindingMissedTagBuild,
+			fmt.Sprintf("release %s of %s has no CircleCI pipeline: nothing was built or published for the tag", tag, slug),
+			"trigger the tag's pipeline by hand on CircleCI, "+confirm)}
+	case inventory.ReleaseWatching:
+		if w.Pipeline == nil {
+			return sr, false
+		}
+		sr.Verdict = reconcile.VerdictOK
+		sr.Summary = fmt.Sprintf("release %s: the tag's pipeline %d is running (%s)", tag, w.Pipeline.Number, at)
+	default:
+		return sr, false
+	}
+	return sr, true
 }
 
 // mentions says whether the step's summary, changes or findings name tag.

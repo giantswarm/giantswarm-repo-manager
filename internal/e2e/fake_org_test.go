@@ -111,6 +111,60 @@ type fakeOrg struct {
 	// repos are the repositories created through the REST surface: the
 	// node of one of them is a plain repository as GraphQL would answer.
 	repos *fakeRepos
+	// releases are the latest releases the release watch's page carries,
+	// by repository, when set; the present repository's default release
+	// otherwise. private names the repositories GraphQL reports PRIVATE.
+	releases map[string]fakeLatestRelease
+	private  map[string]bool
+}
+
+// fakeLatestRelease is a repository's latest release as the release watch reads
+// it: the tag, its creation and the pull request behind the tag's commit.
+type fakeLatestRelease struct {
+	tag       string
+	createdAt time.Time
+	pr        int
+}
+
+// release sets a repository's latest release for the release watch's page.
+func (o *fakeOrg) release(name, tag string, createdAt time.Time, pr int) {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	if o.releases == nil {
+		o.releases = map[string]fakeLatestRelease{}
+	}
+	o.releases[name] = fakeLatestRelease{tag: tag, createdAt: createdAt, pr: pr}
+}
+
+// releasePage is the release watch's page: the unarchived repositories,
+// most recently pushed first, with their latest release.
+func (o *fakeOrg) releasePage() []map[string]any {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	var nodes []map[string]any
+	for _, name := range []string{repoPresent, repoLegacy, repoStray} {
+		n := map[string]any{kName: name, "visibility": "PUBLIC", "pushedAt": o.now.Format(time.RFC3339)}
+		if o.private[name] {
+			n["visibility"] = "PRIVATE"
+		}
+		rel, ok := o.releases[name]
+		switch {
+		case ok:
+			var prs []map[string]any
+			if rel.pr != 0 {
+				prs = append(prs, map[string]any{kNumber: rel.pr, kURL: fmt.Sprintf("https://github.com/%s/%s/pull/%d", org, name, rel.pr)})
+			}
+			n["latestRelease"] = map[string]any{kTagName: rel.tag, kCreatedAt: rel.createdAt.UTC().Format(time.RFC3339),
+				kTagCommit: map[string]any{"oid": "a80db8ff", "associatedPullRequests": map[string]any{kNodes: prs}}}
+		case name == repoPresent:
+			n["latestRelease"] = map[string]any{kTagName: presentTag, kCreatedAt: o.now.AddDate(0, -1, 0).Format(time.RFC3339),
+				kTagCommit: map[string]any{"oid": "0ld", "associatedPullRequests": map[string]any{kNodes: []any{}}}}
+		default:
+			n["latestRelease"] = nil
+		}
+		nodes = append(nodes, n)
+	}
+	return nodes
 }
 
 var (
@@ -149,6 +203,8 @@ func (o *fakeOrg) handle(w http.ResponseWriter, r *http.Request) {
 			"catalog":   map[string]any{kText: catalogFile},
 		}
 		data["mcb"] = map[string]any{"mapping": map[string]any{kText: mappingFile}}
+	case contains(req.Query, "orderBy: {field: PUSHED_AT"):
+		data["organization"] = map[string]any{"repositories": map[string]any{kNodes: o.releasePage()}}
 	case contains(req.Query, "repositories(first:"):
 		data["organization"] = map[string]any{"repositories": map[string]any{
 			kTotalCount: 4, kPageInfo: map[string]any{kHasNextPage: false},
@@ -206,7 +262,7 @@ func (o *fakeOrg) node(name string) map[string]any {
 	switch name {
 	case repoPresent:
 		n := base(false)
-		n["latestRelease"] = map[string]any{"tagName": presentTag, "publishedAt": o.now.AddDate(0, -1, 0).Format(time.RFC3339), "tagCommit": map[string]any{"statusCheckRollup": o.releaseRollup()}}
+		n["latestRelease"] = map[string]any{kTagName: presentTag, "publishedAt": o.now.AddDate(0, -1, 0).Format(time.RFC3339), kTagCommit: map[string]any{"statusCheckRollup": o.releaseRollup()}}
 		n["oldestIssues"] = map[string]any{kNodes: []map[string]any{{kNumber: 3, kTitle: "Dependency Dashboard"}}}
 		n["openPRs"] = map[string]any{kTotalCount: 2, kNodes: []map[string]any{
 			{kNumber: 10, kTitle: "fix(deps): update module x", kCreatedAt: o.now.AddDate(0, 0, -2).Format(time.RFC3339), kHeadRefName: "renovate/x", kAuthor: map[string]any{kLogin: renovateLogin}},
@@ -229,7 +285,12 @@ func (o *fakeOrg) node(name string) map[string]any {
 		}}
 		return n
 	case repoLegacy:
-		return base(false)
+		n := base(false)
+		n["ciConfig"] = map[string]any{kText: fakeCIConfig}
+		if o.private[repoLegacy] {
+			n["visibility"] = "PRIVATE"
+		}
+		return n
 	case repoArchived:
 		return base(true)
 	}
@@ -324,6 +385,28 @@ func (o *fakeOrg) history(name string) map[string]any {
 type fakeChecker struct {
 	calls atomic.Int32
 	hold  chan struct{}
+	// release answers a repository's latest release tag, as the engine's
+	// release step would read it; nil is the present tag.
+	release func(name string) string
+}
+
+// latestTag is the repository's latest release as the engine would read it
+// on GitHub: the fake org's, when the stack wired it, else the present tag.
+func (c *fakeChecker) latestTag(name string) string {
+	if c.release != nil {
+		if tag := c.release(name); tag != "" {
+			return tag
+		}
+	}
+	return presentTag
+}
+
+// latestTag is a repository's latest release tag as set for the release
+// watch's page; empty when none was set.
+func (o *fakeOrg) latestTag(name string) string {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	return o.releases[name].tag
 }
 
 func (c *fakeChecker) Check(_ context.Context, teamSlug string, entry reposetup.Entry) (*reconcile.Result, error) {
@@ -341,7 +424,7 @@ func (c *fakeChecker) Check(_ context.Context, teamSlug string, entry reposetup.
 			{Step: reconcile.StepScaffold, Verdict: reconcile.VerdictOK, Summary: "scaffold present",
 				Findings: []reconcile.Finding{{Kind: reconcile.FindingDefaultIcon, Advisory: true, Message: "the chart carries the template's icon", Fix: "replace helm/<chart>/icon.svg"}}},
 			{Step: reconcile.StepCircleCI, Verdict: reconcile.VerdictSkipped, Summary: "no CircleCI client"},
-			{Step: reconcile.StepRelease, Verdict: reconcile.VerdictSkipped, Summary: "release " + presentTag + ": no CircleCI client to verify the pipeline"},
+			{Step: reconcile.StepRelease, Verdict: reconcile.VerdictSkipped, Summary: "release " + c.latestTag(entry.Name) + ": no CircleCI client to verify the pipeline"},
 		},
 	}, nil
 }

@@ -23,6 +23,12 @@ import (
 const (
 	inventoryApp      = "giantswarm-repo-manager-inventory"
 	installationToken = "installation-token"
+	// The release watch's fakes.
+	kURL           = "url"
+	kItems         = "items"
+	kTagName       = "tagName"
+	kTagCommit     = "tagCommit"
+	jobPushRelease = "push-to-registries-release"
 )
 
 // fakeGitHub answers the calls of the identity chain: GET /user as the person

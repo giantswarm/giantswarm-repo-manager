@@ -257,6 +257,92 @@ type Setup struct {
 	// the last run's verified findings said, so a finding that goes away and
 	// comes back is told again.
 	Told []string `json:"told,omitempty"`
+	// Release is the latest release as the release watch follows it: the
+	// tag's own CircleCI pipeline read every interval until it settles, then
+	// what the record and the team know of the release. One tag, the latest;
+	// the next release replaces it, and what was told about the last one
+	// goes with it.
+	Release *ReleaseWatch `json:"release,omitempty"`
+}
+
+// ReleaseWatch is one release from its tag to the end of the tag's own
+// CircleCI pipeline — never a branch pipeline at the same commit, which the
+// commit's statuses cannot tell apart — and what became of it: built, red
+// (nothing was published; the failed jobs named), unbuilt (no pipeline
+// within the grace period), or unchecked (the pipeline is out of reach: a
+// private project without a CircleCI token, a project CircleCI does not
+// know, a tag outside the vX.Y.Z flow, a repository without a pipeline).
+type ReleaseWatch struct {
+	Tag string `json:"tag"`
+	// CreatedAt is when the release, and with it the tag, was created.
+	CreatedAt time.Time `json:"createdAt"`
+	// PullRequest is the merged pull request behind the tag's commit; nil
+	// when GitHub associates none.
+	PullRequest *ChangePullRequest `json:"pullRequest,omitempty"`
+	// State is one of the Release… states.
+	State string `json:"state"`
+	// Pipeline is the tag's pipeline once found.
+	Pipeline *ReleasePipeline `json:"pipeline,omitempty"`
+	// FailedJobs are the failed workflows' failed jobs, `<job> (<how>)`, of
+	// a red release.
+	FailedJobs []string `json:"failedJobs,omitempty"`
+	// Reason says why the release is unchecked.
+	Reason string `json:"reason,omitempty"`
+	// CheckedAt is the last read; SettledAt when the state became final.
+	CheckedAt time.Time  `json:"checkedAt"`
+	SettledAt *time.Time `json:"settledAt,omitempty"`
+	// Told is the sentence the team heard about the release — a red or an
+	// unbuilt one, once — and ToldAt when; empty while nothing was posted.
+	Told   string     `json:"told,omitempty"`
+	ToldAt *time.Time `json:"toldAt,omitempty"`
+}
+
+// ReleasePipeline names the tag's pipeline on CircleCI.
+type ReleasePipeline struct {
+	Number int64  `json:"number"`
+	URL    string `json:"url"`
+	// Workflow is the failed workflow's page of a red release, where its
+	// jobs and the rerun from failed are; empty otherwise.
+	Workflow string `json:"workflow,omitempty"`
+}
+
+// The states of a watched release.
+const (
+	// ReleaseWatching: the tag's pipeline has not settled (or not appeared
+	// within the grace period yet).
+	ReleaseWatching = "watching"
+	// ReleaseBuilt: every workflow of the tag's pipeline succeeded.
+	ReleaseBuilt = "built"
+	// ReleaseRed: a workflow of the tag's pipeline failed; nothing was
+	// published for the tag until a rerun from failed succeeds.
+	ReleaseRed = "red"
+	// ReleaseUnbuilt: no pipeline for the tag within the grace period.
+	ReleaseUnbuilt = "unbuilt"
+	// ReleaseUnchecked: the pipeline is out of reach; Reason says why.
+	ReleaseUnchecked = "unchecked"
+)
+
+// Settled says whether the release has a final state.
+func (w *ReleaseWatch) Settled() bool { return w != nil && w.State != ReleaseWatching }
+
+// Following says whether the watch still reads the release's pipeline: one
+// not settled yet, and a red one — a rerun from failed may turn it built,
+// silently — until the next release replaces it.
+func (w *ReleaseWatch) Following() bool {
+	return w != nil && (w.State == ReleaseWatching || w.State == ReleaseRed)
+}
+
+// Untold says whether the release is one the team hears about — red or
+// unbuilt — and has not heard about yet.
+func (w *ReleaseWatch) Untold() bool {
+	return w != nil && (w.State == ReleaseRed || w.State == ReleaseUnbuilt) && w.Told == ""
+}
+
+// Settle ends the watch at now in state.
+func (w *ReleaseWatch) Settle(now time.Time, state string) {
+	w.State = state
+	t := now
+	w.SettledAt = &t
 }
 
 // LastRun is one reconciler run: the engine's result, the run, when, and

@@ -68,6 +68,17 @@ spec:
               value: {{ .Values.inventory.reconciler.pollInterval | quote }}
             - name: RECONCILER_WORKFLOW
               value: {{ .Values.inventory.reconciler.workflow | quote }}
+            - name: RELEASES_INTERVAL
+              value: {{ .Values.inventory.releases.interval | quote }}
+            - name: RELEASES_GRACE
+              value: {{ .Values.inventory.releases.grace | quote }}
+            {{- with .Values.circleci.existingSecret }}
+            - name: CIRCLECI_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: {{ . | quote }}
+                  key: token
+            {{- end }}
             {{- if .Values.oauth.enabled }}
             - name: OAUTH_ENABLED
               value: "true"

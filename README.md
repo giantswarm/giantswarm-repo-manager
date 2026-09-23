@@ -64,8 +64,26 @@ change for the team, rendered from the artifact's `change` block and the declara
 new repo: bumblebee-repo (app, go)`, `alice added the existing repo … to team-bumblebee`, `alice
 transferred the repo … (app, go) from team-planeteers to team-bumblebee`, `alice archived the repo …`,
 `alice deprecated the repo …` — linking the pull request, plus one sentence per failed step or finding
-of that person's run with what to do, linking the run — bar a finding of kind `unchecked`, a check the
-reconciler's own token could not run, which is the platform's to fix and stays on the record. A run nobody's change is behind — an Align now,
+of that person's run with what to do, linking the run.
+
+Four rules decide which of a run's findings is news for the team; the others stay on the record, in the
+run's summary per team and on the Repositories page, which is where what is open is read. A finding of
+kind `unchecked` — a check the reconciler's own token could not run — is the platform's to fix, not the
+team's. A finding of kind `pending-pull-request` is the engine's own repair in flight: the `codeowners`
+step opened that pull request in the run that reports it and the bot-PR sweep merges it, so telling the
+team to merge it asks for work nobody has to do. A finding the record's live check no longer reports was
+fixed between the run and the poll — the poller reads a run's artifact minutes after the run finished,
+the collector runs the engine's read-mode checks in the same refresh, and those checks are the state now:
+per kind the step reported, the live check's findings are the ones posted, in its words, and none when it
+found the step clean; a step the live check skipped, failed or has no result for leaves the run's
+findings standing (a manager without a CircleCI client skips the `release` step, and silence about a
+missed tag build would be worse than a sentence from minutes ago). And a finding the team has already
+been told about is not told again: `setup.told` holds the sentences posted, so a decision or chore that
+stands is heard once rather than on every merged change of the entry, and again only after it has gone
+away and come back. A failed step is always posted — it is a property of that run under the reconciler's
+write identity, which the read-only check cannot reproduce.
+
+A run nobody's change is behind — an Align now,
 the schedule, an artifact without a `change` block — posts nothing, findings and failures included: the
 reconciler doing its job is not news, and the nightly's findings would repeat every night; they stay on the
 record and in the run's summary per team. An edit a person made (`changed`) posts its failed steps and

@@ -39,7 +39,7 @@ func TestFillClientlessSteps(t *testing.T) {
 	ran := time.Date(2026, 9, 17, 22, 17, 0, 0, time.UTC)
 	built := time.Date(2026, 9, 18, 8, 0, 0, 0, time.UTC)
 	head := &inventory.HeadStatus{State: stateSuccess, Contexts: []string{"ci/circleci: go-build", "ci/circleci: push"}, At: built}
-	yes := true
+	yes, no := true, false
 	engine := func(steps ...reconcile.StepResult) *reconcile.Result {
 		res := &reconcile.Result{Repository: slug, Declared: slug, Mode: reconcile.ModeCheck, Converged: true}
 		res.Steps = append([]reconcile.StepResult{{Step: reconcile.StepSettings, Verdict: reconcile.VerdictOK, Summary: "settings match"}}, steps...)
@@ -60,6 +60,11 @@ func TestFillClientlessSteps(t *testing.T) {
 	none := &inventory.CircleCI{Source: inventory.CircleCISourceStatuses, Unknown: []string{inventory.CircleCIFactSetupWorkflows}}
 	truncated := &inventory.CircleCI{Source: inventory.CircleCISourceStatuses, Unknown: []string{inventory.CircleCIFactSetupWorkflows, inventory.CircleCIFactFollowed}}
 	both := &inventory.CircleCI{Followed: true, SetupWorkflows: &yes, Head: head, Source: inventory.CircleCISourceBoth}
+	present := &inventory.CircleCI{Followed: true, SetupWorkflows: &yes, Webhook: &yes, Head: head, Source: inventory.CircleCISourceBoth}
+	deaf := &inventory.CircleCI{Followed: true, SetupWorkflows: &yes, Webhook: &no, Head: head, Source: inventory.CircleCISourceBoth}
+	webhookMissing := finding(reconcile.FindingCircleCIWebhookMissing, "giantswarm/x is followed on CircleCI but carries no active CircleCI webhook",
+		"follow the project as a GitHub admin of the repository whose CircleCI grant carries the hook scope")
+	missing := []reconcile.FindingKind{reconcile.FindingCircleCIWebhookMissing}
 	green := &inventory.HeadStatus{State: stateSuccess, Contexts: []string{releaseJob}, At: built}
 	red := &inventory.HeadStatus{State: stateFailure, Contexts: []string{releaseJob}, At: built}
 	running := &inventory.HeadStatus{State: "pending", Contexts: []string{"ci/circleci: go-build", releaseJob}, At: built}
@@ -82,7 +87,7 @@ func TestFillClientlessSteps(t *testing.T) {
 		{"circleci: the head builds — ok, no finding about settings", engine(skipCircle), record(statuses, nil, nil), reconcile.StepCircleCI,
 			want{reconcile.VerdictOK, []string{"CircleCI builds main: success (2 jobs, 2026-09-18T08:00:00Z)"}, nil, nil, true}, false},
 		{"circleci: no statuses, no run — not built, the engine's plan", engine(skipCircle), record(none, nil, nil), reconcile.StepCircleCI,
-			want{reconcile.VerdictDrift, []string{"no CircleCI status on main's head", "does not build giantswarm/x"}, []string{"follow giantswarm/x", enableSW, createKey}, nil, false}, false},
+			want{reconcile.VerdictDrift, []string{"no CircleCI status on main's head", "does not build giantswarm/x"}, []string{followX, enableSW, createKey}, nil, false}, false},
 		{"circleci: statuses truncated, no run — followed unknown", engine(skipCircle), record(truncated, nil, nil), reconcile.StepCircleCI,
 			want{reconcile.VerdictReported, []string{"truncated"}, nil, []reconcile.FindingKind{reconcile.FindingUnchecked}, false}, false},
 		{"circleci: the reconciler's run converged", engine(skipCircle), record(both, nil, run(reconcile.ModeCheck, reconcile.StepResult{Step: reconcile.StepCircleCI, Verdict: reconcile.VerdictOK, Summary: convergedCircleCI})), reconcile.StepCircleCI,
@@ -91,6 +96,14 @@ func TestFillClientlessSteps(t *testing.T) {
 			want{reconcile.VerdictOK, []string{"no CircleCI status on main's head yet", convergedCircleCI}, nil, nil, true}, false},
 		{"circleci: the reconciler's run repaired — the state holds", engine(skipCircle), record(both, nil, run(reconcile.ModeRepair, reconcile.StepResult{Step: reconcile.StepCircleCI, Verdict: reconcile.VerdictRepaired, Changes: []string{enableSW}})), reconcile.StepCircleCI,
 			want{reconcile.VerdictOK, []string{convergedCircleCI}, nil, nil, true}, false},
+		{"circleci: the run converged, the webhook present", engine(skipCircle), record(present, nil, run(reconcile.ModeCheck, reconcile.StepResult{Step: reconcile.StepCircleCI, Verdict: reconcile.VerdictOK, Summary: convergedCircleCI + ", " + webhookPresent})), reconcile.StepCircleCI,
+			want{reconcile.VerdictOK, []string{buildsMain, convergedCircleCI + ", webhook present (reconciler run of 2026-09-17T22:17:00Z)"}, nil, nil, true}, false},
+		{"circleci: the run reported the webhook missing — not converged", engine(skipCircle), record(deaf, nil, run(reconcile.ModeRepair, reconcile.StepResult{Step: reconcile.StepCircleCI, Verdict: reconcile.VerdictReported, Summary: convergedCircleCI + ", webhook missing", Findings: []reconcile.Finding{webhookMissing}})), reconcile.StepCircleCI,
+			want{reconcile.VerdictReported, []string{convergedCircleCI + ", webhook missing (reconciler run of"}, nil, missing, false}, false},
+		{"circleci: a repair that followed and left the project deaf reports it", engine(skipCircle), record(deaf, nil, run(reconcile.ModeRepair, reconcile.StepResult{Step: reconcile.StepCircleCI, Verdict: reconcile.VerdictRepaired, Changes: []string{followX}, Findings: []reconcile.Finding{webhookMissing}})), reconcile.StepCircleCI,
+			want{reconcile.VerdictReported, []string{"webhook missing"}, nil, missing, false}, false},
+		{"circleci: a check's drift keeps the webhook finding", engine(skipCircle), record(deaf, nil, run(reconcile.ModeCheck, reconcile.StepResult{Step: reconcile.StepCircleCI, Verdict: reconcile.VerdictDrift, Changes: []string{enableSW}, Findings: []reconcile.Finding{webhookMissing}})), reconcile.StepCircleCI,
+			want{reconcile.VerdictDrift, []string{"drift found by the reconciler run"}, []string{enableSW}, missing, false}, false},
 		{"circleci: the reconciler's check found drift — its plan", engine(skipCircle), record(statuses, nil, run(reconcile.ModeCheck, reconcile.StepResult{Step: reconcile.StepCircleCI, Verdict: reconcile.VerdictDrift, Changes: []string{enableSW, createKey}})), reconcile.StepCircleCI,
 			want{reconcile.VerdictDrift, []string{buildsMain, "drift found by the reconciler run of 2026-09-17T22:17:00Z"}, []string{enableSW, createKey}, nil, false}, false},
 		{"circleci: the reconciler's step failed", engine(skipCircle), record(statuses, nil, run(reconcile.ModeCheck, reconcile.StepResult{Step: reconcile.StepCircleCI, Verdict: reconcile.VerdictFailed, Summary: "api error: GET /api/v2/project/gh/giantswarm/x/settings: 502"})), reconcile.StepCircleCI,

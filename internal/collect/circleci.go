@@ -22,8 +22,9 @@ var statusRank = map[string]int{"FAILURE": 0, "ERROR": 1, "PENDING": 2, "EXPECTE
 // `ci/circleci:` statuses on the default branch head (read with the
 // repository, no extra call) say whether CircleCI builds the repository; the
 // reconciler's last run — its circleci step, in the run artifact the poller
-// read — says whether the project is followed and setup
-// workflows are on. What neither yields is named in Unknown, never guessed.
+// read — says whether the project is followed, setup workflows are on and
+// CircleCI's webhook is installed. What neither yields is named in Unknown,
+// never guessed.
 func circleCI(n *repoNode, run *inventory.LastRun) *inventory.CircleCI {
 	out := &inventory.CircleCI{Source: inventory.CircleCISourceStatuses}
 	head, truncated := headStatus(n)
@@ -34,10 +35,14 @@ func circleCI(n *repoNode, run *inventory.LastRun) *inventory.CircleCI {
 		if sr := run.Result.Step(reconcile.StepCircleCI); sr != nil && sr.Verdict != reconcile.VerdictSkipped {
 			out.Source = inventory.CircleCISourceBoth
 			setup = applyStep(out, run.Result.Mode, sr)
+			out.Webhook = stepWebhook(sr)
 		}
 	}
 	if !setup {
 		out.Unknown = append(out.Unknown, inventory.CircleCIFactSetupWorkflows)
+	}
+	if out.Webhook == nil {
+		out.Unknown = append(out.Unknown, inventory.CircleCIFactWebhook)
 	}
 	if head == nil && truncated && out.Source == inventory.CircleCISourceStatuses {
 		out.Unknown = append(out.Unknown, inventory.CircleCIFactFollowed)
@@ -77,6 +82,38 @@ func applyStep(out *inventory.CircleCI, mode reconcile.Mode, sr *reconcile.StepR
 	out.Followed = true
 	out.SetupWorkflows = ptr(!enable)
 	return true
+}
+
+// webhookPresent is how the engine's converged circleci step ends its
+// summary when the repository carries CircleCI's webhook (devctl
+// pkg/reposetup/reconcile, step_circleci.go): "followed, setup workflows on,
+// checkout key present, webhook present".
+const webhookPresent = "webhook present"
+
+// stepWebhook is CircleCI's webhook as the reconciler's circleci step
+// verified it: missing when the step reports it missing (finding
+// circleci-webhook-missing), present when a step without changes says so in
+// its summary. Nil otherwise, nothing is guessed: a failed step, an identity
+// that could not read the hooks (finding unchecked), a check run that plans
+// the follow, a step with changes, whose summary names no webhook, and a run
+// of an engine that did not verify the webhook yet, whose converged summary
+// ends at the checkout key.
+func stepWebhook(sr *reconcile.StepResult) *bool {
+	if sr.Verdict == reconcile.VerdictFailed {
+		return nil
+	}
+	for _, f := range sr.Findings {
+		switch f.Kind {
+		case reconcile.FindingCircleCIWebhookMissing:
+			return ptr(false)
+		case reconcile.FindingUnchecked:
+			return nil
+		}
+	}
+	if strings.HasSuffix(sr.Summary, webhookPresent) {
+		return ptr(true)
+	}
+	return nil
 }
 
 func hasChange(sr *reconcile.StepResult, prefix string) bool {

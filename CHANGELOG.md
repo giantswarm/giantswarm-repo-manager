@@ -42,6 +42,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- The record's `circleci` facts carry CircleCI's GitHub webhook
+  ([#110](https://github.com/giantswarm/giantswarm-repo-manager/issues/110)). The reconciler's circleci step verifies
+  the webhook CircleCI installs on the follow (devctl#2358), without which no push and no tag reaches CircleCI:
+  `circleci.webhook` is `false` when the step reports `circleci-webhook-missing`, `true` when a step without changes
+  ends its summary with `webhook present`, and absent, with `webhook` in `circleci.unknown`, when no run tells (a failed
+  step, hooks the run's identity cannot read, a check that plans the follow, a step with changes, a run of an engine
+  that did not verify the webhook yet). `devctl repo status` prints `webhook present` or `webhook missing` in its
+  `circleci` line. The record's circleci step keeps the reconciler's findings whatever its verdict, so a repair that
+  followed a project CircleCI then left without its webhook reads `reported` with `circleci-webhook-missing` and its
+  fix, not `ok`; a converged step's summary names the webhook.
+
 - A release nothing was published for is told to the team once, within minutes, whoever merged and however
   ([#107](https://github.com/giantswarm/giantswarm-repo-manager/issues/107)). The release watch
   (`inventory.releases.interval`, default 5m; `"0"` off) follows the latest release of every declared repository
@@ -63,6 +74,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- The engine is devctl v8.89.0, from v8.87.3: the circleci step verifies CircleCI's webhook (devctl#2358), a chart
+  scaffold carries the smoke test the app test suite runs (devctl#2356), and the `plans` flavour with the template
+  `giantswarm/template-plans` (devctl#2355).
 - The engine is devctl v8.87.3, from v8.87.1: the CircleCI client reads public projects without a token
   (`Config.Anonymous`), the engine's release step counts only the newest run of every workflow, and the `red-release`
   fix names the rerun from failed (devctl#2353).

@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"regexp"
 	"sort"
+	"strings"
 	"sync"
 	"time"
 
@@ -247,10 +248,17 @@ func (c *Collector) watchRelease(ctx context.Context, name string, node *release
 	rec.Setup.Release = w
 	rewriteReleaseStep(rec)
 	rec.Finalize()
-	if w.Untold() && c.released != nil {
-		if told := c.released(ctx, rec); told != "" {
-			w.Told, w.ToldAt = told, ptr(now)
-			out.told = true
+	if w.Untold() {
+		if before := toldByTheRun(rec, w.Tag); before != "" {
+			// The completion path told the team about this release from a
+			// reconciler run's finding before the watch read the tag: once
+			// is enough.
+			w.Told, w.ToldAt = before, ptr(now)
+		} else if c.released != nil {
+			if told := c.released(ctx, rec); told != "" {
+				w.Told, w.ToldAt = told, ptr(now)
+				out.told = true
+			}
 		}
 	}
 	if err := c.store.Put(ctx, rec); err != nil {
@@ -262,6 +270,20 @@ func (c *Collector) watchRelease(ctx context.Context, name string, node *release
 		c.log.Info("release settled", "repository", key, "tag", w.Tag, "state", w.State, "was", before, "failedJobs", w.FailedJobs, "reason", w.Reason, "told", w.Told != "")
 	}
 	return out
+}
+
+// toldByTheRun is the sentence a reconciler run's release finding told the
+// team about tag, when the completion path posted one (setup.told) before
+// the watch settled the release: the engine's and the record's release
+// findings both open with "release <tag> of <owner/name>". Empty when none.
+func toldByTheRun(rec *inventory.Record, tag string) string {
+	prefix := rec.Name + ": release " + tag + " of " + rec.Repository
+	for _, s := range rec.Setup.Told {
+		if strings.HasPrefix(s, prefix) {
+			return s
+		}
+	}
+	return ""
 }
 
 // outsideReason says why a release is outside the watch's reach before any

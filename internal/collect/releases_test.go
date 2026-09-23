@@ -291,3 +291,19 @@ func TestFailedJobsNameHow(t *testing.T) {
 		t.Errorf("failedJobs: %s", got)
 	}
 }
+
+// TestToldByTheRun: a release the completion path told from a reconciler
+// run's finding is found in setup.told by its opening words, for that tag
+// alone.
+func TestToldByTheRun(t *testing.T) {
+	rec := &inventory.Record{Repository: "giantswarm/y", Name: "y", Setup: inventory.Setup{Told: []string{
+		"y: the repository has the default icon — upload one under Settings",
+		"y: release v0.1.0 of giantswarm/y has no CircleCI status on its commit: nothing was built or published for the tag — cut the next tag, or trigger the tag's pipeline by hand",
+	}}}
+	if got := toldByTheRun(rec, "v0.1.0"); !strings.HasPrefix(got, "y: release v0.1.0 of giantswarm/y has no CircleCI status") {
+		t.Errorf("v0.1.0: %q", got)
+	}
+	if got := toldByTheRun(rec, "v0.2.0"); got != "" {
+		t.Errorf("v0.2.0 was not told: %q", got)
+	}
+}

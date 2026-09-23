@@ -9,6 +9,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- The engine's read-mode checks run with the devctl GitHub App's numeric id (`--devctl-app-id`, `DEVCTL_APP_ID`; the
+  chart's `inventory.engine.devctlAppID`, default 5025978, the App of the reconciler in giantswarm/github), so the
+  protection step compares the ruleset `devctl: default branch` in full, its bypass list included (the devctl App, the
+  owning team and the repository admins for pull requests, as the reconciler writes them), and plans a repository still
+  on classic protection as the reconciler would: create the ruleset, remove the classic protection. The check writes
+  nothing. Without the id the step compared the rules alone once devctl reads the ruleset first (devctl#2341), and
+  before that reported every aligned repository as `protection drift: protect main …` with the advisory
+  `rulesets-not-enabled`, "not converged", although the reconciler's nightly run had written the ruleset and removed the
+  classic protection. The create path (`create_repository`, repair mode as the person) is unchanged: a new repository
+  gets classic protection, which the reconciler's next run moves to the ruleset.
+
 ### Fixed
 
 - The engine is devctl v8.82.7, from v8.82.1. Every declared repository read *not in sync* with `settings drift:

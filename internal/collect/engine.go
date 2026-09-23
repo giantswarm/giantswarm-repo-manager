@@ -21,17 +21,25 @@ import (
 // it skips its circleci and release steps; the collector writes those two
 // from the record's own sources, the head's statuses and the reconciler's
 // run (fillClientlessSteps), so the result reads like the reconciler's.
+// The runner gets the devctl App's id, the reconciler's bypass actor on the
+// ruleset `devctl: default branch`, so the protection step compares the
+// ruleset's bypass list as the reconciler writes it and plans a repository
+// still on classic protection as the reconciler would; the check writes
+// nothing. Without the id the step compares the ruleset's rules alone and
+// says so in its summary.
 type Engine struct {
-	org    string
-	reader *gh.Reader
-	log    *logrus.Logger
+	org         string
+	reader      *gh.Reader
+	devctlAppID int64
+	log         *logrus.Logger
 }
 
-// NewEngine builds the checker.
-func NewEngine(org string, reader *gh.Reader) *Engine {
+// NewEngine builds the checker. devctlAppID is the numeric id of the devctl
+// GitHub App; 0 leaves the ruleset's bypass list uncompared.
+func NewEngine(org string, reader *gh.Reader, devctlAppID int64) *Engine {
 	log := logrus.New()
 	log.SetOutput(io.Discard)
-	return &Engine{org: org, reader: reader, log: log}
+	return &Engine{org: org, reader: reader, devctlAppID: devctlAppID, log: log}
 }
 
 // Check runs every step in check mode for the accepted entry.
@@ -44,7 +52,7 @@ func (e *Engine) Check(ctx context.Context, team string, entry reposetup.Entry) 
 	if err != nil {
 		return nil, fmt.Errorf("engine: github client: %w", err)
 	}
-	runner := &reconcile.Runner{GitHub: e.reader.REST(), Checks: checks, Log: io.Discard}
+	runner := &reconcile.Runner{GitHub: e.reader.REST(), Checks: checks, DevctlAppID: e.devctlAppID, Log: io.Discard}
 	res, err := runner.Run(ctx, reconcile.Request{Owner: e.org, Team: team, Entry: entry, Mode: reconcile.ModeCheck})
 	if err != nil {
 		return nil, fmt.Errorf("engine: %w", err)

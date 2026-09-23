@@ -59,6 +59,9 @@ spec:
               value: {{ .Values.inventory.sweep.graphqlBudgetFloor | int64 | quote }}
             - name: SWEEP_TEAMS
               value: {{ join "," .Values.inventory.sweep.teams | quote }}
+            {{- /* int64: Helm reads a large number as a float and would render 5.025978e+06 */}}
+            - name: DEVCTL_APP_ID
+              value: {{ .Values.inventory.engine.devctlAppID | int64 | quote }}
             - name: RENOVATE_ACTIVE_DAYS
               value: {{ .Values.inventory.renovate.activeDays | int64 | quote }}
             - name: RECONCILER_POLL_INTERVAL

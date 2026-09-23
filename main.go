@@ -48,6 +48,7 @@ type options struct {
 
 	githubAPIURL, githubAppPrivateKeyFile string
 	githubAppID, githubAppInstallationID  int64
+	devctlAppID                           int64
 
 	teamFilesRepository, teamFilesRef                                  string
 	reconcilerWorkflow                                                 string
@@ -79,6 +80,7 @@ func parseFlags(args []string) (*options, error) {
 	f.Int64Var(&o.githubAppID, "github-app-id", envInt64("GITHUB_APP_ID"), "Id of the read-only GitHub App giantswarm-repo-manager-inventory, the identity of the unattended reads (GITHUB_APP_ID)")
 	f.Int64Var(&o.githubAppInstallationID, "github-app-installation-id", envInt64("GITHUB_APP_INSTALLATION_ID"), "The inventory App's installation id on the org (GITHUB_APP_INSTALLATION_ID)")
 	f.StringVar(&o.githubAppPrivateKeyFile, "github-app-private-key-file", envOr("GITHUB_APP_PRIVATE_KEY_FILE", ""), "PEM private key of the inventory App (GITHUB_APP_PRIVATE_KEY_FILE)")
+	f.Int64Var(&o.devctlAppID, "devctl-app-id", envInt64("DEVCTL_APP_ID"), "Numeric id of the devctl GitHub App, the reconciler's bypass actor on the ruleset devctl: default branch: the engine's read-mode protection step compares the ruleset's bypass list with it; 0 compares the rules alone (DEVCTL_APP_ID)")
 	f.StringVar(&o.teamFilesRepository, "team-files-repository", envOr("TEAM_FILES_REPOSITORY", teamfiles.DefaultRepository), "owner/name of the repository that holds the team files and policy files (TEAM_FILES_REPOSITORY)")
 	f.StringVar(&o.teamFilesRef, "team-files-ref", envOr("TEAM_FILES_REF", teamfiles.DefaultRef), "Branch the team files are read from and pull requests target (TEAM_FILES_REF)")
 	f.StringVar(&o.reviewsURL, "reviews-url", envOr("REVIEWS_URL", ""), "klaus-gateway's base URL for the team-review endpoint (POST /reviews, /notices); empty leaves the asks undelivered (REVIEWS_URL)")
@@ -145,7 +147,7 @@ func run(ctx context.Context, o *options, log *slog.Logger) error {
 			Org: o.org, EngineChecks: o.sweepEngineChecks,
 			Concurrency: o.sweepConcurrency, BudgetFloor: o.graphqlBudgetFloor,
 			Reconciler: collect.ReconcilerOptions{Repository: o.teamFilesRepository, Workflow: o.reconcilerWorkflow, PollInterval: o.reconcilerPollInterval},
-		}, reader, deps.Inventory, collect.NewEngine(o.org, reader), log)
+		}, reader, deps.Inventory, collect.NewEngine(o.org, reader, o.devctlAppID), log)
 	}
 	if o.sweepOnce {
 		if store != nil {

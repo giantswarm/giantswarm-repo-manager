@@ -6,11 +6,13 @@ package tools
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"runtime/debug"
 	"time"
 
+	"github.com/giantswarm/devctl/v8/pkg/reposetup"
 	"github.com/giantswarm/devctl/v8/pkg/reposetup/reconcile"
 	"github.com/mark3labs/mcp-go/mcp"
 	mcpserver "github.com/mark3labs/mcp-go/server"
@@ -92,7 +94,13 @@ type Deps struct {
 	// with the caller's token (giantswarm/template is private); tests set a
 	// fixed one.
 	Scaffold reconcile.ScaffoldRenderer
-	Log      *slog.Logger
+	// Schema is the repositories schema of the process: the one the
+	// validator checks every declaration against and the one get_info
+	// reports the enumerations of (the collector's validator is handed the
+	// same instance). nil leaves validation refused and get_info's schema
+	// an error: nothing stands in.
+	Schema *reposetup.Schema
+	Log    *slog.Logger
 }
 
 // NewMCPServer builds the MCP server with every tool registered.
@@ -118,7 +126,7 @@ func (ts *Tools) MCPServer() *mcpserver.MCPServer {
 		mcpserver.WithInstructions("Giant Swarm's repository set-up service. The team files in giantswarm/github (repositories/team-*.yaml) are the desired state of every repository; GitHub is the reality. Call get_info first: it reports who you are to this server (the GitHub login of the token muster put on the call — your own authorization of the App giantswarm-repo-manager), the identity of the unattended reads — the read-only App giantswarm-repo-manager-inventory — and the inventory store. The inventory (list_repositories, get_repository) is one record per repository of the org — declaration, GitHub reality, set-up state, findings — refreshed by a scheduled sweep, after every reconciler run and on refresh_repository; every record carries its age. Every write tool takes dryRun and mode; the only write mode is commit — a team-file pull request opened as you — and apply is refused."),
 	)
 	s.AddTool(mcp.NewTool(ToolGetInfo,
-		mcp.WithDescription("Read-only. Report the service version and how this call is authenticated: the caller (the GitHub login and id GET /user answered for the bearer muster put on the call — the person's own user token through the App giantswarm-repo-manager) and the authorization server pinned for it; whether your credential reaches the team files (teamFiles.readable); the identity of the unattended inventory reads (the read-only App giantswarm-repo-manager-inventory, or not configured) and the inventory store; where the inventory's CircleCI facts come from (commit statuses and the reconciler's run artifact, and for the latest release the release watch's read of the tag's own pipeline — circleci.tagPipelines says whether it reads anonymously, which CircleCI answers for public projects, or with a configured token); the team-review endpoint (reviews.configured; when configured, reviews.url, the gateway the asks and notices go to, and reviews.audience, the audience of the projected ServiceAccount token it admits; reviews.debugChannel when one channel receives every ask and notice instead of the channels the per-team policy files name); the engine (devctl reposetup package) and the write modes. Call first."),
+		mcp.WithDescription("Read-only. Report the service version and how this call is authenticated: the caller (the GitHub login and id GET /user answered for the bearer muster put on the call — the person's own user token through the App giantswarm-repo-manager) and the authorization server pinned for it; whether your credential reaches the team files (teamFiles.readable); the identity of the unattended inventory reads (the read-only App giantswarm-repo-manager-inventory, or not configured) and the inventory store; where the inventory's CircleCI facts come from (commit statuses and the reconciler's run artifact, and for the latest release the release watch's read of the tag's own pipeline — circleci.tagPipelines says whether it reads anonymously, which CircleCI answers for public projects, or with a configured token); the team-review endpoint (reviews.configured; when configured, reviews.url, the gateway the asks and notices go to, and reviews.audience, the audience of the projected ServiceAccount token it admits; reviews.debugChannel when one channel receives every ask and notice instead of the channels the per-team policy files name); the engine (devctl reposetup package); the declaration vocabulary (schema: the values the validator's repositories schema allows for componentType, gen.flavours, gen.language, visibility and lifecycle, in the schema's order, and its origin — the copy embedded in the engine's devctl version — or schema.error when they cannot be read); and the write modes. Call first."),
 		mcp.WithReadOnlyHintAnnotation(true),
 	), t.getInfo)
 	t.registerInventory(s)
@@ -166,6 +174,7 @@ type Info struct {
 	CircleCI     CircleCIInfo       `json:"circleci"`
 	Reviews      ReviewsInfo        `json:"reviews"`
 	Engine       EngineInfo         `json:"engine"`
+	Schema       SchemaInfo         `json:"schema"`
 	Capabilities Capabilities       `json:"capabilities"`
 }
 
@@ -276,6 +285,59 @@ type EngineInfo struct {
 	Package string `json:"package"`
 }
 
+// ErrNoSchema is a validation while no repositories schema is configured.
+var ErrNoSchema = errors.New("no repositories schema configured: nothing validates a declaration")
+
+// SchemaInfo is a declaration's vocabulary: the values the validator's
+// repositories schema allows for each enumerated field, in the schema's
+// order, read from the schema itself. Error replaces the lists when a field
+// cannot be read: never an empty list.
+type SchemaInfo struct {
+	// Origin is where the schema came from: `embedded (<module> <version>)`,
+	// the copy shipped with the engine's devctl version.
+	Origin         string   `json:"origin,omitempty"`
+	ComponentTypes []string `json:"componentTypes,omitempty"`
+	Flavours       []string `json:"flavours,omitempty"`
+	Languages      []string `json:"languages,omitempty"`
+	Visibilities   []string `json:"visibilities,omitempty"`
+	Lifecycles     []string `json:"lifecycles,omitempty"`
+	Error          string   `json:"error,omitempty"`
+}
+
+// schemaInfo reads the enumerations from the validator's schema.
+func (t *tools) schemaInfo() SchemaInfo {
+	s := t.d.Schema
+	if s == nil {
+		return SchemaInfo{Error: ErrNoSchema.Error()}
+	}
+	info := SchemaInfo{Origin: string(s.Origin)}
+	if s.Origin == reposetup.SchemaOriginEmbedded {
+		info.Origin = fmt.Sprintf("%s (%s %s)", s.Origin, engineModule, EngineVersion())
+	}
+	var errs []error
+	for _, f := range []struct {
+		path string
+		into *[]string
+	}{
+		{"componentType", &info.ComponentTypes},
+		{"gen.flavours", &info.Flavours},
+		{"gen.language", &info.Languages},
+		{"visibility", &info.Visibilities},
+		{"lifecycle", &info.Lifecycles},
+	} {
+		values, err := s.FieldValues(f.path)
+		if err != nil {
+			errs = append(errs, fmt.Errorf("%s: %w", f.path, err))
+			continue
+		}
+		*f.into = values
+	}
+	if err := errors.Join(errs...); err != nil {
+		return SchemaInfo{Origin: info.Origin, Error: err.Error()}
+	}
+	return info
+}
+
 // Capabilities are the write modes.
 type Capabilities struct {
 	Modes        []string `json:"modes"`
@@ -291,6 +353,7 @@ func (t *tools) getInfo(ctx context.Context, _ mcp.CallToolRequest) (*mcp.CallTo
 		CircleCI:   CircleCIInfo{Source: inventory.CircleCISourceBoth, TagPipelines: t.d.tagPipelines()},
 		Reviews:    t.reviews(),
 		Engine:     EngineInfo{Module: engineModule, Version: EngineVersion(), Package: engineModule + "/pkg/reposetup"},
+		Schema:     t.schemaInfo(),
 		Capabilities: Capabilities{
 			Modes:        []string{string(ModeCommit)},
 			ApplyRefused: true,

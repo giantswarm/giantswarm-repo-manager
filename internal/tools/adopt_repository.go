@@ -226,7 +226,7 @@ func (t *tools) existingVerdict(ctx context.Context, team string, d reposetup.De
 	if err != nil {
 		return reposetup.Entry{}, err
 	}
-	res, err := t.validator().Validate(ctx, reposetup.Request{TeamFile: tf, Mode: reposetup.ModeExisting})
+	res, err := t.runValidator(ctx, reposetup.Request{TeamFile: tf, Mode: reposetup.ModeExisting})
 	if err != nil {
 		return reposetup.Entry{}, err
 	}

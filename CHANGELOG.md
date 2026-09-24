@@ -14,9 +14,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `get_info` reports the team-review endpoint's wiring: `reviews.url`, the gateway the asks and notices go to, and
   `reviews.audience`, the audience of the projected ServiceAccount token it admits (the chart passes `reviews.audience`
   as `REVIEWS_AUDIENCE`); without `REVIEWS_URL` the object stays `configured: false` alone.
+- `get_info` reports the declaration vocabulary, `schema: {origin, componentTypes, flavours, languages, visibilities,
+  lifecycles}`: the values the validator's repositories schema allows, read from the one schema instance the tools and
+  the collector validate against (the copy embedded in the engine's devctl version, which `origin` names); a field that
+  cannot be read is `schema.error`, never an empty list.
 
 ### Changed
 
+- devctl 8.98.1 (was 8.96.0): the engine's `(*reposetup.Schema).FieldValues`
+  ([devctl#2405](https://github.com/giantswarm/devctl/issues/2405)) reads `get_info`'s schema lists; the validator's
+  schema is built once at startup instead of on every validation.
 - The chart's Valkey is the `valkey` app 0.1.7 (was 0.1.4; 0.1.5 lacked its exporter image). From 0.1.5 on the
   subchart's config checksums are pod annotations, so the first upgrade restarts the Valkey pod once.
 - devctl 8.96.0: the team-file schema the inventory and `create_repository` validate entries against knows

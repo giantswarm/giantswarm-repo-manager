@@ -23,6 +23,7 @@ import (
 	"time"
 
 	"github.com/giantswarm/devctl/v8/pkg/circleciclient"
+	"github.com/giantswarm/devctl/v8/pkg/reposetup"
 
 	"github.com/alicebob/miniredis/v2"
 	"github.com/mark3labs/mcp-go/client"
@@ -69,7 +70,10 @@ type stack struct {
 	store   *inventory.Store
 	col     *collect.Collector
 	checker *fakeChecker
-	log     *slog.Logger
+	// schema is the stack's one repositories schema, as main builds it:
+	// the collectors and the tools validate against the same instance.
+	schema *reposetup.Schema
+	log    *slog.Logger
 	// offset moves the collectors' clock: advance lets a pending run's
 	// window run out without waiting.
 	offset atomic.Int64
@@ -84,7 +88,7 @@ func (st *stack) newCollector(floor int) *collect.Collector {
 	if err != nil {
 		panic(err)
 	}
-	return collect.New(collect.Options{Org: org, EngineChecks: true, Concurrency: 2, BudgetFloor: floor, Now: st.now,
+	return collect.New(collect.Options{Org: org, EngineChecks: true, Concurrency: 2, BudgetFloor: floor, Now: st.now, Schema: st.schema,
 		Reconciler: collect.ReconcilerOptions{Repository: org + "/github"},
 		Releases:   collect.ReleaseOptions{Interval: time.Minute, Grace: 10 * time.Minute, CircleCI: cc, Anonymous: true}}, st.app.Reader(), st.store, st.checker, st.log)
 }
@@ -164,14 +168,18 @@ func newStackWith(t *testing.T, debugChannel string) *stack {
 	if err != nil {
 		t.Fatal(err)
 	}
-	st := &stack{ghs: ghs, gw: gw, cc: newFakeCircleCI(t), app: app, store: store, checker: &fakeChecker{release: ghs.org.latestTag}, log: log}
+	schema, err := reposetup.EmbeddedSchema()
+	if err != nil {
+		t.Fatal(err)
+	}
+	st := &stack{ghs: ghs, gw: gw, cc: newFakeCircleCI(t), app: app, store: store, checker: &fakeChecker{release: ghs.org.latestTag}, schema: schema, log: log}
 	st.col = st.newCollector(0)
 	reviews, err := review.New(review.Config{BaseURL: gws.URL, TokenFile: tokenFile, DebugChannel: debugChannel,
 		Channels: map[string]string{teamPlaneteers: planeteersChannel, "standup-planeteers": planeteersStandup, debugChannelName: debugChannelID}})
 	if err != nil {
 		t.Fatal(err)
 	}
-	ts := tools.New(tools.Deps{Version: testVersion, GitHubAPIURL: apiURL, AuthorizationServer: server.DefaultAuthorizationServer, App: app, Inventory: store, Collector: st.col, Log: log,
+	ts := tools.New(tools.Deps{Version: testVersion, GitHubAPIURL: apiURL, AuthorizationServer: server.DefaultAuthorizationServer, App: app, Inventory: store, Collector: st.col, Schema: schema, Log: log,
 		TeamFilesRepository: org + "/github", TeamFilesRef: mainBranch, SweepTeams: []string{team, teamPlaneteers}, WatchInterval: 20 * time.Millisecond, WatchSettle: watchSettle,
 		Review:   reviews,
 		Scaffold: fakeScaffold{}})

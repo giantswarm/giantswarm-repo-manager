@@ -34,6 +34,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- A declaration whose repository is gone reads as the reconciler reads it: an entry declared `lifecycle: deleted` is
+  the record of the deletion and carries no `declared-but-gone` finding (a repository deleted through the Repositories
+  page's Delete had shown the finding with the fix "add the entry back by creating the repository … or remove the
+  entry"); an archived entry's fix is to record the deletion (`lifecycle: deleted`) or remove the entry, and any other
+  entry's is to create the repository or, when it was deleted on purpose, to record the deletion.
 - The record's release step no longer reads a release built from the default branch's build
   ([devctl#2408](https://github.com/giantswarm/devctl/issues/2408)). A release cut on the default branch head — every
   creation's `v0.1.0` — carries that branch's pipeline's statuses on its commit, and for a repository whose tag

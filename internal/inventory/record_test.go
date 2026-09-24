@@ -51,6 +51,19 @@ func TestFindingsDeclaredGoneAndUndeclared(t *testing.T) {
 	if len(gone.Findings) != 1 || gone.Findings[0].Kind != FindingDeclaredButGone || gone.Findings[0].Source != FindingSourceInventory {
 		t.Errorf("gone: %+v", gone.Findings)
 	}
+	if !strings.Contains(gone.Findings[0].Fix, "create the repository") || !strings.Contains(gone.Findings[0].Fix, "lifecycle: deleted") {
+		t.Errorf("gone fix: %s", gone.Findings[0].Fix)
+	}
+	deleted := &Record{Repository: "giantswarm/deleted", Declaration: &Declaration{Team: "team-bumblebee", File: "repositories/team-bumblebee.yaml", Lifecycle: "deleted", Accepted: true}}
+	deleted.Finalize()
+	if len(deleted.Findings) != 0 {
+		t.Errorf("an entry declared deleted is the record of the deletion, not a finding: %+v", deleted.Findings)
+	}
+	archivedGone := &Record{Repository: "giantswarm/archived-gone", Declaration: &Declaration{Team: "team-bumblebee", File: "repositories/team-bumblebee.yaml", Lifecycle: "archived", Accepted: true}}
+	archivedGone.Finalize()
+	if len(archivedGone.Findings) != 1 || archivedGone.Findings[0].Kind != FindingDeclaredButGone || strings.Contains(archivedGone.Findings[0].Fix, "create the repository") || !strings.Contains(archivedGone.Findings[0].Fix, "lifecycle: deleted") {
+		t.Errorf("archived and gone: %+v", archivedGone.Findings)
+	}
 	stray := &Record{Repository: "giantswarm/stray", Reality: &Reality{}}
 	stray.Finalize()
 	if len(stray.Findings) != 1 || stray.Findings[0].Kind != FindingUndeclaredOnGitHub {

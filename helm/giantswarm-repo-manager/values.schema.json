@@ -211,7 +211,11 @@
                         },
                         "interval": {
                             "type": "string",
-                            "description": "Full sweep over the org every interval (a Go duration); `\"0\"` turns the schedule off. The first sweep runs at start when the last one is older than the interval."
+                            "description": "Full sweep over the org every interval (a Go duration); `\"0\"` turns the schedule off. The first sweep runs at start when the last one is older than the interval; an unfinished sweep younger than the interval, one a restarted pod left, is taken up at start and keeps the records it wrote."
+                        },
+                        "restBudgetFloor": {
+                            "type": "integer",
+                            "description": "Pause a sweep's engine checks until the REST budget resets when its remaining requests fall below this, instead of failing the remaining checks with GitHub's rate-limit refusal; 0 never pauses."
                         },
                         "teams": {
                             "type": "array",

@@ -48,6 +48,7 @@ type options struct {
 	sweepConcurrency              int
 	renovateActiveDays            int
 	graphqlBudgetFloor            int
+	restBudgetFloor               int
 
 	githubAPIURL, githubAppPrivateKeyFile string
 	githubAppID, githubAppInstallationID  int64
@@ -78,6 +79,7 @@ func parseFlags(args []string) (*options, error) {
 	f.IntVar(&o.renovateActiveDays, "renovate-active-days", int(envInt64Default("RENOVATE_ACTIVE_DAYS", 180)), "Days within which a Renovate pull request or commit counts as Renovate activity — list_repositories' renovate: active | inactive (RENOVATE_ACTIVE_DAYS)")
 	f.StringVar(&o.sweepTeams, "sweep-teams", envOr("SWEEP_TEAMS", tools.DefaultSweepTeams), "Comma-separated GitHub team slugs whose members may start a sweep with sweep_inventory — the teams that own the manager and the reconciler (SWEEP_TEAMS)")
 	f.IntVar(&o.graphqlBudgetFloor, "graphql-budget-floor", int(envInt64Default("GRAPHQL_BUDGET_FLOOR", 0)), "Stop a sweep cleanly when the GraphQL budget's remaining points fall below this; 0 never stops (GRAPHQL_BUDGET_FLOOR)")
+	f.IntVar(&o.restBudgetFloor, "rest-budget-floor", int(envInt64Default("REST_BUDGET_FLOOR", 500)), "Pause a sweep's engine checks until the REST budget resets when its remaining requests fall below this; 0 never pauses (REST_BUDGET_FLOOR)")
 	f.BoolVar(&o.sweepOnce, "sweep-once", envBool("SWEEP_ONCE"), "Run one full sweep, print its summary as JSON and exit (SWEEP_ONCE)")
 	f.DurationVar(&o.reconcilerPollInterval, "reconciler-poll-interval", envDuration("RECONCILER_POLL_INTERVAL", collect.DefaultReconcilerPoll), "Read the reconciler workflow's completed runs from GitHub every interval and store their reconcile-<repository> artifacts as the repositories' setup.lastRun; every 30 s while an Align now is pending; 0 turns the poller off (RECONCILER_POLL_INTERVAL)")
 	f.StringVar(&o.reconcilerWorkflow, "reconciler-workflow", envOr("RECONCILER_WORKFLOW", teamfiles.ReconcilerWorkflow), "The reconciler's workflow file in the team files repository: the one align_repository dispatches and the poller reads the runs of (RECONCILER_WORKFLOW)")
@@ -175,7 +177,7 @@ func run(ctx context.Context, o *options, log *slog.Logger) error {
 	if reader != nil && deps.Inventory != nil {
 		deps.Collector = collect.New(collect.Options{
 			Org: o.org, EngineChecks: o.sweepEngineChecks, Schema: schema,
-			Concurrency: o.sweepConcurrency, BudgetFloor: o.graphqlBudgetFloor,
+			Concurrency: o.sweepConcurrency, BudgetFloor: o.graphqlBudgetFloor, RESTFloor: o.restBudgetFloor, Interval: o.sweepInterval,
 			Reconciler: collect.ReconcilerOptions{Repository: o.teamFilesRepository, Workflow: o.reconcilerWorkflow, PollInterval: o.reconcilerPollInterval},
 			Releases:   releases,
 		}, reader, deps.Inventory, collect.NewEngine(o.org, reader, o.devctlAppID), log)
@@ -222,7 +224,7 @@ func run(ctx context.Context, o *options, log *slog.Logger) error {
 			if deps.Collector != nil {
 				go deps.Collector.RunReconcilerPoll(runCtx)
 				go deps.Collector.RunReleaseWatch(runCtx)
-				deps.Collector.RunSchedule(runCtx, o.sweepInterval)
+				deps.Collector.RunSchedule(runCtx)
 			}
 		}()
 	}

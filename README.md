@@ -178,7 +178,9 @@ in read mode per accepted declaration (`inventory.sweep.engineChecks`); the prot
 ruleset's rules and reports its bypass list as not compared (`inventory.engine.devctlAppID` stays 0: GitHub shows a
 ruleset's bypass actors to identities that administer the repository, which the inventory App does not). `--sweep-once` runs one sweep and prints the
 summary (calls, GraphQL points, REST calls, duration); `inventory.sweep.graphqlBudgetFloor` stops a sweep cleanly when
-the budget runs low. The record and its findings are described in
+the budget runs low, `inventory.sweep.restBudgetFloor` pauses its engine checks until the REST budget resets. Each
+record is written as soon as it is built and checked, and a pod that starts during an unfinished sweep takes it up at
+once, keeping the records written since its start (`inventory:sweep-cursor`). The record and its findings are described in
 [`docs/inventory-record.md`](docs/inventory-record.md).
 
 ## What the tests prove
@@ -221,7 +223,9 @@ the budget runs low. The record and its findings are described in
   record per repository — declared and present, declared but gone, a refused declaration, undeclared, archived — with
   the findings, the engine's read-mode result, CircleCI and Renovate; the tools list the rows by name, filter them (`team`
   under `mine`, `archived`, `lifecycle` counting GitHub's archived flag) and refresh one; the reconciler's run is stored and
-  survives the next refresh; a sweep stops cleanly at the GraphQL budget floor. Every filter value of `list_repositories`
+  survives the next refresh; a sweep stops cleanly at the GraphQL budget floor; a sweep stopped mid-way twice is finished by
+  the third pod, which checks only what is left and writes the summary once (`internal/e2e/sweep_resume_test.go`); the
+  schedule takes an unfinished sweep up at once; the checks wait out the REST budget's end. Every filter value of `list_repositories`
   has a table test (`internal/tools/filter_test.go`).
 - `make scenario-test` — muster's own scenario harness (`tests/scenarios`) with a mocked GitHub: a backend
   registered the way this chart registers the server (OAuth mode, pinned to the App as the authorization

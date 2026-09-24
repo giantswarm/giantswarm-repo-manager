@@ -82,15 +82,22 @@ type stack struct {
 // newCollector builds another collector over the same store and fakes, with
 // a GraphQL budget floor.
 func (st *stack) newCollector(floor int) *collect.Collector {
+	return st.collectorWith(collect.Options{Concurrency: 2, BudgetFloor: floor}, st.checker, st.log)
+}
+
+// collectorWith builds another collector over the same store and fakes —
+// another pod — with opts' sweep tuning, the checker and the log.
+func (st *stack) collectorWith(opts collect.Options, checker collect.Checker, log *slog.Logger) *collect.Collector {
 	// The release watch reads the fake CircleCI anonymously, as the manager
 	// does without a token.
 	cc, err := circleciclient.New(circleciclient.Config{Anonymous: true, BaseURL: st.cc.URL})
 	if err != nil {
 		panic(err)
 	}
-	return collect.New(collect.Options{Org: org, EngineChecks: true, Concurrency: 2, BudgetFloor: floor, Now: st.now, Schema: st.schema,
-		Reconciler: collect.ReconcilerOptions{Repository: org + "/github"},
-		Releases:   collect.ReleaseOptions{Interval: time.Minute, Grace: 10 * time.Minute, CircleCI: cc, Anonymous: true}}, st.app.Reader(), st.store, st.checker, st.log)
+	opts.Org, opts.EngineChecks, opts.Now, opts.Schema = org, true, st.now, st.schema
+	opts.Reconciler = collect.ReconcilerOptions{Repository: org + "/github"}
+	opts.Releases = collect.ReleaseOptions{Interval: time.Minute, Grace: 10 * time.Minute, CircleCI: cc, Anonymous: true}
+	return collect.New(opts, st.app.Reader(), st.store, checker, log)
 }
 
 // watchReleases runs one pass of the release watch.

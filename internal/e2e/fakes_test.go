@@ -10,6 +10,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -60,6 +61,15 @@ type fakeGitHub struct {
 	// wrote and in which order.
 	mu     sync.Mutex
 	writes []string
+	// rest is the REST budget every REST answer reports in GitHub's
+	// rate-limit headers; nil sends none.
+	rest atomic.Pointer[fakeRESTBudget]
+}
+
+// fakeRESTBudget is the REST budget as GitHub's rate-limit headers carry it.
+type fakeRESTBudget struct {
+	remaining int
+	reset     time.Time
 }
 
 func newFakeGitHub(t *testing.T, logins map[string]string) *fakeGitHub {
@@ -114,6 +124,11 @@ func newFakeGitHub(t *testing.T, logins map[string]string) *fakeGitHub {
 		writeJSON(w, http.StatusOK, map[string]any{kLogin: login, kID: userID(login)})
 	})
 	g.Server = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if b := g.rest.Load(); b != nil && !strings.HasSuffix(r.URL.Path, "/graphql") {
+			w.Header().Set("X-Ratelimit-Remaining", strconv.Itoa(b.remaining))
+			w.Header().Set("X-Ratelimit-Limit", "5000")
+			w.Header().Set("X-Ratelimit-Reset", strconv.FormatInt(b.reset.Unix(), 10))
+		}
 		if r.Method != http.MethodGet {
 			g.mu.Lock()
 			g.writes = append(g.writes, r.Method+" "+r.URL.Path)

@@ -23,6 +23,9 @@ import (
 // channelID is the shape the gateway accepts: a Slack channel ID, not a name.
 var channelID = regexp.MustCompile(`^[CDG][A-Z0-9]{5,}$`)
 
+// DefaultAudience is the projected token's audience the gateway admits by default.
+const DefaultAudience = "klaus-gateway"
+
 // ErrNotConfigured says the gateway client is off (no URL).
 var ErrNotConfigured = errors.New("team-review endpoint not configured (REVIEWS_URL)")
 
@@ -32,6 +35,9 @@ type Config struct {
 	BaseURL string
 	// TokenFile is the projected ServiceAccount token, read per request.
 	TokenFile string
+	// Audience is the projected token's audience, the gateway's
+	// reviews.audience: the kubelet mints the token for it, get_info reports it.
+	Audience string
 	// Channels maps a policy file's channel names — slackChannel for asks,
 	// standupChannel for notices — to their Slack IDs: the gateway refuses
 	// names, and the policy files carry names today.
@@ -89,6 +95,22 @@ func (c *Client) DebugChannel() string {
 		return ""
 	}
 	return c.cfg.DebugChannel
+}
+
+// URL is the gateway's base URL, empty when the endpoint is off.
+func (c *Client) URL() string {
+	if c == nil {
+		return ""
+	}
+	return c.cfg.BaseURL
+}
+
+// Audience is the projected token's audience, empty when the endpoint is off.
+func (c *Client) Audience() string {
+	if c == nil {
+		return ""
+	}
+	return c.cfg.Audience
 }
 
 // Approve is the tool the Approve button calls as the clicking member.

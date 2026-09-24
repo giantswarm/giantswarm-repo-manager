@@ -52,12 +52,12 @@ type options struct {
 	githubAppID, githubAppInstallationID  int64
 	devctlAppID                           int64
 
-	teamFilesRepository, teamFilesRef                                  string
-	reconcilerWorkflow                                                 string
-	reconcilerPollInterval                                             time.Duration
-	releasesInterval, releasesGrace                                    time.Duration
-	circleciToken, circleciAPIURL                                      string
-	reviewsURL, reviewsTokenFile, reviewsChannels, reviewsDebugChannel string
+	teamFilesRepository, teamFilesRef                                                   string
+	reconcilerWorkflow                                                                  string
+	reconcilerPollInterval                                                              time.Duration
+	releasesInterval, releasesGrace                                                     time.Duration
+	circleciToken, circleciAPIURL                                                       string
+	reviewsURL, reviewsTokenFile, reviewsAudience, reviewsChannels, reviewsDebugChannel string
 
 	oauthEnabled                           bool
 	oauthBaseURL, oauthAuthorizationServer string
@@ -92,7 +92,8 @@ func parseFlags(args []string) (*options, error) {
 	f.StringVar(&o.circleciToken, "circleci-token", envOr("CIRCLECI_TOKEN", ""), "CircleCI API token for the release watch's reads; empty reads anonymously, which CircleCI answers for public projects alone, and a private repository's release reads unchecked (CIRCLECI_TOKEN)")
 	f.StringVar(&o.circleciAPIURL, "circleci-api-url", envOr("CIRCLECI_API_URL", ""), "CircleCI API v2 URL; empty is https://circleci.com/api/v2 (CIRCLECI_API_URL)")
 	f.StringVar(&o.reviewsURL, "reviews-url", envOr("REVIEWS_URL", ""), "klaus-gateway's base URL for the team-review endpoint (POST /reviews, /notices); empty leaves the asks undelivered (REVIEWS_URL)")
-	f.StringVar(&o.reviewsTokenFile, "reviews-token-file", envOr("REVIEWS_TOKEN_FILE", "/var/run/secrets/klaus-gateway/token"), "Projected ServiceAccount token (audience klaus-gateway) sent to the team-review endpoint (REVIEWS_TOKEN_FILE)")
+	f.StringVar(&o.reviewsTokenFile, "reviews-token-file", envOr("REVIEWS_TOKEN_FILE", "/var/run/secrets/klaus-gateway/token"), "Projected ServiceAccount token (audience reviews-audience) sent to the team-review endpoint (REVIEWS_TOKEN_FILE)")
+	f.StringVar(&o.reviewsAudience, "reviews-audience", envOr("REVIEWS_AUDIENCE", review.DefaultAudience), "Audience the reviews-token-file token is projected for, the gateway's reviews.audience; get_info reports it (REVIEWS_AUDIENCE)")
 	f.StringVar(&o.reviewsChannels, "reviews-channels", envOr("REVIEWS_CHANNELS", ""), "Comma-separated name=ID pairs mapping a policy file's slackChannel to its Slack channel ID (REVIEWS_CHANNELS)")
 	f.StringVar(&o.reviewsDebugChannel, "reviews-debug-channel", envOr("REVIEWS_DEBUG_CHANNEL", ""), "A channel that receives every ask and notice instead of the policy file's channel, the text naming that channel: a name reviews-channels resolves or a Slack channel ID; empty delivers to the policy file's channel (REVIEWS_DEBUG_CHANNEL)")
 	f.BoolVar(&o.oauthEnabled, "enable-oauth", envBool("OAUTH_ENABLED"), "Require a GitHub user token as the bearer of every MCP request — behind muster the person's own, through the App giantswarm-repo-manager — verified with GET /user; the caller and the token travel with the request (OAUTH_ENABLED)")
@@ -119,7 +120,7 @@ func main() {
 
 // run wires the components and serves until ctx is done.
 func run(ctx context.Context, o *options, log *slog.Logger) error {
-	reviews, err := review.New(review.Config{BaseURL: o.reviewsURL, TokenFile: o.reviewsTokenFile, Channels: channelMap(o.reviewsChannels), DebugChannel: o.reviewsDebugChannel})
+	reviews, err := review.New(review.Config{BaseURL: o.reviewsURL, TokenFile: o.reviewsTokenFile, Audience: o.reviewsAudience, Channels: channelMap(o.reviewsChannels), DebugChannel: o.reviewsDebugChannel})
 	if err != nil {
 		return err
 	}

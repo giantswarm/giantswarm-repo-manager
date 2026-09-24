@@ -180,9 +180,11 @@ reviews:
   # `POST /notices` into its `standupChannel`, authenticated with this pod's
   # projected ServiceAccount token for `audience`. Empty leaves the asks
   # undelivered; the tools say so and approving on GitHub stays equivalent.
+  # `get_info` reports it as `reviews.url` beside `reviews.configured`.
   gatewayURL: ""
   # -- The audience of the projected token — the gateway's `reviews.audience`;
-  # this ServiceAccount must be in its `reviews.allowedCallers`.
+  # this ServiceAccount must be in its `reviews.allowedCallers`. `get_info`
+  # reports it as `reviews.audience`.
   audience: klaus-gateway
   # -- Slack channel IDs by the channel names a team's policy file carries:
   # `slackChannel` (asks with an Approve button) and `standupChannel`

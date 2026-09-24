@@ -433,7 +433,7 @@
             "properties": {
                 "audience": {
                     "type": "string",
-                    "description": "The audience of the projected token — the gateway's `reviews.audience`; this ServiceAccount must be in its `reviews.allowedCallers`."
+                    "description": "The audience of the projected token — the gateway's `reviews.audience`; this ServiceAccount must be in its `reviews.allowedCallers`. `get_info` reports it as `reviews.audience`."
                 },
                 "channels": {
                     "type": "object",
@@ -446,7 +446,7 @@
                 },
                 "gatewayURL": {
                     "type": "string",
-                    "description": "klaus-gateway's base URL as reached from the pod (for example `http://klaus-gateway.agent-platform.svc:8080`): lifecycle and transfer asks go to `POST /reviews` into the team's `slackChannel`, notices (the giving team's transfer notice, what a reconciler run tells the team) to `POST /notices` into its `standupChannel`, authenticated with this pod's projected ServiceAccount token for `audience`. Empty leaves the asks undelivered; the tools say so and approving on GitHub stays equivalent."
+                    "description": "klaus-gateway's base URL as reached from the pod (for example `http://klaus-gateway.agent-platform.svc:8080`): lifecycle and transfer asks go to `POST /reviews` into the team's `slackChannel`, notices (the giving team's transfer notice, what a reconciler run tells the team) to `POST /notices` into its `standupChannel`, authenticated with this pod's projected ServiceAccount token for `audience`. Empty leaves the asks undelivered; the tools say so and approving on GitHub stays equivalent. `get_info` reports it as `reviews.url` beside `reviews.configured`."
                 }
             }
         },

@@ -7,6 +7,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/giantswarm/devctl/v8/pkg/reposetup"
 	"github.com/mark3labs/mcp-go/client"
 	"github.com/mark3labs/mcp-go/mcp"
 	mcpserver "github.com/mark3labs/mcp-go/server"
@@ -156,7 +157,7 @@ func TestValidateRepositoryTakesCreateRepositoryArguments(t *testing.T) {
 // TestCreateRepositoryDryRunIsTheEngineValidation: the dry run returns the
 // engine's Result — the rendered entry with defaults, the template, accepted.
 func TestCreateRepositoryDryRunIsTheEngineValidation(t *testing.T) {
-	c := newTestClient(t, NewMCPServer(Deps{Version: testVersion}))
+	c := newTestClient(t, NewMCPServer(Deps{Version: testVersion, Schema: embeddedSchema(t)}))
 	text, isErr := call(t, c, ToolCreateRepository, map[string]any{ArgDryRun: true, argTeam: testTeam, argEntry: validEntry})
 	if isErr {
 		t.Fatalf("dry run failed: %s", text)
@@ -273,6 +274,93 @@ func TestGetInfoReportsTheReviewEndpoint(t *testing.T) {
 			}
 		})
 	}
+}
+
+// embeddedSchema is the repositories schema main builds: the copy embedded in
+// the engine's devctl version.
+func embeddedSchema(t *testing.T) *reposetup.Schema {
+	t.Helper()
+	s, err := reposetup.EmbeddedSchema()
+	if err != nil {
+		t.Fatal(err)
+	}
+	return s
+}
+
+// vocabularySchema is a repositories schema with one enum per reported
+// field; lifecycle is the document's last field so a case can drop its enum.
+const vocabularySchema = `{"$schema": "https://json-schema.org/draft/2020-12/schema", "type": "array", "items": {"type": "object", "properties": {
+	"componentType": {"type": "string", "enum": ["service", "library"]},
+	"gen": {"type": "object", "properties": {
+		"flavours": {"type": "array", "items": {"type": "string", "enum": ["app", "cli"]}},
+		"language": {"type": "string", "enum": ["go", "generic"]}}},
+	"visibility": {"type": "string", "enum": ["public", "private"]},
+	"lifecycle": {"type": "string"LIFECYCLE}}}}`
+
+// TestGetInfoReportsTheSchemaVocabulary: get_info's schema is the
+// validator's schema's enumerations, each field in its list in the schema's
+// order, with the origin; a field the lists cannot be read from, or no
+// schema at all, is schema.error and no list.
+func TestGetInfoReportsTheSchemaVocabulary(t *testing.T) {
+	compile := func(lifecycle string) *reposetup.Schema {
+		s, err := reposetup.CompileSchema([]byte(strings.Replace(vocabularySchema, "LIFECYCLE", lifecycle, 1)), reposetup.SchemaOriginFile)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return s
+	}
+	noEnum := compile("")
+	_, noEnumErr := noEnum.FieldValues("lifecycle")
+	if noEnumErr == nil {
+		t.Fatal("lifecycle without an enum has values")
+	}
+	noEnumReport, _ := json.Marshal(SchemaInfo{Origin: "file", Error: "lifecycle: " + noEnumErr.Error()})
+	cases := []struct {
+		name   string
+		schema *reposetup.Schema
+		want   string
+	}{
+		{"every field enumerated", compile(`, "enum": ["active", "deprecated"]`),
+			`{"origin":"file","componentTypes":["service","library"],"flavours":["app","cli"],"languages":["go","generic"],"visibilities":["public","private"],"lifecycles":["active","deprecated"]}`},
+		{"a field without an enum", noEnum, string(noEnumReport)},
+		{"no schema", nil, `{"error":"` + ErrNoSchema.Error() + `"}`},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := schemaReport(t, Deps{Version: testVersion, Schema: tc.schema}); got != tc.want {
+				t.Errorf("schema: got %s, want %s", got, tc.want)
+			}
+		})
+	}
+	t.Run("embedded", func(t *testing.T) {
+		var got SchemaInfo
+		if err := json.Unmarshal([]byte(schemaReport(t, Deps{Version: testVersion, Schema: embeddedSchema(t)})), &got); err != nil {
+			t.Fatal(err)
+		}
+		if want := "embedded (" + engineModule + " " + EngineVersion() + ")"; got.Origin != want || got.Error != "" {
+			t.Errorf("schema: origin %q error %q, want origin %q", got.Origin, got.Error, want)
+		}
+	})
+}
+
+// schemaReport is get_info's schema object, compacted.
+func schemaReport(t *testing.T, d Deps) string {
+	t.Helper()
+	text, isErr := call(t, newTestClient(t, NewMCPServer(d)), ToolGetInfo, nil)
+	if isErr {
+		t.Fatal(text)
+	}
+	var info struct {
+		Schema json.RawMessage `json:"schema"`
+	}
+	if err := json.Unmarshal([]byte(text), &info); err != nil {
+		t.Fatal(err)
+	}
+	var got bytes.Buffer
+	if err := json.Compact(&got, info.Schema); err != nil {
+		t.Fatal(err)
+	}
+	return got.String()
 }
 
 // TestParseEntriesOptsEveryEntryIn: the creation is the repository's opt-in

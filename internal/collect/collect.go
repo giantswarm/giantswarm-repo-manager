@@ -47,6 +47,10 @@ type Options struct {
 	// Releases tunes the release watch: the latest release of every declared
 	// repository followed on CircleCI by its tag's own pipeline.
 	Releases ReleaseOptions
+	// Schema is the repositories schema every declaration is validated
+	// against: the process's one instance, the tools' validator and get_info
+	// read the same. nil fails the sweep's team-file read: nothing stands in.
+	Schema *reposetup.Schema
 	// Now is the clock; nil is time.Now.
 	Now func() time.Time
 }

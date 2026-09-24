@@ -28,6 +28,7 @@ import (
 	"time"
 
 	"github.com/giantswarm/devctl/v8/pkg/circleciclient"
+	"github.com/giantswarm/devctl/v8/pkg/reposetup"
 
 	"github.com/giantswarm/giantswarm-repo-manager/internal/collect"
 	"github.com/giantswarm/giantswarm-repo-manager/internal/gh"
@@ -124,7 +125,14 @@ func run(ctx context.Context, o *options, log *slog.Logger) error {
 	if err != nil {
 		return err
 	}
-	deps := tools.Deps{Version: version(), GitHubAPIURL: o.githubAPIURL, Log: log,
+	// The one repositories schema of the process: the copy embedded in the
+	// engine's devctl version, validated against by the tools and the
+	// collector alike and reported by get_info.
+	schema, err := reposetup.EmbeddedSchema()
+	if err != nil {
+		return fmt.Errorf("repositories schema: %w", err)
+	}
+	deps := tools.Deps{Version: version(), GitHubAPIURL: o.githubAPIURL, Log: log, Schema: schema,
 		TeamFilesRepository: o.teamFilesRepository, TeamFilesRef: o.teamFilesRef, ReconcilerWorkflow: o.reconcilerWorkflow, SweepTeams: splitList(o.sweepTeams),
 		RenovateActive: time.Duration(o.renovateActiveDays) * 24 * time.Hour,
 		Review:         reviews}
@@ -166,7 +174,7 @@ func run(ctx context.Context, o *options, log *slog.Logger) error {
 	}
 	if reader != nil && deps.Inventory != nil {
 		deps.Collector = collect.New(collect.Options{
-			Org: o.org, EngineChecks: o.sweepEngineChecks,
+			Org: o.org, EngineChecks: o.sweepEngineChecks, Schema: schema,
 			Concurrency: o.sweepConcurrency, BudgetFloor: o.graphqlBudgetFloor,
 			Reconciler: collect.ReconcilerOptions{Repository: o.teamFilesRepository, Workflow: o.reconcilerWorkflow, PollInterval: o.reconcilerPollInterval},
 			Releases:   releases,

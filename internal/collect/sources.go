@@ -125,11 +125,10 @@ func (c *Collector) parseSources(ctx context.Context, data *sourcesData, src *so
 	if data.GitHub == nil || data.GitHub.TeamFiles == nil {
 		return fmt.Errorf("sources: %s/%s has no %s directory", c.opts.Org, TeamFilesRepository, TeamFilesDir)
 	}
-	schema, err := reposetup.EmbeddedSchema()
-	if err != nil {
-		return fmt.Errorf("sources: engine schema: %w", err)
+	if c.opts.Schema == nil {
+		return errors.New("sources: no repositories schema configured")
 	}
-	validator := reposetup.Validator{Schema: schema, Owner: c.opts.Org}
+	validator := reposetup.Validator{Schema: c.opts.Schema, Owner: c.opts.Org}
 	for _, e := range data.GitHub.TeamFiles.Entries {
 		if e.Type != "blob" || !strings.HasSuffix(e.Name, ".yaml") || e.Object == nil {
 			continue

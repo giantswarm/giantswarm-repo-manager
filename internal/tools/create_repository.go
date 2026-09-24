@@ -252,7 +252,7 @@ func (t *tools) dryRun(ctx context.Context, args map[string]any, p *person, perr
 			req.AuthorTeams = p.teams
 		}
 	}
-	res, err := t.validator().Validate(ctx, req)
+	res, err := t.runValidator(ctx, req)
 	if err != nil {
 		return nil, err
 	}
@@ -323,7 +323,7 @@ func (t *tools) resumed(ctx context.Context, p *person, req reposetup.Request, r
 		return nil, nil, err
 	}
 	req.TeamFile, req.Names, req.Mode = tf, names, reposetup.ModeExisting
-	existing, err := t.validator().Validate(ctx, req)
+	existing, err := t.runValidator(ctx, req)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -433,18 +433,18 @@ func optedIn(entry any) (any, error) {
 	return out, nil
 }
 
-// validator is the engine's validator with the App answering the name checks
-// from its own budget.
-func (t *tools) validator() reposetup.Validator {
-	schema, err := reposetup.EmbeddedSchema()
-	if err != nil {
-		panic("embedded repositories schema does not compile: " + err.Error())
+// runValidator runs the engine's validator over the process's one
+// repositories schema (Deps.Schema, the one get_info reports), the App
+// answering the name checks from its own budget.
+func (t *tools) runValidator(ctx context.Context, req reposetup.Request) (*reposetup.Result, error) {
+	if t.d.Schema == nil {
+		return nil, ErrNoSchema
 	}
-	v := reposetup.Validator{Schema: schema, Owner: t.org()}
+	v := reposetup.Validator{Schema: t.d.Schema, Owner: t.org()}
 	if t.d.App != nil {
 		v.Names = reposetup.GitHubNameChecker{Repositories: repositoryGetter{t.d.App.Installation()}}
 	}
-	return v
+	return v.Validate(ctx, req)
 }
 
 // engine is the set-up engine as the caller: their client creates the

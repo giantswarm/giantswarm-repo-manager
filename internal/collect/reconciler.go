@@ -55,6 +55,15 @@ const (
 	defaultPendingWindow   = 15 * time.Minute
 	defaultLookback        = 7 * 24 * time.Hour
 	defaultMaxArtifact     = 4 << 20
+	// leaseTTL is how long the poller's lease holds without a renewal: past
+	// one artifact's download and refresh; the poll renews it before every
+	// run and before it writes the cursor.
+	leaseTTL = 3 * time.Minute
+	// retryWindow is how long after a run completed its artifact is read
+	// again when the repository could not be read yet (a repository created
+	// seconds before its run) or the team was not told of the run: then the
+	// run is given up with an error log.
+	retryWindow = 30 * time.Minute
 	// ArtifactPrefix is what the reconciler names its per-repository
 	// artifact: reconcile-<name>, the name without the org.
 	ArtifactPrefix = "reconcile-"
@@ -124,13 +133,22 @@ type ReconcilerPoll struct {
 	Conflicting int
 	// Watermark is where the cursor stands after the poll.
 	Watermark time.Time
-	Errors    []string
+	// Standby says another pod holds the poller's lease: this poll read
+	// nothing.
+	Standby bool
+	Errors  []string
 }
 
 // Artifact outcomes consumeRun tells apart.
 var (
 	errArtifactSkipped   = errors.New("artifact already stored")
 	errArtifactMalformed = errors.New("artifact malformed")
+	// errNotTold is a run stored whose change the team was not told of: the
+	// completion hook's error.
+	errNotTold = errors.New("run not told")
+	// errLeaseLost ends a poll whose lease ran out or went to another pod:
+	// the cursor is not written over the other pod's.
+	errLeaseLost = errors.New("reconciler lease lost")
 )
 
 // RunReconcilerPoll polls until ctx is done: at start, then every
@@ -200,9 +218,19 @@ func pollLoop(ctx context.Context, interval, pendingInterval time.Duration, wake
 // PollReconciler reads the reconciler's runs since the cursor once: every
 // completed run's reconcile-<name> artifacts become the repositories'
 // setup.lastRun, the cursor moves past the runs that are consumed, and the
-// pending Align nows older than the window are given up. It returns what
-// it did; a cursor or listing that could not be read is the error.
+// pending Align nows older than the window are given up. One pod polls at a
+// time, under the store's lease: a poll while another pod holds it reads
+// nothing (Standby). It returns what it did; a cursor or listing that could
+// not be read, or a lease lost mid-poll, is the error.
 func (c *Collector) PollReconciler(ctx context.Context) (*ReconcilerPoll, error) {
+	if held, err := c.store.LeaseReconciler(ctx, c.holder, leaseTTL); err != nil || !held {
+		return &ReconcilerPoll{Standby: err == nil}, err
+	}
+	defer func() {
+		if err := c.store.ReleaseReconciler(context.WithoutCancel(ctx), c.holder); err != nil {
+			c.log.Warn("reconciler lease not released", "error", err)
+		}
+	}()
 	now := c.now()
 	cur, err := c.store.ReconcilerCursor(ctx)
 	if err != nil {
@@ -236,6 +264,9 @@ func (c *Collector) PollReconciler(ctx context.Context) (*ReconcilerPoll, error)
 		}
 		open := run.GetStatus() != runCompleted
 		if !open {
+			if err := c.renewLease(ctx); err != nil {
+				return poll, err
+			}
 			if open = !c.consumeRun(ctx, run, poll); !open {
 				cur.Consumed[runKey(run)] = created
 				poll.Runs++
@@ -258,11 +289,24 @@ func (c *Collector) PollReconciler(ctx context.Context) (*ReconcilerPoll, error)
 	}
 	cur.PolledAt = now
 	poll.Watermark = cur.Watermark
+	if err := c.renewLease(ctx); err != nil {
+		return poll, err
+	}
 	if err := c.store.PutReconcilerCursor(ctx, cur); err != nil {
 		return poll, err
 	}
 	c.expirePending(ctx, now, poll)
 	return poll, nil
+}
+
+// renewLease renews the poller's lease; errLeaseLost when another pod
+// holds it now.
+func (c *Collector) renewLease(ctx context.Context) error {
+	held, err := c.store.LeaseReconciler(ctx, c.holder, leaseTTL)
+	if err == nil && !held {
+		err = errLeaseLost
+	}
+	return err
 }
 
 // runKey names a run attempt in the cursor: a re-run of a run keeps its id
@@ -292,7 +336,11 @@ func (c *Collector) listRuns(ctx context.Context, since time.Time) ([]*github.Wo
 
 // consumeRun stores every reconcile-<name> artifact of a completed run, the
 // artifacts read Concurrency at a time; false when one could not be read
-// now, which keeps the run open for the next poll. A run without artifacts
+// now, which keeps the run open for the next poll. So does an artifact whose
+// repository could not be read yet — neither on GitHub nor in the team
+// files, a repository created seconds before its run — or whose run the
+// team was not told of, until retryWindow after the run completed; then the
+// run is given up with an error log. A run without artifacts
 // (cancelled, failed before its report step) or with a malformed one is
 // consumed with a log line, and the records expecting a run this run
 // handled and did not report on hear of its failure at once (runWithoutReport).
@@ -330,9 +378,22 @@ func (c *Collector) consumeRun(ctx context.Context, run *github.WorkflowRun, pol
 			log.Info("reconciler run stored", "repository", r.name)
 		case errors.Is(err, errArtifactSkipped):
 			poll.Skipped++
-		case errors.Is(err, errArtifactMalformed), errors.Is(err, inventory.ErrNotFound):
+		case errors.Is(err, errArtifactMalformed):
 			poll.Errors = append(poll.Errors, err.Error())
 			log.Warn("reconciler run: artifact not stored", "repository", r.name, "error", err)
+		case errors.Is(err, inventory.ErrNotFound), errors.Is(err, errNotTold):
+			poll.Errors = append(poll.Errors, err.Error())
+			if errors.Is(err, inventory.ErrNotFound) {
+				// The next try reads the team files again: the read cached
+				// now may predate the entry.
+				c.setCachedSources(nil)
+			}
+			if c.now().Sub(run.GetUpdatedAt().Time) < retryWindow {
+				log.Warn("reconciler run: artifact kept for the next poll", "repository", r.name, "error", err)
+				ok = false
+				return
+			}
+			log.Error("reconciler run: artifact given up", "repository", r.name, "error", err, "after", retryWindow)
 		default:
 			poll.Errors = append(poll.Errors, err.Error())
 			log.Error("reconciler run: artifact not read", "repository", r.name, "error", err)
@@ -489,7 +550,8 @@ func (c *Collector) listArtifacts(ctx context.Context, runID int64) ([]*github.A
 }
 
 // consumeArtifact stores one artifact as its repository's setup.lastRun
-// through Refresh, unless the record already names the run and attempt or
+// through Refresh, unless the record already names the run and attempt —
+// then it only tells the team of the run if nobody did (LastRun.Told) — or
 // carries a later run.
 func (c *Collector) consumeArtifact(ctx context.Context, run *github.WorkflowRun, a *github.Artifact, name string) error {
 	key := c.opts.Org + "/" + name
@@ -502,7 +564,12 @@ func (c *Collector) consumeArtifact(ctx context.Context, run *github.WorkflowRun
 		stored = old.Setup.LastRun
 	}
 	if stored.Names(run.GetID(), run.GetRunAttempt()) {
-		return errArtifactSkipped
+		if stored.Told || c.reconciled == nil {
+			return errArtifactSkipped
+		}
+		// Stored and not told: the pod that stored the run was replaced
+		// before it posted, or the post was refused. Tell it now.
+		return c.tell(ctx, old)
 	}
 	if a.GetSizeInBytes() > c.opts.Reconciler.MaxArtifact {
 		return fmt.Errorf("%w: %s is %d bytes, over %d", errArtifactMalformed, a.GetName(), a.GetSizeInBytes(), c.opts.Reconciler.MaxArtifact)

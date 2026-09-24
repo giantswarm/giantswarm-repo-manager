@@ -33,6 +33,41 @@ type fakeActions struct {
 	blobDownloads  atomic.Int64
 	blobAuthorized atomic.Bool
 	nextID         atomic.Int64
+	// gate, while set, holds every blob fetch until gateN of them have
+	// arrived or a second passed: two pollers racing over one artifact.
+	gateMu  sync.Mutex
+	gate    chan struct{}
+	gateN   int
+	arrived int
+}
+
+// holdBlobs makes the next n blob fetches wait for each other (a second at
+// most), so pollers that read one artifact at once all read it before any
+// stores it.
+func (a *fakeActions) holdBlobs(n int) {
+	a.gateMu.Lock()
+	defer a.gateMu.Unlock()
+	a.gate, a.gateN, a.arrived = make(chan struct{}), n, 0
+}
+
+// atGate waits at the blob gate, when one is set.
+func (a *fakeActions) atGate() {
+	a.gateMu.Lock()
+	gate := a.gate
+	if gate != nil {
+		a.arrived++
+		if a.arrived == a.gateN {
+			close(gate)
+			a.gate = nil
+		}
+	}
+	a.gateMu.Unlock()
+	if gate != nil {
+		select {
+		case <-gate:
+		case <-time.After(time.Second):
+		}
+	}
 }
 
 type fakeRun struct {
@@ -283,6 +318,7 @@ func (a *fakeActions) register(mux *http.ServeMux, g *fakeGitHub) {
 			a.blobAuthorized.Store(true)
 		}
 		a.blobDownloads.Add(1)
+		a.atGate()
 		id, _ := strconv.ParseInt(r.PathValue(kID), 10, 64)
 		a.mu.Lock()
 		defer a.mu.Unlock()

@@ -159,18 +159,24 @@ func TestReconciledLogsWhyItStaysSilent(t *testing.T) {
 	ts := &Tools{t: &tools{d: Deps{Log: slog.New(slog.NewTextHandler(&buf, nil))}}}
 	undeclared := record(change(inventory.ChangeCreated), okStep)
 	undeclared.Declaration = nil
-	ts.Reconciled(context.Background(), undeclared)
+	if err := ts.Reconciled(context.Background(), undeclared); err != nil {
+		t.Errorf("nothing to tell is no error: %v", err)
+	}
 	if logged := buf.String(); !strings.Contains(logged, "nothing to tell the team") || !strings.Contains(logged, "do not declare") ||
 		!strings.Contains(logged, "team="+testTeam) || !strings.Contains(logged, "change=created") {
 		t.Errorf("undeclared record: %q", logged)
 	}
 	buf.Reset()
-	ts.Reconciled(context.Background(), record(change(inventory.ChangeNightly), findingStep))
+	if err := ts.Reconciled(context.Background(), record(change(inventory.ChangeNightly), findingStep)); err != nil {
+		t.Errorf("nothing to tell is no error: %v", err)
+	}
 	if logged := buf.String(); !strings.Contains(logged, "nothing to tell the team") || !strings.Contains(logged, "change=nightly") || !strings.Contains(logged, "reason=") {
 		t.Errorf("nightly run: %q", logged)
 	}
 	buf.Reset()
-	ts.Reconciled(context.Background(), &inventory.Record{Repository: testRepository})
+	if err := ts.Reconciled(context.Background(), &inventory.Record{Repository: testRepository}); err != nil {
+		t.Errorf("nothing to tell is no error: %v", err)
+	}
 	if logged := buf.String(); !strings.Contains(logged, "without a run") {
 		t.Errorf("record without a run: %q", logged)
 	}
@@ -324,7 +330,11 @@ func runs(t *testing.T, client *review.Client, posted *[]string, steps ...[]reco
 		rec := record(change(inventory.ChangeChanged), st...)
 		rec.Setup.Told = told
 		before := len(*posted)
-		ts.remember(context.Background(), rec, ts.tell(context.Background(), rec, testTeam, "C0STANDUP001", Completions(rec)))
+		found, err := ts.tell(context.Background(), rec, testTeam, "C0STANDUP001", Completions(rec))
+		if err != nil {
+			t.Fatalf("tell: %v", err)
+		}
+		ts.remember(context.Background(), rec, found)
 		told = rec.Setup.Told
 		out = append(out, append([]string(nil), (*posted)[before:]...))
 	}
@@ -359,9 +369,37 @@ func TestAFindingThatDoesNotReachTheChannelStaysUntold(t *testing.T) {
 	client, posted := notices(t, map[string]bool{main: true})
 	rec := record(change(inventory.ChangeChanged), ruleset("protect-main"))
 	ts := &Tools{t: &tools{d: Deps{Log: slog.New(slog.NewTextHandler(new(bytes.Buffer), nil)), Review: client}}}
-	told := ts.tell(context.Background(), rec, testTeam, "C0STANDUP001", Completions(rec))
-	if len(*posted) != 0 || len(told) != 0 {
-		t.Errorf("a refused notice: posted %q, told %q", *posted, told)
+	told, err := ts.tell(context.Background(), rec, testTeam, "C0STANDUP001", Completions(rec))
+	if len(*posted) != 0 || len(told) != 0 || err != nil || !rec.Setup.LastRun.Told {
+		t.Errorf("a refused finding: posted %q, told %q, err %v, run told %v", *posted, told, err, rec.Setup.LastRun.Told)
+	}
+}
+
+// TestARefusedChangeSentenceIsToldOnceLater: the change sentence is told
+// once per run. A gateway that refuses it leaves the run untold and says so
+// (the poller tells the run again); the next try posts it, and a try after
+// that posts nothing.
+func TestARefusedChangeSentenceIsToldOnceLater(t *testing.T) {
+	rec := record(change(inventory.ChangeCreated))
+	sentence := changeSentence(rec)
+	if sentence == "" {
+		t.Fatal("no change sentence for a creation")
+	}
+	refusing, _ := notices(t, map[string]bool{sentence: true})
+	accepting, posted := notices(t, nil)
+	tell := func(client *review.Client) error {
+		ts := &Tools{t: &tools{d: Deps{Log: slog.New(slog.NewTextHandler(new(bytes.Buffer), nil)), Review: client}}}
+		_, err := ts.tell(context.Background(), rec, testTeam, "C0STANDUP001", Completions(rec))
+		return err
+	}
+	if err := tell(refusing); err == nil || rec.Setup.LastRun.Told {
+		t.Fatalf("a refused change sentence: err %v, run told %v", err, rec.Setup.LastRun.Told)
+	}
+	if err := tell(accepting); err != nil || !rec.Setup.LastRun.Told || len(*posted) != 1 || (*posted)[0] != sentence {
+		t.Fatalf("the retry: err %v, run told %v, posted %q", err, rec.Setup.LastRun.Told, *posted)
+	}
+	if err := tell(accepting); err != nil || len(*posted) != 1 {
+		t.Errorf("a told run is told again: err %v, posted %q", err, *posted)
 	}
 }
 

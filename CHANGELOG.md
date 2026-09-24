@@ -41,6 +41,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Every reconciler run's change notice is posted once: a run whose repository cannot be read yet stays open for the
+  next poll (30 minutes, then an error log) instead of being consumed; a run stored but not told (a restart before the
+  post, a refused post) is told by the next poll (`setup.lastRun.told`); one pod polls at a time under the lease
+  `inventory:reconciler-lease`, so a rolling update does not post twice.
 - The record's release step no longer reads a release built from the default branch's build
   ([devctl#2408](https://github.com/giantswarm/devctl/issues/2408)). A release cut on the default branch head — every
   creation's `v0.1.0` — carries that branch's pipeline's statuses on its commit, and for a repository whose tag

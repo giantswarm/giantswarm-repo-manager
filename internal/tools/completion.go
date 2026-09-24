@@ -19,63 +19,78 @@ import (
 // news; nothing when the run has nothing to tell, and nothing at all for a
 // run nobody's change is behind (an Align now, the schedule). Nothing to
 // approve. What was told is written back to the record, so a standing
-// finding is told once and not again on the next change of the entry. Every
-// way out logs why: a record without a declaration — the team files do not
-// name the repository, read again after the run — has no team to tell and
-// stays silent under the team the artifact names.
-func (ts *Tools) Reconciled(ctx context.Context, rec *inventory.Record) {
+// finding is told once and not again on the next change of the entry, and
+// the change sentence once per run (LastRun.Told). Every way out logs why:
+// a record without a declaration — the team files do not name the
+// repository, read again after the run — has no team to tell and stays
+// silent under the team the artifact names. The error says the change
+// sentence did not reach the team (no identity, no channel, the post
+// refused): the poller tells the run again.
+func (ts *Tools) Reconciled(ctx context.Context, rec *inventory.Record) error {
 	t := ts.t
 	if rec == nil || rec.Setup.LastRun == nil {
 		t.d.Log.Warn("reconciler run: completion hook called without a run")
-		return
+		return nil
 	}
 	run := rec.Setup.LastRun
 	if rec.Declaration == nil {
 		t.d.Log.Info("reconciler run: nothing to tell the team", "repository", rec.Repository, "team", run.Result.Team, "change", changeKind(run),
 			"reason", "the team files do not declare the repository")
-		return
+		return nil
 	}
 	team := rec.Declaration.Team
 	msgs := Completions(rec)
 	if len(msgs) == 0 {
 		t.d.Log.Info("reconciler run: nothing to tell the team", "repository", rec.Repository, "team", team, "change", changeKind(run),
 			"reason", "the run is not behind a person's change or has nothing to report")
-		return
+		return nil
 	}
 	if t.d.Review == nil {
 		t.d.Log.Info("completion message not delivered", "repository", rec.Repository, "team", team, "reason", review.ErrNotConfigured)
-		return
+		return nil
 	}
 	repo, err := t.unattended()
 	if err != nil {
 		t.d.Log.Warn("completion message not delivered", "repository", rec.Repository, "error", err)
-		return
+		return err
 	}
 	channel, err := t.policyChannel(ctx, repo, team, false)
 	if err != nil {
 		t.d.Log.Warn("completion message not delivered", "repository", rec.Repository, "team", team, "reason", err.Error())
-		return
+		return err
 	}
-	told := ts.tell(ctx, rec, team, channel, msgs)
+	told, err := ts.tell(ctx, rec, team, channel, msgs)
 	ts.remember(ctx, rec, told)
+	return err
 }
 
 // tell posts what the team has not been told yet and returns the findings
 // the record has told after it: the ones already in Setup.Told and still
 // reported, plus the ones posted now. A finding whose message does not
-// reach the channel stays untold and is told by the next run.
-func (ts *Tools) tell(ctx context.Context, rec *inventory.Record, team, channel string, msgs []Completion) []string {
+// reach the channel stays untold and is told by the next run. The change
+// sentence is posted once per run: posted, or absent, it marks the run
+// told; the error is its post refused.
+func (ts *Tools) tell(ctx context.Context, rec *inventory.Record, team, channel string, msgs []Completion) ([]string, error) {
 	t := ts.t
+	run := rec.Setup.LastRun
 	known := set(rec.Setup.Told)
 	told := make([]string, 0, len(msgs))
+	var notTold error
 	for _, m := range msgs {
 		if m.Finding && known[m.Text] {
 			told = append(told, m.Text)
 			t.d.Log.Info("finding already told", "repository", rec.Repository, "team", team, "text", m.Text)
 			continue
 		}
+		if m.Change && run.Told {
+			t.d.Log.Info("change already told", "repository", rec.Repository, "team", team, "run", run.RunURL)
+			continue
+		}
 		if _, err := t.d.Review.Notify(ctx, review.Notice{Team: team, Channel: channel, Text: m.Text, Link: m.Link}); err != nil {
 			t.d.Log.Warn("completion message not delivered", "repository", rec.Repository, "team", team, "error", err)
+			if m.Change {
+				notTold = err
+			}
 			continue
 		}
 		t.d.Log.Info("completion message posted", "repository", rec.Repository, "team", team, "channel", channel, "text", m.Text)
@@ -83,23 +98,22 @@ func (ts *Tools) tell(ctx context.Context, rec *inventory.Record, team, channel 
 			told = append(told, m.Text)
 		}
 	}
-	return told
+	run.Told = notTold == nil
+	return told, notTold
 }
 
-// remember writes the told findings back to the record, so the next run over
-// the repository knows what the team has heard. The record was stored before
-// the hook ran; nothing else writes it in between.
+// remember writes the told findings and whether the run was told back to
+// the record, so the next run over the repository — and the next poll
+// reading this run — knows what the team has heard. The record was stored
+// before the hook ran; nothing else writes it in between.
 func (ts *Tools) remember(ctx context.Context, rec *inventory.Record, told []string) {
 	t := ts.t
-	if equal(rec.Setup.Told, told) {
-		return
-	}
 	rec.Setup.Told = told
 	if t.d.Inventory == nil {
 		return
 	}
 	if err := t.d.Inventory.Put(ctx, rec); err != nil {
-		t.d.Log.Warn("told findings not stored", "repository", rec.Repository, "error", err)
+		t.d.Log.Warn("told run not stored", "repository", rec.Repository, "error", err)
 	}
 }
 
@@ -113,6 +127,9 @@ type Completion struct {
 	// a failed step: a finding is told once, and again only after it has
 	// gone away and come back.
 	Finding bool `json:"finding,omitempty"`
+	// Change says the sentence is about the change itself: told once per
+	// run (LastRun.Told).
+	Change bool `json:"-"`
 }
 
 // Completions renders what a run tells the team, in order: the sentence
@@ -146,7 +163,7 @@ func Completions(rec *inventory.Record) []Completion {
 	}
 	var out []Completion
 	if s := changeSentence(rec); s != "" {
-		out = append(out, Completion{Text: s, Link: changeLink(run)})
+		out = append(out, Completion{Text: s, Link: changeLink(run), Change: true})
 	}
 	for _, st := range run.Result.Steps {
 		if st.Verdict == reconcile.VerdictFailed {
@@ -346,17 +363,4 @@ func set(ss []string) map[string]bool {
 		m[s] = true
 	}
 	return m
-}
-
-// equal says whether the two lists of told findings are the same, in order.
-func equal(a, b []string) bool {
-	if len(a) != len(b) {
-		return false
-	}
-	for i := range a {
-		if a[i] != b[i] {
-			return false
-		}
-	}
-	return true
 }

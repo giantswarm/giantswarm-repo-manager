@@ -165,3 +165,39 @@ func TestReplyErrorsAreNotUnavailable(t *testing.T) {
 		t.Fatalf("missing record: %v", err)
 	}
 }
+
+// TestReconcilerLease: one holder at a time; the holder renews its own
+// lease, another waits until it is released or runs out.
+func TestReconcilerLease(t *testing.T) {
+	mr := miniredis.RunT(t)
+	st, err := Open(mr.Addr())
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(st.Close)
+	ctx := context.Background()
+	lease := func(holder string) bool {
+		t.Helper()
+		held, err := st.LeaseReconciler(ctx, holder, time.Minute)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return held
+	}
+	if !lease("old") {
+		t.Fatal("the first holder does not take the free lease")
+	}
+	if !lease("old") || lease("new") {
+		t.Fatal("the holder renews its lease, another waits")
+	}
+	if err := st.ReleaseReconciler(ctx, "new"); err != nil || lease("new") {
+		t.Fatalf("a release by another holder gives the lease up: %v", err)
+	}
+	if err := st.ReleaseReconciler(ctx, "old"); err != nil || !lease("new") {
+		t.Fatalf("the released lease is free: %v", err)
+	}
+	mr.FastForward(2 * time.Minute)
+	if !lease("old") {
+		t.Error("a lease that ran out is free")
+	}
+}

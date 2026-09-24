@@ -378,6 +378,11 @@ type LastRun struct {
 	// team — the kind of team-file change, who made it and its pull request.
 	// nil for an artifact without one.
 	Change *Change `json:"change,omitempty"`
+	// Told says the team heard of the run: its change sentence reached the
+	// team's channel, or it had none. A run stored and not told — the pod
+	// replaced before it posted, the post refused — is told by the next
+	// poll that reads the run, and never twice.
+	Told bool `json:"told,omitempty"`
 }
 
 // Names says whether the run is the Actions run id at attempt.

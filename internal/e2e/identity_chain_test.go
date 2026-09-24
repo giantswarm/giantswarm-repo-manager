@@ -69,6 +69,7 @@ type stack struct {
 	app     *gh.App
 	store   *inventory.Store
 	col     *collect.Collector
+	tools   *tools.Tools
 	checker *fakeChecker
 	// schema is the stack's one repositories schema, as main builds it:
 	// the collectors and the tools validate against the same instance.
@@ -215,6 +216,7 @@ func newStackWith(t *testing.T, debugChannel string, opts ...stackOption) *stack
 		o(st, &deps)
 	}
 	ts := tools.New(deps)
+	st.tools = ts
 	st.col.OnReconciled(ts.Reconciled)
 	st.col.OnConflict(ts.Conflicted)
 	st.col.OnReleased(ts.Released)

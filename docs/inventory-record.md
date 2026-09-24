@@ -31,7 +31,12 @@ repository's `setup.lastRun`: `result` is the JSON, `runUrl` its `workflowRun.ur
 and `attempt` the Actions run — a run's artifact is read once, re-polls and restarts included; a re-run (the same run id,
 the next attempt) is read again; an artifact older than the stored run does not replace it. A run without artifacts
 (cancelled, failed before its report step) is consumed and logged; a repository that is neither declared nor on GitHub
-loses its record.
+loses its record. Such an artifact — a repository created seconds before its run — keeps its run open, and the next poll
+reads the team files and the repository again, for 30 minutes after the run completed; then the run is given up with an
+error log. One pod polls at a time: the poll holds the lease `inventory:reconciler-lease` (renewed before every run and
+before the cursor is written), and a pod that finds it held skips its poll, so a rolling update's two pods never both
+consume a run. The change sentence is posted once per run: `lastRun.told` records it; a run stored and not told — the
+pod replaced before it posted, the gateway refusing the post — is told by the next poll that reads it.
 
 The cursor (`inventory:reconciler`) is a watermark with the run attempts consumed at or after it: the watermark moves to
 the oldest run still open — running, or whose artifacts could not be read this time — so a run that completes after a
@@ -147,7 +152,7 @@ the message to the team's standup channel is rendered from (README, "Asks and me
     "checks": { "…": "reconcile.Result in mode check — what devctl repo status prints; its circleci and release steps come from the record's sources (the head's statuses, lastRun), the engine having no CircleCI client" },
     "checkedAt": "…",
     "checkError": "",                   // why checks is missing (no read identity, …); a refused entry has checks = the engine's Refused result
-    "lastRun": {"result": {"…": "reconcile.Result"}, "runUrl": "…", "timestamp": "…", "runId": 1, "attempt": 1,
+    "lastRun": {"result": {"…": "reconcile.Result"}, "runUrl": "…", "timestamp": "…", "runId": 1, "attempt": 1, "told": true,  // told: the team heard of the run (its change sentence posted, or none)
                 "change": {"kind": "created", "by": "alice", "pullRequest": {"number": 4711, "url": "…"}}},  // kind: created | added | transferred (+fromTeam) | archived | deleted | deprecated | changed | dispatched | nightly
     "pendingRun": {"dispatchedAt": "…", "by": "alice", "kind": "created", "pullRequest": {"number": 4711, "url": "…"},   // a run expected: kind dispatched (an Align now) or the pull request's kind
                    "mergedAt": "…", "conflictsSince": "…"},   // the merge, once read; the pull request found conflicting with its base (mergeable: false), until it is re-rendered

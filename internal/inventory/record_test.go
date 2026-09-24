@@ -46,7 +46,11 @@ func TestARecordOfTheEarlierShapeUnmarshals(t *testing.T) {
 
 func TestFindingsDeclaredGoneAndUndeclared(t *testing.T) {
 	now := time.Now()
-	gone := &Record{Repository: "giantswarm/gone", Declaration: &Declaration{Team: "team-bumblebee", File: "repositories/team-bumblebee.yaml", Accepted: true}}
+	// declared is an accepted entry of team-bumblebee's file with the lifecycle given.
+	declared := func(lifecycle string) *Declaration {
+		return &Declaration{Team: "team-bumblebee", File: "repositories/team-bumblebee.yaml", Lifecycle: lifecycle, Accepted: true}
+	}
+	gone := &Record{Repository: "giantswarm/gone", Declaration: declared("")}
 	gone.Finalize()
 	if len(gone.Findings) != 1 || gone.Findings[0].Kind != FindingDeclaredButGone || gone.Findings[0].Source != FindingSourceInventory {
 		t.Errorf("gone: %+v", gone.Findings)
@@ -54,12 +58,12 @@ func TestFindingsDeclaredGoneAndUndeclared(t *testing.T) {
 	if !strings.Contains(gone.Findings[0].Fix, "create the repository") || !strings.Contains(gone.Findings[0].Fix, "lifecycle: deleted") {
 		t.Errorf("gone fix: %s", gone.Findings[0].Fix)
 	}
-	deleted := &Record{Repository: "giantswarm/deleted", Declaration: &Declaration{Team: "team-bumblebee", File: "repositories/team-bumblebee.yaml", Lifecycle: "deleted", Accepted: true}}
+	deleted := &Record{Repository: "giantswarm/deleted", Declaration: declared("deleted")}
 	deleted.Finalize()
 	if len(deleted.Findings) != 0 {
 		t.Errorf("an entry declared deleted is the record of the deletion, not a finding: %+v", deleted.Findings)
 	}
-	archivedGone := &Record{Repository: "giantswarm/archived-gone", Declaration: &Declaration{Team: "team-bumblebee", File: "repositories/team-bumblebee.yaml", Lifecycle: "archived", Accepted: true}}
+	archivedGone := &Record{Repository: "giantswarm/archived-gone", Declaration: declared("archived")}
 	archivedGone.Finalize()
 	if len(archivedGone.Findings) != 1 || archivedGone.Findings[0].Kind != FindingDeclaredButGone || strings.Contains(archivedGone.Findings[0].Fix, "create the repository") || !strings.Contains(archivedGone.Findings[0].Fix, "lifecycle: deleted") {
 		t.Errorf("archived and gone: %+v", archivedGone.Findings)

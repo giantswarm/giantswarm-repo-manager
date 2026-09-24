@@ -121,6 +121,15 @@ func (f *fakeRepos) put(name, path, content string) {
 	f.repos[name].files[path] = content
 }
 
+// file is the content at path on the repository's main, and whether it is
+// there.
+func (f *fakeRepos) file(name, path string) (string, bool) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	content, ok := f.repos[name].files[path]
+	return content, ok
+}
+
 // installed sets whether the inventory App's installation covers the
 // repository.
 func (f *fakeRepos) installed(name string, on bool) {

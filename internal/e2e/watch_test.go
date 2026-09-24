@@ -15,10 +15,10 @@ import (
 
 // watch_repository against the fakes: a creation followed phase by phase as
 // GitHub and the inventory show them — to ready, to a failed step, to a run
-// that never reported, to a red release, through a read GitHub refuses,
-// through the jobs the declaration implies and the settle window, through a
-// merge arriving mid-call that ends the call with the phase — and the
-// timeout that answers with what is pending.
+// that never reported, to a red release, to a tag no pipeline built, through
+// a read GitHub refuses, through the jobs the declaration implies and the
+// settle window, through a merge arriving mid-call that ends the call with
+// the phase — and the timeout that answers with what is pending.
 
 const (
 	argTimeout = "timeout"
@@ -397,7 +397,8 @@ func TestWatchRepositoryForgetsTheRunOfAClosedPullRequest(t *testing.T) {
 
 // TestWatchRepositoryReportsARedRelease: without a CircleCI status on the
 // release the reconciler's release step decides — its red-release finding
-// fails the phase; once CircleCI reports a failure, the statuses do.
+// fails the phase with its fix and the run; a status the declaration does
+// not tell as the tag pipeline's leaves the run's verdict standing.
 func TestWatchRepositoryReportsARedRelease(t *testing.T) {
 	st := newStack(t)
 	c := st.as(t, aliceToken)
@@ -405,17 +406,88 @@ func TestWatchRepositoryReportsARedRelease(t *testing.T) {
 	pr := created.PullRequest.Number
 	st.ghs.files.merge(pr)
 	red := "release " + firstTag + " of " + org + "/" + shinyService + " is red: pipeline 1, build (failed: go-build)"
+	fix := firstTag + " is a dead tag"
 	st.reported(t, pr, prURL, reconcile.StepResult{Step: reconcile.StepRelease, Verdict: reconcile.VerdictReported,
-		Findings: []reconcile.Finding{{Kind: reconcile.FindingRedRelease, Message: red, Fix: firstTag + " is a dead tag"}}})
+		Findings: []reconcile.Finding{{Kind: reconcile.FindingRedRelease, Message: red, Fix: fix}}})
 	st.ghs.repos.publish(shinyService, firstTag)
 	w := st.watch(t, c, pr, 0.3)
-	if w.Ready || w.Failure == nil || w.Failure.Phase != tools.PhaseReleased || w.Failure.Reason != red || names(w.Phases) != throughSetUp || w.Release == nil {
+	if w.Ready || w.Failure == nil || w.Failure.Phase != tools.PhaseReleased || !strings.HasPrefix(w.Failure.Reason, red+" — "+fix+" (") ||
+		!strings.Contains(w.Failure.Reason, "/actions/runs/") || names(w.Phases) != throughSetUp || w.Release == nil {
 		t.Fatalf("the reconciler's red release: %+v failure=%+v", w, w.Failure)
 	}
+	reason := w.Failure.Reason
 	st.ghs.repos.report(shinyService, stateFailure, circleBuild)
-	w = st.watch(t, c, pr, 0.3)
-	if w.Failure == nil || w.Failure.Phase != tools.PhaseReleased || w.Failure.Reason != "the CircleCI statuses on "+firstTag+" are failure: "+circleBuild+" ("+stateFailure+")" {
-		t.Fatalf("CircleCI's red status: %+v", w.Failure)
+	if w = st.watch(t, c, pr, 0.3); w.Failure == nil || w.Failure.Phase != tools.PhaseReleased || w.Failure.Reason != reason {
+		t.Fatalf("a status of either pipeline: %+v", w.Failure)
+	}
+}
+
+// fakeCIChartWorkflows is the generated Go + app pipeline with its filters:
+// go-build on every branch and on tags, the chart built on tags and on
+// branches other than main, pushed on tags alone.
+const fakeCIChartWorkflows = `version: 2.1
+orbs:
+  architect: giantswarm/architect@10.10.0
+workflows:
+  build:
+    jobs:
+      - architect/go-build:
+          name: go-build
+          filters:
+            tags:
+              only: /^v.*/
+      - architect/push-to-app-catalog:
+          name: build-chart
+          requires: [go-build]
+          filters:
+            tags:
+              only: /^v.*/
+            branches:
+              ignore: [main]
+      - architect/push-to-app-catalog:
+          name: push-chart
+          requires: [build-chart]
+          filters:
+            tags:
+              only: /^v.*/
+            branches:
+              ignore: /.*/
+`
+
+// TestWatchRepositoryReportsATagNoPipelineBuilt: auto-release tags the
+// scaffold on main before the reconciler follows the project on CircleCI,
+// so no pipeline ever builds the tag; the follow builds main, whose head the
+// tag names, and posts setup and go-build green on the release's commit. The
+// run's missed-tag-build fails the phase with its fix — not a wait for a
+// chart job no pipeline will run. Once the tag's pipeline is triggered by
+// hand its chart jobs report, which only the tag pipeline runs, and the
+// statuses make the release ready.
+func TestWatchRepositoryReportsATagNoPipelineBuilt(t *testing.T) {
+	st := newStack(t)
+	c := st.as(t, aliceToken)
+	created, prURL := st.createShiny(t, c)
+	pr := created.PullRequest.Number
+	st.ghs.repos.put(shinyService, ".circleci/workflows.yml", fakeCIChartWorkflows)
+	st.declared(pr, "- name: "+shinyService+"\n  componentType: service\n  gen:\n    language: go\n    flavours: [app]\n")
+	missed := "release " + firstTag + " of " + org + "/" + shinyService + " has no pipeline: nothing was built or published for the tag"
+	fix := "cut the next tag, or trigger the tag's pipeline by hand"
+	st.reported(t, pr, prURL, reconcile.StepResult{Step: reconcile.StepRelease, Verdict: reconcile.VerdictReported,
+		Findings: []reconcile.Finding{{Kind: reconcile.FindingMissedTagBuild, Message: missed, Fix: fix}}})
+	if rec := st.record(t, shinyService); rec.CI == nil || len(rec.CI.Jobs) != 3 {
+		t.Fatalf("the record's CI jobs: %+v", rec.CI)
+	}
+	st.ghs.repos.publish(shinyService, firstTag)
+	st.ghs.repos.report(shinyService, stateSuccess, circleSetup, circleBuild)
+
+	w := st.watch(t, c, pr, 0.3)
+	if w.Ready || w.Pending != "" || w.Failure == nil || w.Failure.Phase != tools.PhaseReleased || !strings.HasPrefix(w.Failure.Reason, missed+" — "+fix+" (") ||
+		names(w.Phases) != throughSetUp || w.Release == nil || w.Release.Tag != firstTag || w.Waited != 0 {
+		t.Fatalf("a tag no pipeline built: %+v failure=%+v", w, w.Failure)
+	}
+
+	st.ghs.repos.report(shinyService, stateSuccess, circleChart, circlePushChart)
+	if w = st.watch(t, c, pr, 3); !w.Ready || w.Failure != nil || w.PendingReason != "" || names(w.Phases) != allPhases {
+		t.Fatalf("the tag's pipeline triggered by hand: %+v failure=%+v", w, w.Failure)
 	}
 }
 

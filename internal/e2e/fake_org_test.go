@@ -306,6 +306,13 @@ func (o *fakeOrg) node(name string) map[string]any {
 		if r := o.repos.get(name); r != nil {
 			n := base(false)
 			n[kCreatedAt], n["isEmpty"] = r.createdAt.UTC().Format(time.RFC3339), r.empty
+			// The CircleCI configuration a test put on main, as the sweep
+			// reads it.
+			for key, path := range map[string]string{"ciConfig": ".circleci/config.yml", "ciWorkflows": ".circleci/workflows.yml"} {
+				if text, ok := o.repos.file(name, path); ok {
+					n[key] = map[string]any{kText: text}
+				}
+			}
 			return n
 		}
 	}

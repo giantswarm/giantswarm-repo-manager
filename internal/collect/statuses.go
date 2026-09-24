@@ -79,7 +79,7 @@ func statusesReleaseStep(slug, tag string, b *inventory.HeadStatus, ci *inventor
 func splitStatuses(s *inventory.HeadStatus, ci *inventory.CI, runs func(inventory.CIJob) bool) (own, foreign []string) {
 	jobs := jobIndex(ci)
 	for _, c := range s.Contexts {
-		if js, ok := jobs[jobOf(c)]; ok && !runsAny(js, runs) {
+		if js, ok := jobs[inventory.JobOf(c)]; ok && !runsAny(js, runs) {
 			foreign = append(foreign, c)
 			continue
 		}
@@ -97,7 +97,7 @@ func splitStatuses(s *inventory.HeadStatus, ci *inventory.CI, runs func(inventor
 func anyTagOnly(contexts []string, ci *inventory.CI, tag string) bool {
 	jobs := jobIndex(ci)
 	for _, c := range contexts {
-		js, ok := jobs[jobOf(c)]
+		js, ok := jobs[inventory.JobOf(c)]
 		if ok && runsAny(js, func(j inventory.CIJob) bool { return j.RunsOnTag(tag) }) && !runsAny(js, inventory.CIJob.RunsOnBranches) {
 			return true
 		}
@@ -143,16 +143,11 @@ func runsAny(jobs []inventory.CIJob, runs func(inventory.CIJob) bool) bool {
 	return false
 }
 
-// jobOf is the job a `ci/circleci: <job>` context names.
-func jobOf(context string) string {
-	return strings.TrimSpace(strings.TrimPrefix(context, circleContext))
-}
-
 // jobNames lists the contexts' jobs.
 func jobNames(contexts []string) string {
 	names := make([]string, 0, len(contexts))
 	for _, c := range contexts {
-		names = append(names, jobOf(c))
+		names = append(names, inventory.JobOf(c))
 	}
 	return strings.Join(names, ", ")
 }

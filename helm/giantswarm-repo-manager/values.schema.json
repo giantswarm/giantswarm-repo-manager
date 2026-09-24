@@ -29,7 +29,7 @@
             "properties": {
                 "existingSecret": {
                     "type": "string",
-                    "description": "Existing Secret with a CircleCI API token under `token`, for the release watch to read the tag pipelines of private repositories (a personal token of a read-only identity: CircleCI has no scoped tokens). Empty reads anonymously, which CircleCI answers for public projects alone; a private repository's release then reads `unchecked` and the team hears nothing about it."
+                    "description": "Existing Secret with a CircleCI API token under `token`, for the release watch to read the tag pipelines of private repositories (a personal token of a read-only identity: CircleCI has no scoped tokens). Empty reads anonymously, which CircleCI answers for public projects alone; a private repository's release then reads `unchecked` and the team hears nothing about it. `watch_repository` decides a new repository's released phase from the tag pipeline wherever the release watch reads it, from the commit statuses elsewhere."
                 }
             }
         },

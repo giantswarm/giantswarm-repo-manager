@@ -6,7 +6,6 @@ import (
 	"io"
 
 	"github.com/giantswarm/devctl/v8/pkg/githubclient"
-	"github.com/giantswarm/devctl/v8/pkg/reposetup"
 	"github.com/giantswarm/devctl/v8/pkg/reposetup/reconcile"
 	"github.com/sirupsen/logrus"
 
@@ -28,7 +27,6 @@ import (
 // compare an empty list against the reconciler's and plan it on every
 // aligned repository; the id is for a read identity that sees the actors.
 type Engine struct {
-	org         string
 	reader      *gh.Reader
 	devctlAppID int64
 	log         *logrus.Logger
@@ -36,14 +34,15 @@ type Engine struct {
 
 // NewEngine builds the checker. devctlAppID is the numeric id of the devctl
 // GitHub App; 0 leaves the ruleset's bypass list uncompared.
-func NewEngine(org string, reader *gh.Reader, devctlAppID int64) *Engine {
+func NewEngine(reader *gh.Reader, devctlAppID int64) *Engine {
 	log := logrus.New()
 	log.SetOutput(io.Discard)
-	return &Engine{org: org, reader: reader, devctlAppID: devctlAppID, log: log}
+	return &Engine{reader: reader, devctlAppID: devctlAppID, log: log}
 }
 
-// Check runs every step in check mode for the accepted entry.
-func (e *Engine) Check(ctx context.Context, team string, entry reposetup.Entry) (*reconcile.Result, error) {
+// Check runs the request's steps for its accepted entry, in check mode
+// whatever the request's mode.
+func (e *Engine) Check(ctx context.Context, req reconcile.Request) (*reconcile.Result, error) {
 	tok, err := e.reader.Token(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("engine: read identity token: %w", err)
@@ -53,7 +52,8 @@ func (e *Engine) Check(ctx context.Context, team string, entry reposetup.Entry) 
 		return nil, fmt.Errorf("engine: github client: %w", err)
 	}
 	runner := &reconcile.Runner{GitHub: e.reader.REST(), Checks: checks, DevctlAppID: e.devctlAppID, Log: io.Discard}
-	res, err := runner.Run(ctx, reconcile.Request{Owner: e.org, Team: team, Entry: entry, Mode: reconcile.ModeCheck})
+	req.Mode = reconcile.ModeCheck
+	res, err := runner.Run(ctx, req)
 	if err != nil {
 		return nil, fmt.Errorf("engine: %w", err)
 	}

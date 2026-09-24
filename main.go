@@ -180,7 +180,7 @@ func run(ctx context.Context, o *options, log *slog.Logger) error {
 			Concurrency: o.sweepConcurrency, BudgetFloor: o.graphqlBudgetFloor, RESTFloor: o.restBudgetFloor, Interval: o.sweepInterval,
 			Reconciler: collect.ReconcilerOptions{Repository: o.teamFilesRepository, Workflow: o.reconcilerWorkflow, PollInterval: o.reconcilerPollInterval},
 			Releases:   releases,
-		}, reader, deps.Inventory, collect.NewEngine(o.org, reader, o.devctlAppID), log)
+		}, reader, deps.Inventory, collect.NewEngine(reader, o.devctlAppID), log)
 	}
 	if o.sweepOnce {
 		if store != nil {

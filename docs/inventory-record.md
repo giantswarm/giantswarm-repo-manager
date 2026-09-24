@@ -205,7 +205,10 @@ too beside a branch pipeline's statuses cannot be attributed — the release rea
 `removed`, `resumes`, `carried`, `graphql {calls, cost, remaining, limit, resetAt}`, `rest {calls, remaining, limit, resetAt}`,
 `errors[]` (source problems, a budget stop). The GitHub reads follow the prototype's paging:
 repository metadata 20 a page (halved down to 5 on a page GitHub cannot answer — over the whole org 50 a page was answered with 502 and 25 with a truncated body), default-branch history in aliased batches of 20 (halved on a failing batch), the team
-files, catalog, mapping and org teams in one query — one combined metadata+history query made GitHub answer 502. With
+files, catalog, mapping and org teams in one query — one combined metadata+history query made GitHub answer 502. The
+align-files overrides beside the team files are listed once (one REST request) at the commit that query read, and an
+engine check reads its repository's CODEOWNERS override (one more request) only when the listing names it: the
+`codeowners` step compares CODEOWNERS with the override then, with the generated file naming the team otherwise. With
 `inventory.sweep.graphqlBudgetFloor` set, a sweep stops cleanly when the GraphQL budget falls below it: what was
 collected is stored, nothing is removed, the summary's `errors` say where it stopped. The engine's checks pause when
 the REST budget falls below `inventory.sweep.restBudgetFloor` (default 500) until its reset, one check waiting and the

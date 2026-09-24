@@ -25,13 +25,18 @@ const (
 )
 
 // sources are the desired-state inputs of a sweep: the team files, the
-// catalog, the apps-to-teams mapping and the org's teams — one GraphQL query.
+// catalog, the apps-to-teams mapping and the org's teams — one GraphQL query
+// — and the align-files overrides beside the team files, listed once at the
+// commit the team files were read at (one REST request).
 type sources struct {
 	teams        map[string]bool
 	declarations map[string]*declared // repository name → declaration
 	catalog      map[string]bool
 	mapping      map[string]string
-	problems     []string
+	// ref is the commit of the team files' repository the query read.
+	ref       string
+	overrides *reposetup.Overrides
+	problems  []string
 }
 
 // declared is one team-file entry with the engine's verdict.
@@ -46,6 +51,7 @@ query($org: String!, $ghRepo: String!, $teamFilesDir: String!, $catalogPath: Str
     teams(first: 100, after: $teamsAfter) { pageInfo { hasNextPage endCursor } nodes { slug } }
   }
   github: repository(owner: $org, name: $ghRepo) {
+    head: object(expression: "HEAD") { oid }
     teamFiles: object(expression: $teamFilesDir) { ... on Tree { entries { name type object { ... on Blob { text } } } } }
     catalog: object(expression: $catalogPath) { ... on Blob { text } }
   }
@@ -69,6 +75,9 @@ type sourcesData struct {
 		} `json:"teams"`
 	} `json:"organization"`
 	GitHub *struct {
+		Head *struct {
+			OID string `json:"oid"`
+		} `json:"head"`
 		TeamFiles *struct {
 			Entries []struct {
 				Name   string `json:"name"`
@@ -110,6 +119,11 @@ func (c *Collector) fetchSources(ctx context.Context) (*sources, error) {
 			if err := c.parseSources(ctx, &data, src); err != nil {
 				return nil, err
 			}
+			overrides, lerr := c.listOverrides(ctx, src.ref)
+			if lerr != nil {
+				return nil, fmt.Errorf("sources: %w", lerr)
+			}
+			src.overrides = overrides
 		}
 		if err != nil {
 			return src, err
@@ -125,6 +139,10 @@ func (c *Collector) parseSources(ctx context.Context, data *sourcesData, src *so
 	if data.GitHub == nil || data.GitHub.TeamFiles == nil {
 		return fmt.Errorf("sources: %s/%s has no %s directory", c.opts.Org, TeamFilesRepository, TeamFilesDir)
 	}
+	if data.GitHub.Head == nil || data.GitHub.Head.OID == "" {
+		return fmt.Errorf("sources: %s/%s has no HEAD commit", c.opts.Org, TeamFilesRepository)
+	}
+	src.ref = data.GitHub.Head.OID
 	if c.opts.Schema == nil {
 		return errors.New("sources: no repositories schema configured")
 	}
@@ -180,6 +198,17 @@ func (c *Collector) parseSources(ctx context.Context, data *sourcesData, src *so
 }
 
 // fillDeclaration copies the fields the record shows from the entry.
+// listOverrides lists the align-files overrides of the team files'
+// repository at ref: one request, and one more per repository that has an
+// override when a check reads its CODEOWNERS.
+func (c *Collector) listOverrides(ctx context.Context, ref string) (*reposetup.Overrides, error) {
+	o, err := reposetup.Remote{GitHub: c.reader.REST(), Owner: c.opts.Org, Repo: TeamFilesRepository, Ref: ref}.Overrides(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("list %s at %s: %w", reposetup.OverridesDir, ref, err)
+	}
+	return o, nil
+}
+
 func fillDeclaration(d *inventory.Declaration, decl reposetup.Declaration) {
 	inst, err := decl.Instance()
 	if err != nil {

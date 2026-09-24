@@ -11,7 +11,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/giantswarm/devctl/v8/pkg/reposetup"
 	"github.com/giantswarm/devctl/v8/pkg/reposetup/reconcile"
 	"github.com/google/go-github/v92/github"
 
@@ -29,12 +28,12 @@ type interruptingChecker struct {
 	cancel context.CancelFunc
 }
 
-func (c *interruptingChecker) Check(ctx context.Context, team string, entry reposetup.Entry) (*reconcile.Result, error) {
+func (c *interruptingChecker) Check(ctx context.Context, req reconcile.Request) (*reconcile.Result, error) {
 	if c.calls.Add(1) == c.at {
 		c.cancel()
 		return nil, ctx.Err()
 	}
-	return c.fakeChecker.Check(ctx, team, entry)
+	return c.fakeChecker.Check(ctx, req)
 }
 
 // restReadingChecker is the engine reading GitHub over REST as the App:
@@ -44,10 +43,10 @@ type restReadingChecker struct {
 	rest *github.Client
 }
 
-func (c *restReadingChecker) Check(ctx context.Context, team string, entry reposetup.Entry) (*reconcile.Result, error) {
+func (c *restReadingChecker) Check(ctx context.Context, req reconcile.Request) (*reconcile.Result, error) {
 	// The answer's rate-limit headers are what counts, not the repository.
-	_, _, _ = c.rest.Repositories.Get(ctx, org, entry.Name)
-	return c.fakeChecker.Check(ctx, team, entry)
+	_, _, _ = c.rest.Repositories.Get(ctx, org, req.Entry.Name)
+	return c.fakeChecker.Check(ctx, req)
 }
 
 // logBuffer is a sweep's log at Info, for the lines an operator reads.

@@ -38,8 +38,13 @@ const (
 // pipeline's statuses are on the commit, and the release reads unchecked
 // (tunnelport v1.6.7: go-build and go-test in error from a canceled branch
 // pipeline six days after the tag). Without a branch pipeline's statuses
-// every failure is the tag pipeline's, as before.
-func statusesReleaseStep(slug, tag string, b *inventory.HeadStatus, ci *inventory.CI) reconcile.StepResult {
+// every failure is the tag pipeline's, as before. A green set reads built
+// only once a job only the tag pipeline runs (tagOnly) has reported, when
+// the declaration has such jobs: a release cut on the default branch head
+// carries that branch's green build of the shared jobs whether or not the
+// tag was ever built (devctl#2408: `built: CircleCI success (1 job)` for a
+// tag no pipeline built), and reads unchecked.
+func statusesReleaseStep(slug, tag string, b *inventory.HeadStatus, ci *inventory.CI, tagOnly []string) reconcile.StepResult {
 	sr := reconcile.StepResult{Step: reconcile.StepRelease}
 	own, foreign := splitStatuses(b, ci, func(j inventory.CIJob) bool { return j.RunsOnTag(tag) })
 	failed, pending := statesOf(b, own)
@@ -64,6 +69,12 @@ func statusesReleaseStep(slug, tag string, b *inventory.HeadStatus, ci *inventor
 	case len(pending) > 0:
 		sr.Verdict = reconcile.VerdictOK
 		sr.Summary = fmt.Sprintf("release %s: CircleCI pipeline running (%s)%s", tag, count, ignored)
+	case len(tagOnly) > 0 && !inventory.Reported(own, tagOnly):
+		sr.Verdict = reconcile.VerdictReported
+		sr.Summary = fmt.Sprintf("release %s: none of the tag pipeline's own jobs (%s) on its commit (%s)%s", tag, strings.Join(tagOnly, ", "), count, ignored)
+		sr.Findings = []reconcile.Finding{finding(reconcile.FindingUnchecked,
+			fmt.Sprintf("whether CircleCI built the tag %s of %s is out of the inventory's reach: %s on its commit run on the default branch too, and none of the jobs only the tag pipeline runs (%s) has reported", tag, slug, jobNames(own), strings.Join(tagOnly, ", ")),
+			fmt.Sprintf("configure a CircleCI token (`circleci.existingSecret`) so the release watch reads the tag's own pipeline; `devctl release wait %s %s` tells now", slug, tag))}
 	default:
 		sr.Verdict = reconcile.VerdictOK
 		sr.Summary = fmt.Sprintf("release %s built: CircleCI success (%s)%s", tag, count, ignored)

@@ -143,7 +143,7 @@ func creationArguments() []mcp.ToolOption {
 func (t *tools) registerValidate(s *mcpserver.MCPServer) {
 	opts := append([]mcp.ToolOption{
 		mcp.WithDescription("Read-only. The dry run of creating one or more new repositories for a team, exactly what create_repository would do: each entry " +
-			"rendered with the schema's defaults, the implied template (giantswarm/template for Go, template-app for a chart, " +
+			"rendered with the schema's defaults, the implied template (giantswarm/template for Go, template-app for a chart, template-plans for the plans flavour, " +
 			"the minimal scaffold otherwise) and its options, whether the name is free on GitHub, and the refusals of the creation rules as data " +
 			"(entries[].problems, and as the engine's findings entry-refused / gen-circleci-refused). " + createdOptedIn +
 			"Plus the guard notices a person sees before any pull request exists: team-review when the author is outside the " +

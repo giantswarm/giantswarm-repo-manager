@@ -29,6 +29,6 @@ annotations:
 # (charts/ is not committed), never `helm dependency update`.
 dependencies:
   - name: valkey
-    version: "0.1.4"
+    version: "0.1.7"
     repository: oci://gsoci.azurecr.io/charts/giantswarm
     condition: valkey.enabled

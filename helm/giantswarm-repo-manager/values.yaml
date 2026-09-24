@@ -26,8 +26,9 @@ nameOverride: ""
 fullnameOverride: ""
 
 # -- The inventory store: the Giant Swarm `valkey` app as a subchart (its
-# values live under `valkey.valkey`, the upstream chart's). One replica on an
-# RWO volume with `Recreate`, so a rollout does not deadlock on the volume;
+# values live under `valkey.valkey`, the upstream chart's). One replica on a
+# 1Gi RWO volume with `Recreate`, so a rollout does not deadlock on the volume
+# and the inventory survives a Valkey restart as well as a manager restart;
 # the store is a cache — every record is rebuilt from the team files and
 # GitHub — so the restart gap costs nothing. Set `valkey.enabled: false` and
 # `inventory.valkeyAddress` to use a Valkey outside the release.
@@ -43,6 +44,11 @@ valkey:  # @schema skipProperties: true; additionalProperties: true
     deploymentStrategy: Recreate
     podAnnotations:
       karpenter.sh/do-not-disrupt: "true"
+    # The data on a PersistentVolumeClaim (ReadWriteOnce, the cluster's
+    # default storage class), not the chart's emptyDir.
+    dataStorage:
+      enabled: true
+      requestedSize: 1Gi
     # The restricted Pod Security Standard: the valkey chart's init container
     # and metrics exporter carry no security context of their own, so an
     # installation enforcing PSS restricted (Kyverno: disallow-privilege-

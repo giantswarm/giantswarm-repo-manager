@@ -166,7 +166,7 @@ func run(ctx context.Context, o *options, log *slog.Logger) error {
 		if err != nil {
 			return fmt.Errorf("circleci client: %w", err)
 		}
-		releases.CircleCI = cc
+		releases.CircleCI, deps.CircleCI = cc, cc
 		deps.TagPipelines = tools.TagPipelinesToken
 		if releases.Anonymous {
 			deps.TagPipelines = tools.TagPipelinesAnonymous

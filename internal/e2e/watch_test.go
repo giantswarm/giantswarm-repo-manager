@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/giantswarm/devctl/v8/pkg/circleciclient"
 	"github.com/giantswarm/devctl/v8/pkg/reposetup/reconcile"
 	"github.com/mark3labs/mcp-go/client"
 
@@ -514,5 +515,108 @@ func TestWatchRepositoryReportsARefusedRead(t *testing.T) {
 	st.ghs.repos.installed(shinyService, true)
 	if w = st.watch(t, c, pr, 3); !w.Ready || w.PendingReason != "" {
 		t.Fatalf("after the App reaches the repository: %+v", w)
+	}
+}
+
+// The tag pipeline of the watch's releases on the fake CircleCI: the second
+// pipeline the fake seeds, after the default branch's, its workflows as the
+// generated configuration names them.
+const (
+	tagPipelineNumber = 11502
+	workflowSetup     = "setup"
+	workflowRunning   = "running"
+	workflowFailed    = "failed"
+)
+
+// tagPipelineLine is how the released phase names shiny-service's tag
+// pipeline.
+func tagPipelineLine() string {
+	return fmt.Sprintf("the tag pipeline of %s, pipeline %d (%s)", firstTag, tagPipelineNumber, circleciclient.PipelineURL(org, shinyService, tagPipelineNumber))
+}
+
+// releasedWithTagPipelines creates shiny-service on a stack whose tools hold
+// the manager's CircleCI client in mode, merges and reports its pull
+// request, and publishes the first release with every commit status green
+// and complete — the statuses rule's input, which the tag pipeline path
+// does not read — beside a green pipeline of the default branch at the same
+// commit, the one the reconciler's follow starts.
+func releasedWithTagPipelines(t *testing.T, mode string) (*stack, *client.Client, int) {
+	t.Helper()
+	st := newStackWith(t, "", withTagPipelines(mode))
+	c := st.as(t, aliceToken)
+	created, prURL := st.createShiny(t, c)
+	pr := created.PullRequest.Number
+	st.ghs.files.merge(pr)
+	st.reported(t, pr, prURL, reconcile.StepResult{Step: reconcile.StepRelease, Verdict: reconcile.VerdictRepaired, Summary: "trigger the missed tag build for " + firstTag})
+	st.ghs.repos.publish(shinyService, firstTag)
+	st.ghs.repos.report(shinyService, stateSuccess, greenRelease...)
+	st.cc.pipeline(shinyService, circleciclient.PipelineVCS{Branch: mainBranch}, time.Now(), stateSuccess)
+	return st, c, pr
+}
+
+// TestWatchRepositoryDecidesReleasedFromTheTagPipeline: with the manager's
+// CircleCI client the tag's own pipeline decides the released phase, the
+// commit statuses — green and complete from the start — and the default
+// branch's green pipeline do not: no pipeline for the tag yet keeps it
+// pending; setup and build running keep it pending
+// naming both workflows; both succeeded make it ready at once, statuses
+// posted that instant notwithstanding — no settle window.
+func TestWatchRepositoryDecidesReleasedFromTheTagPipeline(t *testing.T) {
+	st, c, pr := releasedWithTagPipelines(t, tools.TagPipelinesToken)
+	w := st.watch(t, c, pr, settling)
+	if w.Ready || w.Failure != nil || w.Pending != tools.PhaseReleased || names(w.Phases) != throughSetUp ||
+		w.PendingReason != "CircleCI has no pipeline for "+firstTag+" of "+org+"/"+shinyService+" yet" {
+		t.Fatalf("no tag pipeline yet: %+v", w)
+	}
+	st.cc.pipeline(shinyService, circleciclient.PipelineVCS{Tag: firstTag}, time.Now(), workflowRunning)
+	st.cc.workflow(shinyService, workflowSetup, workflowRunning)
+	if w = st.watch(t, c, pr, settling); w.Ready || w.Failure != nil || w.Pending != tools.PhaseReleased ||
+		w.PendingReason != tagPipelineLine()+": build (running), setup (running) — waiting for the running workflows" {
+		t.Fatalf("setup and build running: %+v", w)
+	}
+	st.cc.finish(shinyService, stateSuccess)
+	st.ghs.repos.report(shinyService, stateSuccess, greenRelease...)
+	if w = st.watch(t, c, pr, settling); !w.Ready || w.Failure != nil || w.Pending != "" || w.PendingReason != "" || names(w.Phases) != allPhases || w.Waited != 0 {
+		t.Fatalf("setup and build succeeded: %+v", w)
+	}
+}
+
+// TestWatchRepositoryFailsReleasedOnARedTagPipeline: a failed workflow of
+// the tag pipeline fails the released phase at once, while another still
+// runs and the statuses are green, with the failed jobs and the failed
+// workflow's page.
+func TestWatchRepositoryFailsReleasedOnARedTagPipeline(t *testing.T) {
+	st, c, pr := releasedWithTagPipelines(t, tools.TagPipelinesToken)
+	wf := st.cc.pipeline(shinyService, circleciclient.PipelineVCS{Tag: firstTag}, time.Now(), workflowFailed)
+	st.cc.workflow(shinyService, workflowSetup, workflowRunning)
+	w := st.watch(t, c, pr, 3)
+	want := tagPipelineLine() + " is red: build (failed), setup (running) — failed build-image-amd64 (timed out), build-image-arm64 (timed out) (" +
+		circleciclient.WorkflowURL(org, shinyService, tagPipelineNumber, wf) + ")"
+	if w.Ready || w.Pending != "" || w.Failure == nil || w.Failure.Phase != tools.PhaseReleased || w.Failure.Reason != want || names(w.Phases) != throughSetUp || w.Waited != 0 {
+		t.Fatalf("a failed workflow: %+v failure=%+v", w, w.Failure)
+	}
+}
+
+// TestWatchRepositoryReadsTheStatusesWhereNoTagPipelineIsRead: an anonymous
+// CircleCI client reads the pipelines of public repositories alone — a
+// public repository's running tag pipeline keeps the phase pending, green
+// statuses notwithstanding; the same repository private is decided by the
+// statuses rule, unchanged: settling, then ready although the pipeline
+// still runs.
+func TestWatchRepositoryReadsTheStatusesWhereNoTagPipelineIsRead(t *testing.T) {
+	st, c, pr := releasedWithTagPipelines(t, tools.TagPipelinesAnonymous)
+	st.cc.pipeline(shinyService, circleciclient.PipelineVCS{Tag: firstTag}, time.Now(), workflowRunning)
+	st.ghs.repos.setPrivate(shinyService, false)
+	if w := st.watch(t, c, pr, settling); w.Ready || w.Pending != tools.PhaseReleased || w.PendingReason != tagPipelineLine()+": build (running) — waiting for the running workflows" {
+		t.Fatalf("public, read anonymously: %+v", w)
+	}
+	st.ghs.repos.setPrivate(shinyService, true)
+	st.ghs.repos.report(shinyService, stateSuccess, greenRelease...)
+	if w := st.watch(t, c, pr, settling); w.Ready || w.Pending != tools.PhaseReleased || !strings.HasPrefix(w.PendingReason, "the CircleCI statuses on "+firstTag+": ") ||
+		!strings.Contains(w.PendingReason, "released once unchanged for "+watchSettle.String()) {
+		t.Fatalf("private, settling: %+v", w)
+	}
+	if w := st.watch(t, c, pr, 3); !w.Ready || w.Failure != nil || names(w.Phases) != allPhases {
+		t.Fatalf("private, settled: %+v", w)
 	}
 }

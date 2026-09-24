@@ -124,9 +124,30 @@ func newStack(t *testing.T) *stack {
 	return newStackWith(t, "")
 }
 
+// stackOption changes the tools' dependencies before the server is built.
+type stackOption func(*stack, *tools.Deps)
+
+// withTagPipelines hands the tools the manager's CircleCI client over the
+// fake, as main does while the release watch is on: mode is
+// tools.TagPipelinesToken or tools.TagPipelinesAnonymous.
+func withTagPipelines(mode string) stackOption {
+	return func(st *stack, d *tools.Deps) {
+		cfg := circleciclient.Config{Token: "cci-token", BaseURL: st.cc.URL}
+		if mode == tools.TagPipelinesAnonymous {
+			cfg = circleciclient.Config{Anonymous: true, BaseURL: st.cc.URL}
+		}
+		cc, err := circleciclient.New(cfg)
+		if err != nil {
+			panic(err)
+		}
+		d.CircleCI, d.TagPipelines = cc, mode
+	}
+}
+
 // newStackWith is the stack with the review client's debug channel set (as
-// a name reviews.channels resolves), or without one for "".
-func newStackWith(t *testing.T, debugChannel string) *stack {
+// a name reviews.channels resolves), or without one for "", and the options
+// applied to the tools' dependencies.
+func newStackWith(t *testing.T, debugChannel string, opts ...stackOption) *stack {
 	t.Helper()
 	log := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError}))
 	ghs := newFakeGitHub(t, map[string]string{aliceToken: alice, carolToken: carol, daveToken: dave})
@@ -179,10 +200,14 @@ func newStackWith(t *testing.T, debugChannel string) *stack {
 	if err != nil {
 		t.Fatal(err)
 	}
-	ts := tools.New(tools.Deps{Version: testVersion, GitHubAPIURL: apiURL, AuthorizationServer: server.DefaultAuthorizationServer, App: app, Inventory: store, Collector: st.col, Schema: schema, Log: log,
+	deps := tools.Deps{Version: testVersion, GitHubAPIURL: apiURL, AuthorizationServer: server.DefaultAuthorizationServer, App: app, Inventory: store, Collector: st.col, Schema: schema, Log: log,
 		TeamFilesRepository: org + "/github", TeamFilesRef: mainBranch, SweepTeams: []string{team, teamPlaneteers}, WatchInterval: 20 * time.Millisecond, WatchSettle: watchSettle,
 		Review:   reviews,
-		Scaffold: fakeScaffold{}})
+		Scaffold: fakeScaffold{}}
+	for _, o := range opts {
+		o(st, &deps)
+	}
+	ts := tools.New(deps)
 	st.col.OnReconciled(ts.Reconciled)
 	st.col.OnConflict(ts.Conflicted)
 	st.col.OnReleased(ts.Released)

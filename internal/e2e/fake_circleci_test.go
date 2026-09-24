@@ -87,6 +87,24 @@ func (f *fakeCircleCI) rerun(repo, status string, at time.Time) {
 	f.jobs[wfID] = []circleciclient.Job{{Name: "build-image-amd64", Status: status}, {Name: "build-image-arm64", Status: status}, {Name: jobPushRelease, Status: status}}
 }
 
+// workflow adds a workflow name of status to repo's newest pipeline.
+func (f *fakeCircleCI) workflow(repo, name, status string) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	p := f.pipelines[org+"/"+repo][0]
+	f.workflows[p.ID] = append(f.workflows[p.ID], circleciclient.Workflow{ID: p.ID + "-" + name, Name: name, Status: status, PipelineNumber: p.Number, CreatedAt: p.CreatedAt})
+}
+
+// finish sets every workflow of repo's newest pipeline to status.
+func (f *fakeCircleCI) finish(repo, status string) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	p := f.pipelines[org+"/"+repo][0]
+	for i := range f.workflows[p.ID] {
+		f.workflows[p.ID][i].Status = status
+	}
+}
+
 // count is how many requests the fake answered so far.
 func (f *fakeCircleCI) count() int {
 	f.mu.Lock()

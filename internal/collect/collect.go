@@ -8,11 +8,13 @@ package collect
 
 import (
 	"context"
+	"crypto/rand"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
 	"net/http"
+	"os"
 	"sort"
 	"strings"
 	"sync"
@@ -125,7 +127,7 @@ var ErrSweepRunning = errors.New("a sweep is already running")
 
 // Collector fills the store.
 type Collector struct {
-	reconciled func(context.Context, *inventory.Record)
+	reconciled func(context.Context, *inventory.Record) error
 	conflicted func(context.Context, *inventory.Record, *github.PullRequest)
 	// released tells the team about a release nothing was published for and
 	// returns the sentence and whether it reached the channel (releases.go).
@@ -145,6 +147,8 @@ type Collector struct {
 	// wake wakes the reconciler poller between ticks: WakeReconciler sends,
 	// the poller receives; one buffered wake is all a poll needs.
 	wake chan struct{}
+	// holder names this collector in the reconciler poller's lease.
+	holder string
 
 	srcMu    sync.Mutex
 	srcCache *sources
@@ -163,7 +167,7 @@ func New(opts Options, reader *gh.Reader, store *inventory.Store, checker Checke
 		log = slog.Default()
 	}
 	return &Collector{opts: opts, reader: reader, gql: newGraphQL(reader.GraphQLURL(), reader.HTTP(), opts.BudgetFloor), store: store, checker: checker, log: log, now: opts.Now,
-		blobs: &http.Client{Timeout: 90 * time.Second}, wake: make(chan struct{}, 1)}
+		blobs: &http.Client{Timeout: 90 * time.Second}, wake: make(chan struct{}, 1), holder: leaseHolder()}
 }
 
 // Options are the collector's options.
@@ -430,8 +434,27 @@ func (c *Collector) existing(ctx context.Context) (map[string]*inventory.Record,
 // reconciler — the poller read the run's artifact) or on demand. A repository neither declared nor on GitHub loses
 // its record and is reported as inventory.ErrNotFound.
 // OnReconciled registers the hook a refresh with a reconciler run calls after
-// the record is stored: the completion message to the team's channel.
-func (c *Collector) OnReconciled(fn func(context.Context, *inventory.Record)) { c.reconciled = fn }
+// the record is stored: the completion message to the team's channel. Its
+// error says the team was not told of the run; the poller tells it again.
+func (c *Collector) OnReconciled(fn func(context.Context, *inventory.Record) error) {
+	c.reconciled = fn
+}
+
+// tell calls the completion hook for a record's run; errNotTold with the
+// hook's error.
+func (c *Collector) tell(ctx context.Context, rec *inventory.Record) error {
+	if err := c.reconciled(ctx, rec); err != nil {
+		return fmt.Errorf("%w: %s: %w", errNotTold, rec.Repository, err)
+	}
+	return nil
+}
+
+// leaseHolder names a collector in the poller's lease: the host (the pod)
+// and a random part, unique per process.
+func leaseHolder() string {
+	host, _ := os.Hostname()
+	return host + "/" + rand.Text()
+}
 
 func (c *Collector) Refresh(ctx context.Context, repository string, run *inventory.LastRun, source string) (*inventory.Record, error) {
 	name := strings.TrimPrefix(repository, c.opts.Org+"/")
@@ -465,7 +488,7 @@ func (c *Collector) Refresh(ctx context.Context, repository string, run *invento
 		return nil, err
 	}
 	if run != nil && c.reconciled != nil {
-		c.reconciled(ctx, rec)
+		return rec, c.tell(ctx, rec)
 	}
 	return rec, nil
 }

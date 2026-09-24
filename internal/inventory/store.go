@@ -12,6 +12,7 @@ import (
 	"log/slog"
 	"net"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -21,12 +22,14 @@ import (
 
 // Keys: repository records under KeyPrefix<owner>/<name>, the last completed
 // sweep's summary under SweepKey, the unfinished sweep's cursor under
-// SweepCursorKey, the reconciler poller's cursor under ReconcilerKey.
+// SweepCursorKey, the reconciler poller's cursor under ReconcilerKey and the
+// lease of the one pod polling it under ReconcilerLeaseKey.
 const (
-	KeyPrefix      = "repo:"
-	SweepKey       = "inventory:sweep"
-	SweepCursorKey = "inventory:sweep-cursor"
-	ReconcilerKey  = "inventory:reconciler"
+	KeyPrefix          = "repo:"
+	SweepKey           = "inventory:sweep"
+	SweepCursorKey     = "inventory:sweep-cursor"
+	ReconcilerKey      = "inventory:reconciler"
+	ReconcilerLeaseKey = "inventory:reconciler-lease"
 )
 
 // Connection timing: one dial is bounded by dialTimeout, and WaitConnected
@@ -385,6 +388,52 @@ func (s *Store) ReconcilerCursor(ctx context.Context) (*ReconcilerCursor, error)
 	return &cur, nil
 }
 
+// leaseScript takes the lease in KEYS[1] for the holder ARGV[1] for ARGV[2]
+// milliseconds, or renews it when the holder holds it already: 1 when the
+// holder holds it now, 0 when another does.
+var leaseScript = valkey.NewLuaScript(`if redis.call('GET', KEYS[1]) == ARGV[1] then
+  return redis.call('PEXPIRE', KEYS[1], ARGV[2])
+end
+if redis.call('SET', KEYS[1], ARGV[1], 'NX', 'PX', ARGV[2]) then
+  return 1
+end
+return 0`)
+
+// releaseScript gives up the lease in KEYS[1] when the holder ARGV[1] holds it.
+var releaseScript = valkey.NewLuaScript(`if redis.call('GET', KEYS[1]) == ARGV[1] then
+  return redis.call('DEL', KEYS[1])
+end
+return 0`)
+
+// LeaseReconciler takes or renews the reconciler poller's lease for holder,
+// for ttl: true when holder holds it now, false while another pod does. One
+// pod polls the cursor at a time, so a rolling update's two pods never both
+// consume one run.
+func (s *Store) LeaseReconciler(ctx context.Context, holder string, ttl time.Duration) (bool, error) {
+	c, err := s.conn()
+	if err != nil {
+		return false, err
+	}
+	n, err := leaseScript.Exec(ctx, c, []string{ReconcilerLeaseKey}, []string{holder, strconv.FormatInt(ttl.Milliseconds(), 10)}).AsInt64()
+	if err != nil {
+		return false, fail("lease reconciler", err)
+	}
+	return n == 1, nil
+}
+
+// ReleaseReconciler gives up holder's lease of the reconciler poller, so the
+// next poll of any pod need not wait for it to run out.
+func (s *Store) ReleaseReconciler(ctx context.Context, holder string) error {
+	c, err := s.conn()
+	if err != nil {
+		return err
+	}
+	if err := releaseScript.Exec(ctx, c, []string{ReconcilerLeaseKey}, []string{holder}).Error(); err != nil {
+		return fail("release reconciler lease", err)
+	}
+	return nil
+}
+
 // putJSON stores v as JSON under key; what names the value in errors.
 func (s *Store) putJSON(ctx context.Context, key, what string, v any) error {
 	c, err := s.conn()
@@ -432,8 +481,8 @@ func (s *Store) del(ctx context.Context, key string) error {
 	return nil
 }
 
-// Clear removes every record, the sweep summary and both cursors —
-// the store is a cache, so a forced rebuild (and a test on a shared Valkey)
+// Clear removes every record, the sweep summary, both cursors and the
+// poller's lease — the store is a cache, so a forced rebuild (and a test on a shared Valkey)
 // starts from nothing.
 func (s *Store) Clear(ctx context.Context) error {
 	keys, err := s.Keys(ctx)
@@ -444,7 +493,7 @@ func (s *Store) Clear(ctx context.Context) error {
 		return err
 	}
 	// One DEL per key: a multi-key command needs one hash slot.
-	for _, key := range []string{SweepKey, SweepCursorKey, ReconcilerKey} {
+	for _, key := range []string{SweepKey, SweepCursorKey, ReconcilerKey, ReconcilerLeaseKey} {
 		if err := s.del(ctx, key); err != nil {
 			return err
 		}

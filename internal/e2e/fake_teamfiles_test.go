@@ -128,6 +128,8 @@ type fakeTeamFiles struct {
 	// checksPending marks pull requests whose checks still run: GitHub
 	// refuses to merge them (405) and lets auto-merge be armed.
 	checksPending map[int]bool
+	// reads counts the contents reads by path and ref.
+	reads map[string]int
 }
 
 func newFakeTeamFiles() *fakeTeamFiles {
@@ -139,6 +141,7 @@ func newFakeTeamFiles() *fakeTeamFiles {
 			"repository-setup/" + teamPlaneteers + ".yaml": []byte("slackChannel: " + teamPlaneteers + "\nstandupChannel: standup-planeteers\n"),
 		},
 		refs: map[string]string{headsPrefix + mainBranch: "base000"}, trees: map[string]map[string][]byte{}, commits: map[string]string{}, parents: map[string]string{}, pulls: map[int]*fakePullRequest{}, next: 4711,
+		reads: map[string]int{},
 	}
 	f.snapshots = map[string]map[string][]byte{"base000": copyFiles(f.files)}
 	return f
@@ -232,6 +235,32 @@ func (f *fakeTeamFiles) land(pr *fakePullRequest, at time.Time) {
 	f.snapshots[sha] = copyFiles(f.files)
 }
 
+// commit lands files on main as one new commit, the way a push to main does.
+func (f *fakeTeamFiles) commit(files map[string][]byte) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	for p, c := range files {
+		f.files[p] = c
+	}
+	sha := fmt.Sprintf("main%03d", len(f.snapshots))
+	f.refs[headsPrefix+mainBranch] = sha
+	f.snapshots[sha] = copyFiles(f.files)
+}
+
+// head is the commit at main.
+func (f *fakeTeamFiles) head() string {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.refs[headsPrefix+mainBranch]
+}
+
+// readsOf is how many times path was read at ref.
+func (f *fakeTeamFiles) readsOf(path, ref string) int {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.reads[path+"@"+ref]
+}
+
 // mergeSHA is the merge commit of pull request n, "" while it is unmerged.
 func (f *fakeTeamFiles) mergeSHA(n int) string {
 	f.mu.Lock()
@@ -289,17 +318,32 @@ func (f *fakeTeamFiles) register(mux *http.ServeMux, g *fakeGitHub) {
 		f.mu.Lock()
 		defer f.mu.Unlock()
 		p := r.PathValue("path")
+		f.reads[p+"@"+r.URL.Query().Get(kRef)]++
 		view := f.viewAt(r.URL.Query().Get(kRef))
 		if c, ok := view[p]; ok {
 			writeJSON(w, http.StatusOK, map[string]any{kType: kFile, kName: path.Base(p), kPath: p, kSHA: "blob-" + p, "encoding": "base64", kContent: base64.StdEncoding.EncodeToString(c)})
 			return
 		}
+		// A directory lists its files and its subdirectories, as GitHub does.
 		var dir []map[string]any
+		listed := map[string]bool{}
 		for name := range view {
-			if path.Dir(name) == p {
-				dir = append(dir, map[string]any{kType: kFile, kName: path.Base(name), kPath: name})
+			rest, ok := strings.CutPrefix(name, p+"/")
+			if !ok {
+				continue
 			}
+			first, _, sub := strings.Cut(rest, "/")
+			if listed[first] {
+				continue
+			}
+			listed[first] = true
+			typ := kFile
+			if sub {
+				typ = "dir"
+			}
+			dir = append(dir, map[string]any{kType: typ, kName: first, kPath: p + "/" + first})
 		}
+		sort.Slice(dir, func(i, j int) bool { return dir[i][kName].(string) < dir[j][kName].(string) })
 		if dir == nil {
 			ghMessage(w, http.StatusNotFound, "Not Found")
 			return

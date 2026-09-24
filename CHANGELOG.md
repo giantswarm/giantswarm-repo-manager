@@ -41,6 +41,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- The engine check compares CODEOWNERS with the repository's align-files override
+  (`repositories/override/<repository>/CODEOWNERS` in giantswarm/github) when it has one: a repository whose CODEOWNERS
+  is exactly its override had read *not in sync* against the generated single-team file. A sweep and a refresh list the
+  override directory once, at the commit the team files were read at, and read only a checked repository's own
+  override; the opt-in plan and *Align now*'s dry run read the same check. devctl v8.98.8.
 - A declaration whose repository is gone reads as the reconciler reads it: an entry declared `lifecycle: deleted` is
   the record of the deletion and carries no `declared-but-gone` finding (a repository deleted through the Repositories
   page's Delete had shown the finding with the fix "add the entry back by creating the repository … or remove the

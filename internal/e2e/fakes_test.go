@@ -29,6 +29,7 @@ const (
 	kItems         = "items"
 	kTagName       = "tagName"
 	kTagCommit     = "tagCommit"
+	kOID           = "oid"
 	jobPushRelease = "push-to-registries-release"
 )
 
@@ -77,6 +78,8 @@ func newFakeGitHub(t *testing.T, logins map[string]string) *fakeGitHub {
 	g := &fakeGitHub{logins: logins, teams: map[string][]string{}, org: &fakeOrg{remaining: 5000, now: time.Now(), teamFile: teamFile}, files: newFakeTeamFiles(), actions: &fakeActions{}, repos: newFakeRepos(), roles: map[string]string{}}
 	// The org's GraphQL knows the repositories the REST surface creates.
 	g.org.repos = g.repos
+	// The org's GraphQL reads the team files at the team-files fake's main.
+	g.org.head = g.files.head
 	mux := http.NewServeMux()
 	mux.HandleFunc("POST /api/v3/graphql", func(w http.ResponseWriter, r *http.Request) {
 		// The team-files fake takes the auto-merge mutation; the org fake

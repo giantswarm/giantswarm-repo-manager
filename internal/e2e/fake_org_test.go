@@ -11,7 +11,6 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/giantswarm/devctl/v8/pkg/reposetup"
 	"github.com/giantswarm/devctl/v8/pkg/reposetup/reconcile"
 )
 
@@ -119,6 +118,8 @@ type fakeOrg struct {
 	// otherwise. private names the repositories GraphQL reports PRIVATE.
 	releases map[string]fakeLatestRelease
 	private  map[string]bool
+	// head is the commit at main of the team files' repository.
+	head func() string
 }
 
 // fakeLatestRelease is a repository's latest release as the release watch reads
@@ -158,10 +159,10 @@ func (o *fakeOrg) releasePage() []map[string]any {
 				prs = append(prs, map[string]any{kNumber: rel.pr, kURL: fmt.Sprintf("https://github.com/%s/%s/pull/%d", org, name, rel.pr)})
 			}
 			n["latestRelease"] = map[string]any{kTagName: rel.tag, kCreatedAt: rel.createdAt.UTC().Format(time.RFC3339),
-				kTagCommit: map[string]any{"oid": "a80db8ff", "associatedPullRequests": map[string]any{kNodes: prs}}}
+				kTagCommit: map[string]any{kOID: "a80db8ff", "associatedPullRequests": map[string]any{kNodes: prs}}}
 		case name == repoPresent:
 			n["latestRelease"] = map[string]any{kTagName: presentTag, kCreatedAt: o.now.AddDate(0, -1, 0).Format(time.RFC3339),
-				kTagCommit: map[string]any{"oid": "0ld", "associatedPullRequests": map[string]any{kNodes: []any{}}}}
+				kTagCommit: map[string]any{kOID: "0ld", "associatedPullRequests": map[string]any{kNodes: []any{}}}}
 		default:
 			n["latestRelease"] = nil
 		}
@@ -202,6 +203,7 @@ func (o *fakeOrg) handle(w http.ResponseWriter, r *http.Request) {
 	case contains(req.Query, "teamFiles:"):
 		data["organization"] = map[string]any{"teams": map[string]any{kPageInfo: map[string]any{kHasNextPage: false}, kNodes: []map[string]any{{kSlug: team}, {kSlug: teamPlaneteers}}}}
 		data[kGitHub] = map[string]any{
+			"head":      map[string]any{kOID: o.head()},
 			"teamFiles": map[string]any{"entries": []map[string]any{{kName: "team-bumblebee.yaml", kType: "blob", kObject: map[string]any{kText: teamFileText}}}},
 			"catalog":   map[string]any{kText: catalogFile},
 		}
@@ -474,6 +476,10 @@ func (o *fakeOrg) history(name string) map[string]any {
 type fakeChecker struct {
 	calls atomic.Int32
 	hold  chan struct{}
+	// overrides are the CODEOWNERS overrides the requests carried, by
+	// repository, a nil entry for a request without one.
+	mu        sync.Mutex
+	overrides map[string][]byte
 	// release answers a repository's latest release tag, as the engine's
 	// release step would read it; nil is the present tag.
 	release func(name string) string
@@ -498,8 +504,24 @@ func (o *fakeOrg) latestTag(name string) string {
 	return o.releases[name].tag
 }
 
-func (c *fakeChecker) Check(_ context.Context, teamSlug string, entry reposetup.Entry) (*reconcile.Result, error) {
+// override is the CODEOWNERS override the last request for the repository
+// carried, and whether the repository was checked.
+func (c *fakeChecker) override(name string) ([]byte, bool) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	o, ok := c.overrides[name]
+	return o, ok
+}
+
+func (c *fakeChecker) Check(_ context.Context, req reconcile.Request) (*reconcile.Result, error) {
 	c.calls.Add(1)
+	teamSlug, entry := req.Team, req.Entry
+	c.mu.Lock()
+	if c.overrides == nil {
+		c.overrides = map[string][]byte{}
+	}
+	c.overrides[entry.Name] = req.CodeownersOverride
+	c.mu.Unlock()
 	if c.hold != nil {
 		<-c.hold
 	}

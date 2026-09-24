@@ -117,9 +117,11 @@ func sleep(ctx context.Context, d time.Duration) error {
 // progressEvery is how many written records a sweep logs its progress after.
 const progressEvery = 50
 
-// Checker runs the engine's checks in read mode for one accepted declaration.
+// Checker runs the engine's checks in read mode for one accepted
+// declaration: the collector's request, its entry, team and CODEOWNERS
+// override resolved from the sweep's sources.
 type Checker interface {
-	Check(ctx context.Context, team string, entry reposetup.Entry) (*reconcile.Result, error)
+	Check(ctx context.Context, req reconcile.Request) (*reconcile.Result, error)
 }
 
 // ErrSweepRunning is returned when a sweep is already running.
@@ -554,7 +556,7 @@ func (c *Collector) check(ctx context.Context, r *inventory.Record, src *sources
 		// reconcile` prints for it. Read from the declaration alone, so a
 		// gone repository keeps the refusal beside declared-but-gone.
 		at := c.now()
-		r.Setup.Checks = reconcile.Refused(reconcile.Request{Owner: c.opts.Org, Team: d.Team, Entry: d.entry, Mode: reconcile.ModeCheck}, at)
+		r.Setup.Checks = reconcile.Refused(c.request(d), at)
 		r.Setup.CheckedAt, r.Setup.CheckError = &at, ""
 		return false
 	case r.Reality == nil:
@@ -566,12 +568,19 @@ func (c *Collector) check(ctx context.Context, r *inventory.Record, src *sources
 			return false
 		}
 	}
-	res, err := c.checker.Check(ctx, d.Team, d.entry)
+	// The engine compares CODEOWNERS with the repository's align-files
+	// override when it has one, read at the team files' commit; nil
+	// compares it with the generated file naming the team.
+	req := c.request(d)
+	override, err := src.overrides.Codeowners(ctx, r.Name)
 	if err != nil {
-		if !keepOld {
-			r.Setup.Checks, r.Setup.CheckedAt = nil, nil
-		}
-		r.Setup.CheckError = err.Error()
+		c.checkFailed(r, keepOld, fmt.Errorf("read the CODEOWNERS override: %w", err))
+		return false
+	}
+	req.CodeownersOverride = override
+	res, err := c.checker.Check(ctx, req)
+	if err != nil {
+		c.checkFailed(r, keepOld, err)
 		return true
 	}
 	// The engine has no CircleCI client here: its circleci and release
@@ -580,6 +589,20 @@ func (c *Collector) check(ctx context.Context, r *inventory.Record, src *sources
 	at := c.now()
 	r.Setup.Checks, r.Setup.CheckedAt, r.Setup.CheckError = res, &at, ""
 	return true
+}
+
+// request is the engine's read-mode request for a declaration.
+func (c *Collector) request(d *declared) reconcile.Request {
+	return reconcile.Request{Owner: c.opts.Org, Team: d.Team, Entry: d.entry, Mode: reconcile.ModeCheck}
+}
+
+// checkFailed records a check that did not produce a result; keepOld leaves
+// the older result in place.
+func (c *Collector) checkFailed(r *inventory.Record, keepOld bool, err error) {
+	if !keepOld {
+		r.Setup.Checks, r.Setup.CheckedAt = nil, nil
+	}
+	r.Setup.CheckError = err.Error()
 }
 
 // parallel runs fn over items, concurrency at a time, and returns when every

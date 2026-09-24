@@ -253,7 +253,7 @@ func TestReleaseStepFromTheWatch(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			sr := releaseStep(slug, tag, statuses, nil, nil, tc.w)
+			sr := releaseStep(slug, tag, mainBranch, statuses, nil, nil, tc.w)
 			if sr.Verdict != tc.verdict || !strings.Contains(sr.Summary, tc.summary) {
 				t.Errorf("verdict=%s summary=%q, want %s containing %q", sr.Verdict, sr.Summary, tc.verdict, tc.summary)
 			}

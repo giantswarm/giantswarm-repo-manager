@@ -27,6 +27,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- The record's release step no longer reads a release built from the default branch's build
+  ([devctl#2408](https://github.com/giantswarm/devctl/issues/2408)). A release cut on the default branch head — every
+  creation's `v0.1.0` — carries that branch's pipeline's statuses on its commit, and for a repository whose tag
+  pipeline the release watch cannot read (private, no `circleci.existingSecret`) the step read `setup` and `go-build`
+  green as the release's: `release v0.1.0 built: CircleCI success (1 job)` for a tag no pipeline built, while
+  `devctl repo watch` failed on the missed build. The rule `watch_repository` follows since #122 now decides both,
+  shared as `inventory.CI.TagOnly`: until a job only the tag pipeline runs (on the tag, not on the default branch) has
+  reported, the reconciler run's release step decides when it found the tag unbuilt or red; without such a run, a
+  green set of shared jobs reads `unchecked` naming the tag pipeline's own jobs, never built. A declaration without
+  tag-only jobs reads as before.
+
 - The chart's Valkey keeps the inventory on a 1Gi ReadWriteOnce PersistentVolumeClaim by default
   (`valkey.valkey.dataStorage`), as the chart's `Recreate` strategy assumed; it lived in an `emptyDir`, so a Valkey pod
   restart emptied it. `make helm-verify` asserts the default render: the volume, and the restricted Pod Security

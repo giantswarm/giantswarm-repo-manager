@@ -62,6 +62,36 @@ func (j CIJob) RunsOnBranches() bool {
 	return true
 }
 
+// TagOnly are the names of the jobs the pipeline runs on tag and not on
+// branch: a status of one of them on a commit both name — a release cut on
+// the default branch head — can only be the tag pipeline's. Nil without a
+// CI block or when every tag job runs on branch too.
+func (ci *CI) TagOnly(tag, branch string) []string {
+	if ci == nil {
+		return nil
+	}
+	var out []string
+	for _, j := range ci.Jobs {
+		if j.RunsOnTag(tag) && !j.RunsOnBranch(branch) {
+			out = append(out, j.Name)
+		}
+	}
+	return out
+}
+
+// Reported says whether one of the `ci/circleci:` contexts names one of the
+// jobs.
+func Reported(contexts, jobs []string) bool {
+	for _, c := range contexts {
+		for _, j := range jobs {
+			if JobOf(c) == j {
+				return true
+			}
+		}
+	}
+	return false
+}
+
 // matchesAny says whether ref matches one of the patterns: a regular
 // expression between slashes, else the ref's name. A pattern that does not
 // compile matches nothing.

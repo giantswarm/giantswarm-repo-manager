@@ -37,7 +37,7 @@ func fillClientlessSteps(res *reconcile.Result, rec *inventory.Record) {
 		*sr = circleCIStep(rec.Repository, rec.Reality.DefaultBranch, rec.CircleCI, rec.CI, last)
 	}
 	if sr := res.Step(reconcile.StepRelease); sr != nil && clientless(sr) {
-		*sr = releaseStep(rec.Repository, releaseTag(sr.Summary), rec.Reality.LatestRelease, rec.CI, last, rec.Setup.Release)
+		*sr = releaseStep(rec.Repository, releaseTag(sr.Summary), rec.Reality.DefaultBranch, rec.Reality.LatestRelease, rec.CI, last, rec.Setup.Release)
 	}
 	converge(res)
 }
@@ -67,7 +67,7 @@ func rewriteReleaseStep(rec *inventory.Record) {
 	if sr == nil {
 		return
 	}
-	*sr = releaseStep(rec.Repository, w.Tag, rec.Reality.LatestRelease, rec.CI, rec.Setup.LastRun, w)
+	*sr = releaseStep(rec.Repository, w.Tag, rec.Reality.DefaultBranch, rec.Reality.LatestRelease, rec.CI, rec.Setup.LastRun, w)
 	converge(rec.Setup.Checks)
 }
 
@@ -230,30 +230,34 @@ func jobs(s *inventory.HeadStatus) string {
 // CircleCI, which the commit's statuses cannot tell from a branch
 // pipeline's at the same commit. Else the tag commit's `ci/circleci:`
 // statuses say whether CircleCI built the release, read against the
-// declaration (statusesReleaseStep); the reconciler's run stands in while
-// the commit carries none and that run named the tag; a commit without any
+// declaration (statusesReleaseStep) — except while none of the jobs only
+// the tag pipeline runs has reported there (inventory.CI.TagOnly): a
+// release cut on the default branch head carries that branch's pipeline's
+// statuses too, and the reconciler run that named the tag unbuilt or red,
+// having read the tag's own pipeline with its token, decides then. The run
+// also stands in while the commit carries no status; a commit without any
 // CircleCI status is the missed tag build the engine reports (finding
-// missed-tag-build: a tag is never built for the person).
-func releaseStep(slug, tag string, rel *inventory.Release, ci *inventory.CI, last *inventory.LastRun, w *inventory.ReleaseWatch) reconcile.StepResult {
+// missed-tag-build).
+func releaseStep(slug, tag, branch string, rel *inventory.Release, ci *inventory.CI, last *inventory.LastRun, w *inventory.ReleaseWatch) reconcile.StepResult {
 	sr := reconcile.StepResult{Step: reconcile.StepRelease}
 	if w != nil && w.Tag == tag {
 		if done, ok := watchedReleaseStep(slug, tag, w); ok {
 			return done
 		}
 	}
-	if rel != nil && rel.Tag == tag && rel.Build != nil {
-		return statusesReleaseStep(slug, tag, rel.Build, ci)
+	run := runStep(last, reconcile.StepRelease)
+	if run != nil && !mentions(run, tag) {
+		run = nil
 	}
-	if run := runStep(last, reconcile.StepRelease); run != nil && mentions(run, tag) {
-		from := " (reconciler run of " + last.Timestamp.UTC().Format(time.RFC3339) + ")"
-		sr.Verdict = run.Verdict
-		sr.Changes = append([]string(nil), run.Changes...)
-		sr.Findings = append([]reconcile.Finding(nil), run.Findings...)
-		sr.Summary = fmt.Sprintf("release %s%s", tag, from)
-		if run.Summary != "" {
-			sr.Summary = run.Summary + from
+	if rel != nil && rel.Tag == tag && rel.Build != nil {
+		tagOnly := ci.TagOnly(tag, branch)
+		if run != nil && unbuilt(run) && !inventory.Reported(rel.Build.Contexts, tagOnly) {
+			return runReleaseStep(run, last, tag)
 		}
-		return sr
+		return statusesReleaseStep(slug, tag, rel.Build, ci, tagOnly)
+	}
+	if run != nil {
+		return runReleaseStep(run, last, tag)
 	}
 	switch {
 	case rel == nil || rel.Tag != tag:
@@ -280,6 +284,35 @@ func releaseStep(slug, tag string, rel *inventory.Release, ci *inventory.CI, las
 			"cut the next tag, or trigger the tag's pipeline by hand")}
 	}
 	return sr
+}
+
+// runReleaseStep is the reconciler run's release step for tag, dated.
+func runReleaseStep(run *reconcile.StepResult, last *inventory.LastRun, tag string) reconcile.StepResult {
+	from := " (reconciler run of " + last.Timestamp.UTC().Format(time.RFC3339) + ")"
+	sr := reconcile.StepResult{Step: reconcile.StepRelease, Verdict: run.Verdict,
+		Changes:  append([]string(nil), run.Changes...),
+		Findings: append([]reconcile.Finding(nil), run.Findings...),
+		Summary:  fmt.Sprintf("release %s%s", tag, from),
+	}
+	if run.Summary != "" {
+		sr.Summary = run.Summary + from
+	}
+	return sr
+}
+
+// unbuilt says whether the run's release step found the tag not built: the
+// step failed, or it reports the tag without a pipeline (missed-tag-build)
+// or its pipeline red (red-release).
+func unbuilt(run *reconcile.StepResult) bool {
+	if run.Verdict == reconcile.VerdictFailed {
+		return true
+	}
+	for _, f := range run.Findings {
+		if f.Kind == reconcile.FindingMissedTagBuild || f.Kind == reconcile.FindingRedRelease {
+			return true
+		}
+	}
+	return false
 }
 
 // watchedReleaseStep is the release step from the release watch: built,

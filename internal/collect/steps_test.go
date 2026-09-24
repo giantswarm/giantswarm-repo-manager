@@ -19,6 +19,8 @@ const (
 	amd64Leg       = "build-image-amd64"
 	mainBranch     = "main"
 	vTags          = "/^v.*/"
+	// noBranch is the branches filter of a job that runs on tags alone.
+	noBranch = "/.*/"
 )
 
 // TestFillClientlessSteps: the engine's circleci and release steps, skipped
@@ -236,7 +238,7 @@ func TestStatusesReleaseStep(t *testing.T) {
 	const slug, tag = "giantswarm/x", "v2.58.8"
 	at := time.Date(2026, 9, 23, 8, 13, 0, 0, time.UTC)
 	tagOnly := func(n string) inventory.CIJob {
-		return inventory.CIJob{Name: n, TagsOnly: []string{vTags}, BranchesIgnore: []string{"/.*/"}}
+		return inventory.CIJob{Name: n, TagsOnly: []string{vTags}, BranchesIgnore: []string{noBranch}}
 	}
 	shared := func(n string) inventory.CIJob { return inventory.CIJob{Name: n, TagsOnly: []string{vTags}} }
 	branchOnly := func(n string) inventory.CIJob { return inventory.CIJob{Name: n, BranchesIgnore: []string{mainBranch}} }
@@ -295,7 +297,7 @@ func TestStatusesReleaseStep(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			got := statusesReleaseStep(slug, tag, tc.build, tc.ci)
+			got := statusesReleaseStep(slug, tag, tc.build, tc.ci, tc.ci.TagOnly(tag, mainBranch))
 			if got.Verdict != tc.verdict {
 				t.Errorf("verdict %s, want %s (%+v)", got.Verdict, tc.verdict, got)
 			}
@@ -330,7 +332,7 @@ func TestBuildsSentenceIgnoresOtherPipelines(t *testing.T) {
 	ci := &inventory.CI{Jobs: []inventory.CIJob{
 		{Name: "node-build", TagsOnly: []string{vTags}},
 		{Name: amd64Leg, BranchesIgnore: []string{mainBranch}},
-		{Name: releaseJobName, TagsOnly: []string{vTags}, BranchesIgnore: []string{"/.*/"}},
+		{Name: releaseJobName, TagsOnly: []string{vTags}, BranchesIgnore: []string{noBranch}},
 	}}
 	head := &inventory.HeadStatus{State: stateFailure, At: at,
 		Contexts: []string{"ci/circleci: " + amd64Leg, "ci/circleci: node-build", releaseJob},
@@ -342,5 +344,49 @@ func TestBuildsSentenceIgnoresOtherPipelines(t *testing.T) {
 	// Without a declaration the sentence is the head's as before.
 	if got := buildsSentence("giantswarm/x", mainBranch, head, nil, true); got != "CircleCI builds main: failure (3 jobs, 2026-09-23T09:06:02Z)" {
 		t.Errorf("without a declaration: %q", got)
+	}
+}
+
+// TestReleaseStepOfATagNoPipelineBuilt (devctl#2408): a chart repository's
+// first release is cut on the default branch head before the reconciler
+// follows the project, so no tag pipeline builds it, and the follow's build
+// of main posts setup and go-build green on the release's commit. Those
+// jobs run on main too and are no evidence for the tag: with the reconciler
+// run's missed-tag-build for the tag, the run decides; without a run, the
+// statuses read unchecked, never built. Once the tag pipeline's own jobs
+// (build-chart, push-chart-release) report, the statuses decide again.
+func TestReleaseStepOfATagNoPipelineBuilt(t *testing.T) {
+	const slug, tag = "giantswarm/x", "v0.1.0"
+	at := time.Date(2026, 9, 24, 6, 9, 34, 0, time.UTC)
+	ci := &inventory.CI{Jobs: []inventory.CIJob{
+		{Name: setupJob, TagsOnly: []string{vTags}},
+		{Name: "go-build", TagsOnly: []string{vTags}},
+		{Name: "build-chart", TagsOnly: []string{vTags}, BranchesIgnore: []string{mainBranch}},
+		{Name: "execute-chart-tests", BranchesIgnore: []string{mainBranch}},
+		{Name: "push-chart-release", TagsOnly: []string{vTags}, BranchesIgnore: []string{noBranch}},
+	}}
+	release := func(jobs ...string) *inventory.Release {
+		contexts := make([]string, 0, len(jobs))
+		for _, j := range jobs {
+			contexts = append(contexts, "ci/circleci: "+j)
+		}
+		return &inventory.Release{Tag: tag, Build: &inventory.HeadStatus{State: stateSuccess, Contexts: contexts, At: at}}
+	}
+	missed := "release v0.1.0 of giantswarm/x has no pipeline: nothing was built or published for the tag"
+	run := &inventory.LastRun{Timestamp: at, Result: reconcile.Result{Steps: []reconcile.StepResult{{Step: reconcile.StepRelease, Verdict: reconcile.VerdictReported,
+		Findings: []reconcile.Finding{{Kind: reconcile.FindingMissedTagBuild, Message: missed, Fix: "cut the next tag, or trigger the tag's pipeline by hand"}}}}}}
+
+	sr := releaseStep(slug, tag, mainBranch, release(setupJob, "go-build"), ci, run, nil)
+	if sr.Verdict != reconcile.VerdictReported || len(sr.Findings) != 1 || sr.Findings[0].Kind != reconcile.FindingMissedTagBuild || !strings.Contains(sr.Summary, "(reconciler run of ") {
+		t.Errorf("main's build beside the run's missed build: %+v, want the run's missed-tag-build", sr)
+	}
+	sr = releaseStep(slug, tag, mainBranch, release(setupJob, "go-build"), ci, nil, nil)
+	if sr.Verdict != reconcile.VerdictReported || len(sr.Findings) != 1 || sr.Findings[0].Kind != reconcile.FindingUnchecked ||
+		!strings.Contains(sr.Summary, "none of the tag pipeline's own jobs (build-chart, push-chart-release) on its commit") {
+		t.Errorf("main's build without a run: %+v, want unchecked naming the tag pipeline's own jobs", sr)
+	}
+	sr = releaseStep(slug, tag, mainBranch, release(setupJob, "go-build", "build-chart", "push-chart-release"), ci, run, nil)
+	if sr.Verdict != reconcile.VerdictOK || len(sr.Findings) != 0 || !strings.HasPrefix(sr.Summary, "release v0.1.0 built: CircleCI success (4 jobs") {
+		t.Errorf("the tag pipeline triggered by hand: %+v, want built", sr)
 	}
 }

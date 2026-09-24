@@ -229,9 +229,9 @@ type watcher struct {
 	// flavours are the declaration's, from the record read in the setUp
 	// phase: they say whether a chart job is expected on the release.
 	flavours []string
-	// jobs are the pipeline's jobs with their filters, from the same
-	// record: they say which statuses only the tag pipeline posts.
-	jobs []inventory.CIJob
+	// ci is the record's CI block, from the same record: its jobs and their
+	// filters say which statuses only the tag pipeline posts.
+	ci *inventory.CI
 	// run is the reconciler run, from the setUp phase.
 	run *inventory.LastRun
 	// dockerfile says whether the default branch carries a Dockerfile — the
@@ -383,9 +383,7 @@ func (w *watcher) setUp(ctx context.Context) (outcome, error) {
 	if rec.Declaration != nil {
 		w.flavours = rec.Declaration.Flavours
 	}
-	if rec.CI != nil {
-		w.jobs = rec.CI.Jobs
-	}
+	w.ci = rec.CI
 	if p := rec.Setup.PendingRun; p.Follows(w.number) && p.MergedAt == nil && w.t.d.Collector != nil {
 		// The pull request merged (the phase before this one) and the poller
 		// has not read the merge yet: wake it, so the run is looked for at
@@ -456,17 +454,13 @@ func (w *watcher) released(ctx context.Context) (outcome, error) {
 
 // tagPipelineReported says whether a status on the release's commit is the
 // tag pipeline's for certain: its job is one the pipeline runs on the tag
-// and not on the default branch.
+// and not on the default branch (inventory.CI.TagOnly).
 func (w *watcher) tagPipelineReported(tag string, st *github.CombinedStatus) bool {
+	contexts := make([]string, 0, len(st.Statuses))
 	for _, s := range st.Statuses {
-		job := inventory.JobOf(s.GetContext())
-		for _, j := range w.jobs {
-			if j.Name == job && j.RunsOnTag(tag) && !j.RunsOnBranch(w.branch) {
-				return true
-			}
-		}
+		contexts = append(contexts, s.GetContext())
 	}
-	return false
+	return inventory.Reported(contexts, w.ci.TagOnly(tag, w.branch))
 }
 
 // statusesVerdict is the released phase once CircleCI has reported on the

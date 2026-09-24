@@ -8,12 +8,14 @@ import (
 	"strings"
 	"time"
 
+	"github.com/giantswarm/devctl/v8/pkg/circleciclient"
 	"github.com/giantswarm/devctl/v8/pkg/reposetup"
 	"github.com/giantswarm/devctl/v8/pkg/reposetup/reconcile"
 	"github.com/google/go-github/v92/github"
 	"github.com/mark3labs/mcp-go/mcp"
 	mcpserver "github.com/mark3labs/mcp-go/server"
 
+	"github.com/giantswarm/giantswarm-repo-manager/internal/collect"
 	"github.com/giantswarm/giantswarm-repo-manager/internal/inventory"
 )
 
@@ -42,8 +44,9 @@ const contextImagePush = "push-to-registries"
 // The phases of a new repository, in order: the repository exists, its
 // default branch carries the scaffold, the declaration pull request is open,
 // merged, the reconciler run of that pull request has reported, and the
-// first release exists with its CircleCI statuses green, complete for the
-// declaration and settled.
+// first release exists with its tag pipeline's workflows green — or, where
+// the manager reads no tag pipeline, its CircleCI statuses green, complete
+// for the declaration and settled.
 const (
 	PhaseCreated    = "created"
 	PhaseScaffolded = "scaffolded"
@@ -71,9 +74,11 @@ type Watch struct {
 	// out; empty when ready or failed.
 	Pending string `json:"pending,omitempty"`
 	// PendingReason says why the pending phase could not be decided on the
-	// last read — a read GitHub refused, the statuses no identity reads, or,
-	// once CircleCI reports on the release, the statuses reported and what
-	// is still awaited; empty when the phase is simply not reached yet.
+	// last read — a read GitHub or CircleCI refused, the statuses no
+	// identity reads, or, once CircleCI builds the release, the tag
+	// pipeline's workflows and their states (the statuses reported and what
+	// is still awaited, where the manager reads no tag pipeline); empty when
+	// the phase is simply not reached yet.
 	PendingReason string `json:"pendingReason,omitempty"`
 	// Failure names the phase that failed and why; the phases before it are
 	// done.
@@ -115,7 +120,12 @@ func (t *tools) registerWatch(s *mcpserver.MCPServer) {
 			"or when timeout runs out — with the phases reached either way, each with its timestamp and the seconds since the phase before: "+
 			"created (the repository exists), scaffolded (its default branch carries the scaffold commit), declared (the declaration pull request is open), "+
 			"merged, setUp (the reconciler run of that pull request has reported: a failed step or a refused entry fails the phase, the run's other findings are "+
-			"carried as findings), released (the first release exists and the CircleCI statuses on its commit are green, complete and settled: CircleCI posts one status "+
+			"carried as findings), released (the first release exists and its build is green, decided on one of two paths — get_info's circleci.tagPipelines says which "+
+			"this deployment runs: token reads the tag pipeline of every repository, anonymous of the public ones, off of none. The tag pipeline path reads the tag's own "+
+			"pipeline on CircleCI by the release watch's rule: a failed workflow fails the phase with its failed jobs, every workflow green is done at once, otherwise "+
+			"pendingReason names the workflows and their states; until CircleCI has a pipeline for the tag, the reconciler run's release step decides — a missed-tag-build "+
+			"finding for the tag fails the phase with its fix, anything else keeps waiting. The statuses path, where no tag pipeline is read: the CircleCI statuses on "+
+			"its commit are green, complete and settled: CircleCI posts one status "+
 			"per job as the job starts, so a green set counts only once it holds the jobs the declaration implies — a chart job when the flavours produce a chart, "+
 			fmt.Sprintf("push-to-registries when the default branch carries a Dockerfile — and has not changed for %d s; a failing status fails the phase at once; ", int(DefaultWatchSettle.Seconds()))+
 			"while the statuses are pending, incomplete or settling, pendingReason lists the ones reported and what is awaited; until the tag pipeline itself has "+
@@ -124,9 +134,10 @@ func (t *tools) registerWatch(s *mcpserver.MCPServer) {
 			"pipeline, decides: a failed step, or a red-release or missed-tag-build finding for the tag, fails the phase with its fix, anything else keeps waiting "+
 			"for the statuses). ready is true when every phase is done; "+
 			"pending names the phase still waited for when the timeout ran out — call again to keep following. Who reads what: the repository, its commits, "+
-			"the pull request and the release are read as you every few seconds; the commit statuses and the Dockerfile as the inventory App giantswarm-repo-manager-inventory, "+
-			"the identity of the unattended reads (your token through the App giantswarm-repo-manager cannot read them) — without that App the reconciler "+
-			"run's release step alone decides the released phase and pendingReason says so. A read GitHub refuses (403) keeps its phase pending with the "+
+			"the pull request and the release are read as you every few seconds; the tag pipeline as the manager's CircleCI client (circleci.existingSecret's token, "+
+			"or anonymously); the commit statuses and the Dockerfile as the inventory App giantswarm-repo-manager-inventory, "+
+			"the identity of the unattended reads (your token through the App giantswarm-repo-manager cannot read them) — on the statuses path without that App the reconciler "+
+			"run's release step alone decides the released phase and pendingReason says so. A read GitHub or CircleCI refuses keeps its phase pending with the "+
 			"refusal in pendingReason; the call errors only on wrong arguments. Takes the repository and the pull request number create_repository's answer carries."),
 		mcp.WithReadOnlyHintAnnotation(true),
 		mcp.WithString(argRepository, mcp.Required(), mcp.Description("Repository name, with or without the org.")),
@@ -237,6 +248,12 @@ type watcher struct {
 	// dockerfile says whether the default branch carries a Dockerfile — the
 	// image push job's condition — once read; nil before.
 	dockerfile *bool
+	// private says the repository is private, from the created phase: an
+	// anonymous CircleCI client does not read its pipelines.
+	private bool
+	// pipeline is the release's tag pipeline on CircleCI once found; later
+	// reads list its workflows alone.
+	pipeline *circleciclient.Pipeline
 }
 
 // outcome is what one read of a phase found: done at a time, failed for a
@@ -304,7 +321,7 @@ func (w *watcher) created(ctx context.Context) (outcome, error) {
 	case err != nil:
 		return undecided(fmt.Sprintf("read %s/%s as you: %v", w.org(), w.name, err)), nil
 	}
-	w.out.Repository, w.branch = repo.GetHTMLURL(), repo.GetDefaultBranch()
+	w.out.Repository, w.branch, w.private = repo.GetHTMLURL(), repo.GetDefaultBranch(), repo.GetPrivate()
 	return done(repo.GetCreatedAt().Time), nil
 }
 
@@ -412,8 +429,10 @@ func (w *watcher) setUp(ctx context.Context) (outcome, error) {
 	return done(run.Timestamp), nil
 }
 
-// released: the first release exists (read as the caller) and the CircleCI
-// statuses on its commit are green, complete and settled — read as the
+// released: the first release exists (read as the caller) and, where the
+// manager reads the tag pipeline on CircleCI (readsTagPipeline), its
+// workflows decide (tagPipelineVerdict). Elsewhere the CircleCI statuses on
+// its commit must be green, complete and settled — read as the
 // inventory App, the identity of the unattended reads: the caller's token
 // through the App giantswarm-repo-manager has no statuses permission. A
 // failing status fails the phase at once. Until the tag pipeline itself has
@@ -434,6 +453,9 @@ func (w *watcher) released(ctx context.Context) (outcome, error) {
 	}
 	tag := rel.GetTagName()
 	w.out.Release = &WatchRelease{Tag: tag, URL: rel.GetHTMLURL()}
+	if w.readsTagPipeline() {
+		return w.tagPipelineVerdict(ctx, tag), nil
+	}
 	if w.t.d.App == nil {
 		if o := w.releaseStepVerdict(tag); o.failed {
 			return o, nil
@@ -450,6 +472,55 @@ func (w *watcher) released(ctx context.Context) (outcome, error) {
 		}
 	}
 	return w.statusesVerdict(ctx, tag, st)
+}
+
+// readsTagPipeline says whether the manager reads the repository's tag
+// pipeline on CircleCI: it holds a client, with a token or — for a public
+// repository — anonymously.
+func (w *watcher) readsTagPipeline() bool {
+	return w.t.d.CircleCI != nil && (w.t.d.TagPipelines == TagPipelinesToken || !w.private)
+}
+
+// tagPipelineVerdict is the released phase from the tag's own pipeline on
+// CircleCI, by the release watch's rule (collect.TagPipeline): a failed
+// workflow fails the phase with its failed jobs; every workflow that ran
+// green, none still moving, is done — no settle window, a workflow's status
+// is the pipeline's verdict; otherwise pending with the workflows and their
+// states. Before CircleCI has a pipeline for the tag, the reconciler run's
+// release step decides: a tag no pipeline built fails the phase with its
+// fix, anything else keeps waiting. A read CircleCI refuses keeps the phase
+// pending with the refusal.
+func (w *watcher) tagPipelineVerdict(ctx context.Context, tag string) outcome {
+	cc, slug := w.t.d.CircleCI, w.org()+"/"+w.name
+	if w.pipeline == nil || w.pipeline.VCS.Tag != tag {
+		p, err := cc.FindPipelineByTag(ctx, w.org(), w.name, tag)
+		switch {
+		case err != nil:
+			return undecided(fmt.Sprintf("read the pipelines of %s on CircleCI: %v", slug, err))
+		case p == nil:
+			if o := w.releaseStepVerdict(tag); o.failed {
+				return o
+			}
+			return undecided(fmt.Sprintf("CircleCI has no pipeline for %s of %s yet", tag, slug))
+		}
+		w.pipeline = p
+	}
+	tp, err := collect.ReadTagPipeline(ctx, cc, w.org(), w.name, w.pipeline)
+	if err != nil {
+		return undecided(fmt.Sprintf("read the tag pipeline of %s on CircleCI (%s): %v", tag, tp.Pipeline.URL, err))
+	}
+	line := fmt.Sprintf("the tag pipeline of %s, pipeline %d (%s)", tag, tp.Pipeline.Number, tp.Pipeline.URL)
+	switch {
+	case tp.Red():
+		return failed(fmt.Sprintf("%s is red: %s — failed %s (%s)", line, strings.Join(tp.Workflows, ", "), strings.Join(tp.Failed, ", "), tp.Pipeline.Workflow))
+	case tp.Built():
+		return done(time.Now())
+	case tp.Running:
+		return undecided(fmt.Sprintf("%s: %s — waiting for the running workflows", line, strings.Join(tp.Workflows, ", ")))
+	case len(tp.Workflows) == 0:
+		return undecided(line + ": no workflow yet")
+	}
+	return undecided(fmt.Sprintf("%s: %s — no workflow has run yet", line, strings.Join(tp.Workflows, ", ")))
 }
 
 // tagPipelineReported says whether a status on the release's commit is the

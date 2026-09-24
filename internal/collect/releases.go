@@ -318,12 +318,10 @@ func isReleaseTag(tag string) bool {
 }
 
 // readRelease reads the tag's pipeline on CircleCI into w: the pipeline by
-// its vcs.tag, of every workflow name the newest run (a rerun from failed
-// is a second run of the same name; the one it replaced keeps its failed
-// status), the failed jobs of a failed run. A failed run settles the
-// release red at once; the watch keeps reading a red release, and a rerun
-// that goes green turns it built on a later pass, silently — the team was
-// told once, and hears nothing more about the tag. No pipeline within the
+// its vcs.tag, then its workflows by the rule of TagPipeline. A failed run
+// settles the release red at once; the watch keeps reading a red release,
+// and a rerun that goes green turns it built on a later pass, silently —
+// the team was told once, and hears nothing more about the tag. No pipeline within the
 // grace period settles it unbuilt. A 404 settles it unchecked: without a
 // token, the project is private and the token is what is missing; with
 // one, CircleCI does not know the project. Any other error keeps the watch
@@ -350,49 +348,20 @@ func (c *Collector) readRelease(ctx context.Context, rec *inventory.Record, w *i
 		}
 		return
 	}
-	w.Pipeline = &inventory.ReleasePipeline{Number: p.Number, URL: circleciclient.PipelineURL(org, name, p.Number)}
-	runs, err := o.CircleCI.ListPipelineWorkflows(ctx, p.ID)
-	if err != nil {
-		c.log.Warn("release watch: workflows not read", "repository", rec.Repository, "tag", w.Tag, "pipeline", p.Number, "error", err)
-		return
-	}
-	var failed []string
-	running, succeeded := false, 0
-	w.Pipeline.Workflow = ""
-	for _, run := range circleciclient.NewestWorkflows(runs) {
-		switch {
-		case circleciclient.WorkflowFailed(run.Status):
-			jobs, err := o.CircleCI.ListWorkflowJobs(ctx, run.ID)
-			if err != nil {
-				c.log.Warn("release watch: jobs not read", "repository", rec.Repository, "tag", w.Tag, "workflow", run.Name, "error", err)
-				return
-			}
-			names := failedJobs(jobs)
-			if len(names) == 0 {
-				names = []string{run.Name + " (" + failureWord(run.Status) + ")"}
-			}
-			failed = append(failed, names...)
-			if w.Pipeline.Workflow == "" {
-				w.Pipeline.Workflow = circleciclient.WorkflowURL(org, name, p.Number, run.ID)
-			}
-		case circleciclient.WorkflowSucceeded(run.Status):
-			succeeded++
-		case run.Status == workflowNotRun:
-		default:
-			running = true
-		}
-	}
+	tp, err := ReadTagPipeline(ctx, o.CircleCI, org, name, p)
+	w.Pipeline = tp.Pipeline
 	switch {
-	case len(failed) > 0:
-		w.FailedJobs = failed
+	case err != nil:
+		c.log.Warn("release watch: tag pipeline not read", "repository", rec.Repository, "tag", w.Tag, "error", err)
+	case tp.Red():
+		w.FailedJobs = tp.Failed
 		w.Settle(now, inventory.ReleaseRed)
-	case running, succeeded == 0:
-		// Still moving, or no workflow has started yet: a red release
-		// being rerun stays red until the rerun ends.
-	default:
-		w.FailedJobs, w.Pipeline.Workflow = nil, ""
+	case tp.Built():
+		w.FailedJobs = nil
 		w.Settle(now, inventory.ReleaseBuilt)
 	}
+	// Otherwise still moving, or no workflow has started yet: a red release
+	// being rerun stays red until the rerun ends.
 }
 
 // workflowNotRun is a workflow the pipeline's filters left out: neither

@@ -138,6 +138,13 @@ func (f *fakeRepos) installed(name string, on bool) {
 	f.repos[name].uninstalled = !on
 }
 
+// setPrivate sets whether the repository is private.
+func (f *fakeRepos) setPrivate(name string, private bool) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.repos[name].private = private
+}
+
 // get is the repository by name, nil when it does not exist.
 func (f *fakeRepos) get(name string) *fakeRepo {
 	f.mu.Lock()

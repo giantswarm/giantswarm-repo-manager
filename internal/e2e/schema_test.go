@@ -19,22 +19,22 @@ const engineModule = "github.com/giantswarm/devctl/v8"
 
 // embeddedSchemaDocument is the repositories schema document shipped with the
 // devctl version this module builds with, read from the module's source
-// rather than through the engine, and that version.
-func embeddedSchemaDocument(t *testing.T) (doc []byte, version string) {
+// rather than through the engine.
+func embeddedSchemaDocument(t *testing.T) []byte {
 	t.Helper()
 	out, err := exec.Command("go", "list", "-m", "-json", engineModule).Output() // #nosec G204 -- fixed arguments
 	if err != nil {
 		t.Fatalf("go list -m %s: %v", engineModule, err)
 	}
-	var mod struct{ Dir, Version string }
+	var mod struct{ Dir string }
 	if err := json.Unmarshal(out, &mod); err != nil {
 		t.Fatal(err)
 	}
-	doc, err = os.ReadFile(filepath.Join(mod.Dir, "pkg", "reposetup", "schema", "repositories.schema.json")) // #nosec G304 -- the module cache
+	doc, err := os.ReadFile(filepath.Join(mod.Dir, "pkg", "reposetup", "schema", "repositories.schema.json")) // #nosec G304 -- the module cache
 	if err != nil {
 		t.Fatal(err)
 	}
-	return doc, mod.Version
+	return doc
 }
 
 // enum is a schema node's enumeration.
@@ -45,11 +45,12 @@ type enum struct {
 // TestGetInfoReportsTheSchemaTheValidatorUses: get_info's schema is the
 // declaration vocabulary of the schema document embedded in the engine's
 // devctl version — each list the document's enum, in its order, and the
-// origin naming that copy — and it is the vocabulary the validator holds a
+// origin naming that copy and the engine version get_info reports (a test
+// binary may carry no module versions) — and it is the vocabulary the validator holds a
 // declaration to: a reported visibility is accepted, one the report does
 // not list is refused on that field.
 func TestGetInfoReportsTheSchemaTheValidatorUses(t *testing.T) {
-	doc, version := embeddedSchemaDocument(t)
+	doc := embeddedSchemaDocument(t)
 	var schema struct {
 		Items struct {
 			Properties struct {
@@ -72,7 +73,6 @@ func TestGetInfoReportsTheSchemaTheValidatorUses(t *testing.T) {
 	}
 	p := schema.Items.Properties
 	want := tools.SchemaInfo{
-		Origin:         "embedded (" + engineModule + " " + version + ")",
 		ComponentTypes: p.ComponentType.Enum,
 		Flavours:       p.Gen.Properties.Flavours.Items.Enum,
 		Languages:      p.Gen.Properties.Language.Enum,
@@ -87,8 +87,10 @@ func TestGetInfoReportsTheSchemaTheValidatorUses(t *testing.T) {
 
 	st := newStack(t)
 	asAlice := st.as(t, aliceToken)
-	got := getInfo(t, asAlice).Schema
-	if !reflect.DeepEqual(got, want) {
+	info := getInfo(t, asAlice)
+	want.Origin = "embedded (" + engineModule + " " + info.Engine.Version + ")"
+	got := info.Schema
+	if !reflect.DeepEqual(got, want) || info.Engine.Module != engineModule {
 		t.Fatalf("get_info schema:\n got %+v\nwant %+v", got, want)
 	}
 

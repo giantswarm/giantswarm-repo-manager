@@ -9,6 +9,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- devctl 8.96.0: the team-file schema the inventory and `create_repository` validate entries against knows
+  `gen.ci.templateContent` ([devctl#2397](https://github.com/giantswarm/devctl/pull/2397)), the field a template
+  repository sets beside `generate: false` when its `.circleci/config.yml` is content for the repositories created from it;
+  an entry carrying it was refused as an unknown field before. The record's release step and `devctl pr wait` treat a
+  repository CircleCI has never run a pipeline for as GitHub-only ([devctl#2396](https://github.com/giantswarm/devctl/pull/2396)).
+
 ### Fixed
 
 - The `helm.sh/chart` label is valid for any chart version

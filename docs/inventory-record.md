@@ -177,7 +177,9 @@ the message to the team's standup channel is rendered from (README, "Asks and me
 
 ### Findings
 
-The inventory's own kinds (`source: inventory`): `declared-but-gone` (declaration, no repository), `undeclared-on-github`
+The inventory's own kinds (`source: inventory`): `declared-but-gone` (declaration, no repository — never for an entry
+declared `lifecycle: deleted`, the record of the deletion; an archived entry's fix records the deletion or removes the
+entry, any other entry's creates the repository or records its deletion), `undeclared-on-github`
 (repository, no declaration — archived ones included), `reconcile-run-missing` (an expected run that completed without a
 report — the fix names the run — or did not report within 15 minutes — the fix names the workflow's Actions page). The
 engine's kinds pass through with `source: engine`:

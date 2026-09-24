@@ -41,6 +41,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- A declaration whose repository is gone reads as the reconciler reads it: an entry declared `lifecycle: deleted` is
+  the record of the deletion and carries no `declared-but-gone` finding (a repository deleted through the Repositories
+  page's Delete had shown the finding with the fix "add the entry back by creating the repository … or remove the
+  entry"); an archived entry's fix is to record the deletion (`lifecycle: deleted`) or remove the entry, and any other
+  entry's is to create the repository or, when it was deleted on purpose, to record the deletion.
 - Every reconciler run's change notice is posted once: a run whose repository cannot be read yet stays open for the
   next poll (30 minutes, then an error log) instead of being consumed; a run stored but not told (a restart before the
   post, a refused post) is told by the next poll (`setup.lastRun.told`); one pod polls at a time under the lease

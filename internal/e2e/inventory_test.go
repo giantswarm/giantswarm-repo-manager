@@ -268,6 +268,34 @@ func TestInventoryToolsAndReconcilerRefresh(t *testing.T) {
 	}
 }
 
+// TestADeletedEntryIsTheRecord: an entry declared lifecycle: deleted whose
+// repository the reconciler deleted is the record of the deletion, as the
+// reconciler reads it: no declared-but-gone finding — the finding filter
+// finds only the repository that went missing undeclared — and a row the
+// lifecycle filter finds under deleted.
+func TestADeletedEntryIsTheRecord(t *testing.T) {
+	const repoDeleted = "deleted-service"
+	st := newStack(t)
+	st.ghs.org.declare("- name: " + repoDeleted + "\n  componentType: service\n  align: true\n  lifecycle: deleted\n  gen:\n    language: go\n    flavours: [generic]\n")
+	if _, err := st.col.Sweep(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	rec := st.record(t, repoDeleted)
+	if rec.Reality != nil || rec.Declaration == nil || rec.Declaration.Lifecycle != lifecycleDeleted || len(rec.Findings) != 0 {
+		t.Errorf("deleted: reality %v declaration %+v findings %+v", rec.Reality, rec.Declaration, rec.Findings)
+	}
+	c := st.as(t, aliceToken)
+	var rows tools.Listing
+	st.callJSON(t, c, tools.ToolListRepositories, map[string]any{"finding": inventory.FindingDeclaredButGone}, &rows)
+	if rows.Matched != 1 || rows.Repositories[0].Repository != org+"/"+repoGone {
+		t.Errorf("finding declared-but-gone: %+v", rows.Repositories)
+	}
+	st.callJSON(t, c, tools.ToolListRepositories, map[string]any{argLifecycle: lifecycleDeleted}, &rows)
+	if rows.Matched != 1 || rows.Repositories[0].Repository != org+"/"+repoDeleted || !rows.Repositories[0].Gone {
+		t.Errorf("lifecycle deleted: %+v", rows.Repositories)
+	}
+}
+
 // TestSweepInventoryForTheOwningTeams: sweep_inventory starts the sweep for a
 // member of a configured team; while it runs a second call says so and
 // carries the last summary; a non-member is refused in approve_change's

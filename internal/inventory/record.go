@@ -5,6 +5,8 @@ import (
 	"time"
 
 	"github.com/giantswarm/devctl/v8/pkg/reposetup/reconcile"
+
+	"github.com/giantswarm/giantswarm-repo-manager/internal/teamfiles"
 )
 
 // Sources of a record's last write.
@@ -582,9 +584,9 @@ func (r *Record) findings() []Finding {
 	out := []Finding{}
 	switch {
 	case r.Declaration != nil && r.Reality == nil:
-		out = append(out, Finding{Kind: FindingDeclaredButGone, Source: FindingSourceInventory,
-			Message: fmt.Sprintf("%s is declared in %s but does not exist on GitHub", r.Repository, r.Declaration.File),
-			Fix:     "add the entry back by creating the repository from the declaration, or remove the entry from the team file"})
+		if f := r.declaredButGone(); f != nil {
+			out = append(out, *f)
+		}
 	case r.Declaration == nil && r.Reality != nil:
 		out = append(out, Finding{Kind: FindingUndeclaredOnGitHub, Source: FindingSourceInventory,
 			Message: fmt.Sprintf("%s exists on GitHub and no team file declares it", r.Repository),
@@ -599,6 +601,27 @@ func (r *Record) findings() []Finding {
 		}
 	}
 	return out
+}
+
+// declaredButGone is the finding of a declaration whose repository does not
+// exist on GitHub, in the reconciler's terms: none for an entry declared
+// deleted, which is the record of the deletion ("deleted, as declared"); an
+// archived entry is recorded as deleted or removed, since an archived
+// repository is never recreated; any other entry is created from its
+// declaration, or recorded as deleted when it was deleted on purpose.
+func (r *Record) declaredButGone() *Finding {
+	d := r.Declaration
+	var fix string
+	switch d.Lifecycle {
+	case teamfiles.LifecycleDeleted:
+		return nil
+	case teamfiles.LifecycleArchived:
+		fix = fmt.Sprintf("an archived repository is never recreated: set lifecycle: deleted on the entry in %s as the record (Delete on the Repositories page, set_lifecycle), or remove the entry", d.File)
+	default:
+		fix = fmt.Sprintf("create the repository as yourself (Create on the Repositories page, the Repo Manager agent or `devctl repo create`) and the next run reconciles the entry in %s; if it was deleted on purpose, set lifecycle: deleted on the entry as the record (Delete on the Repositories page, set_lifecycle)", d.File)
+	}
+	return &Finding{Kind: FindingDeclaredButGone, Source: FindingSourceInventory,
+		Message: fmt.Sprintf("%s is declared in %s but does not exist on GitHub", r.Repository, d.File), Fix: fix}
 }
 
 // MissingRunFinding is the finding reconcile-run-missing for the record's

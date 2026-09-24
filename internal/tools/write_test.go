@@ -1,6 +1,7 @@
 package tools
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"strings"
@@ -11,6 +12,7 @@ import (
 	mcpserver "github.com/mark3labs/mcp-go/server"
 
 	"github.com/giantswarm/giantswarm-repo-manager/internal/identity"
+	"github.com/giantswarm/giantswarm-repo-manager/internal/review"
 	"github.com/giantswarm/giantswarm-repo-manager/internal/teamfiles"
 )
 
@@ -231,6 +233,45 @@ func TestGetInfoWithoutComponents(t *testing.T) {
 	if info.Caller != nil || info.Auth.Mode != AuthModeNone || info.Auth.Reason == "" || info.GitHub.AppError == "" ||
 		info.Inventory.Connected || !info.Capabilities.ApplyRefused || info.Engine.Package != engineModule+"/pkg/reposetup" {
 		t.Errorf("unexpected info: %s", text)
+	}
+}
+
+// TestGetInfoReportsTheReviewEndpoint: with the gateway set, get_info names
+// its URL and the token audience; without it, configured: false alone.
+func TestGetInfoReportsTheReviewEndpoint(t *testing.T) {
+	configured, err := review.New(review.Config{BaseURL: "http://gateway.test:8080", Audience: review.DefaultAudience})
+	if err != nil {
+		t.Fatal(err)
+	}
+	cases := []struct {
+		name   string
+		client *review.Client
+		want   string
+	}{
+		{"configured", configured, `{"configured":true,"url":"http://gateway.test:8080","audience":"klaus-gateway"}`},
+		{"not configured", nil, `{"configured":false}`},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			c := newTestClient(t, NewMCPServer(Deps{Version: testVersion, Review: tc.client}))
+			text, isErr := call(t, c, ToolGetInfo, nil)
+			if isErr {
+				t.Fatal(text)
+			}
+			var info struct {
+				Reviews json.RawMessage `json:"reviews"`
+			}
+			if err := json.Unmarshal([]byte(text), &info); err != nil {
+				t.Fatal(err)
+			}
+			var got bytes.Buffer
+			if err := json.Compact(&got, info.Reviews); err != nil {
+				t.Fatal(err)
+			}
+			if got.String() != tc.want {
+				t.Errorf("reviews: got %s, want %s", got.String(), tc.want)
+			}
+		})
 	}
 }
 

@@ -9,6 +9,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- `get_info` reports the team-review endpoint's wiring: `reviews.url`, the gateway the asks and notices go to, and
+  `reviews.audience`, the audience of the projected ServiceAccount token it admits (the chart passes `reviews.audience`
+  as `REVIEWS_AUDIENCE`); without `REVIEWS_URL` the object stays `configured: false` alone.
+
 ### Changed
 
 - devctl 8.96.0: the team-file schema the inventory and `create_repository` validate entries against knows

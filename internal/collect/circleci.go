@@ -10,10 +10,6 @@ import (
 	"github.com/giantswarm/giantswarm-repo-manager/internal/inventory"
 )
 
-// circleContext is the prefix of the commit statuses CircleCI posts, one per
-// job: `ci/circleci: <job>`.
-const circleContext = "ci/circleci:"
-
 // statusRank orders GitHub's status states worst first, for the head's
 // summary state.
 var statusRank = map[string]int{"FAILURE": 0, "ERROR": 1, "PENDING": 2, "EXPECTED": 3, "SUCCESS": 4}
@@ -157,7 +153,7 @@ func rollupStatus(rollup *statusRollup) (*inventory.HeadStatus, bool) {
 	worst, at := "", time.Time{}
 	var contexts, failed, pending []string
 	for _, c := range rollup.Contexts.Nodes {
-		if !strings.HasPrefix(c.Context, circleContext) {
+		if !strings.HasPrefix(c.Context, inventory.CircleCIContext) {
 			continue
 		}
 		contexts = append(contexts, c.Context)

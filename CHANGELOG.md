@@ -19,6 +19,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- `watch_repository` ends on a first release no pipeline built instead of waiting for it forever: a creation followed
+  from chat never answered. Auto-release tags the scaffold on `main` before the reconciler follows the project on
+  CircleCI, so CircleCI never builds that tag; the follow builds `main`, whose head the tag names, and its `setup` and
+  `go-build` statuses on the release commit made the `released` phase wait for a chart job no pipeline would run,
+  although the reconciler run had reported `missed-tag-build`. Until a job the pipeline runs on the tag and not on the
+  default branch (`ci.jobs`) reports, the run's release step decides: a failed step, or a `red-release` or
+  `missed-tag-build` finding for the tag, fails the phase with the finding's fix and the run. Once the tag pipeline
+  reports — a tag pipeline triggered by hand — its statuses decide as before.
+
 - The `helm.sh/chart` label is valid for any chart version
   ([#115](https://github.com/giantswarm/giantswarm-repo-manager/issues/115)). The label is `<name>-<version>` cut to 63
   characters, and the cut of a long version (a branch build's `X.Y.Z-dev.<branch>.<date>.<time>.h<sha7>`, or the

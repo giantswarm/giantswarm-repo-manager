@@ -5,6 +5,15 @@ import (
 	"strings"
 )
 
+// CircleCIContext is the prefix of the commit statuses CircleCI posts, one
+// per job: `ci/circleci: <job>`.
+const CircleCIContext = "ci/circleci:"
+
+// JobOf is the job a `ci/circleci: <job>` status context names.
+func JobOf(context string) string {
+	return strings.TrimSpace(strings.TrimPrefix(context, CircleCIContext))
+}
+
 // CIJob is one job of the pipeline's workflows, under the name CircleCI
 // posts its status with (`ci/circleci: <name>`: the job's `name` parameter,
 // else the job's key), and the filters that decide which refs run it.

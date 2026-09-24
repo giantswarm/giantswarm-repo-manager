@@ -118,9 +118,11 @@ func (t *tools) registerWatch(s *mcpserver.MCPServer) {
 			"carried as findings), released (the first release exists and the CircleCI statuses on its commit are green, complete and settled: CircleCI posts one status "+
 			"per job as the job starts, so a green set counts only once it holds the jobs the declaration implies — a chart job when the flavours produce a chart, "+
 			fmt.Sprintf("push-to-registries when the default branch carries a Dockerfile — and has not changed for %d s; a failing status fails the phase at once; ", int(DefaultWatchSettle.Seconds()))+
-			"while the statuses are pending, incomplete or settling, pendingReason lists the ones reported and what is awaited; while CircleCI has not reported "+
-			"on the release's commit at all — a repository the reconciler has only just followed — the reconciler run's release step decides: a failed step or a "+
-			"red-release finding fails the phase, anything else keeps waiting for the statuses). ready is true when every phase is done; "+
+			"while the statuses are pending, incomplete or settling, pendingReason lists the ones reported and what is awaited; until the tag pipeline itself has "+
+			"reported on the release's commit — a status of a job the pipeline runs on the tag and not on the default branch; the first tag's commit is the default "+
+			"branch head, where the pipeline the reconciler's follow starts posts its own jobs' statuses — the reconciler run's release step, which read the tag's own "+
+			"pipeline, decides: a failed step, or a red-release or missed-tag-build finding for the tag, fails the phase with its fix, anything else keeps waiting "+
+			"for the statuses). ready is true when every phase is done; "+
 			"pending names the phase still waited for when the timeout ran out — call again to keep following. Who reads what: the repository, its commits, "+
 			"the pull request and the release are read as you every few seconds; the commit statuses and the Dockerfile as the inventory App giantswarm-repo-manager-inventory, "+
 			"the identity of the unattended reads (your token through the App giantswarm-repo-manager cannot read them) — without that App the reconciler "+
@@ -227,6 +229,9 @@ type watcher struct {
 	// flavours are the declaration's, from the record read in the setUp
 	// phase: they say whether a chart job is expected on the release.
 	flavours []string
+	// jobs are the pipeline's jobs with their filters, from the same
+	// record: they say which statuses only the tag pipeline posts.
+	jobs []inventory.CIJob
 	// run is the reconciler run, from the setUp phase.
 	run *inventory.LastRun
 	// dockerfile says whether the default branch carries a Dockerfile — the
@@ -378,6 +383,9 @@ func (w *watcher) setUp(ctx context.Context) (outcome, error) {
 	if rec.Declaration != nil {
 		w.flavours = rec.Declaration.Flavours
 	}
+	if rec.CI != nil {
+		w.jobs = rec.CI.Jobs
+	}
 	if p := rec.Setup.PendingRun; p.Follows(w.number) && p.MergedAt == nil && w.t.d.Collector != nil {
 		// The pull request merged (the phase before this one) and the poller
 		// has not read the merge yet: wake it, so the run is looked for at
@@ -410,9 +418,12 @@ func (w *watcher) setUp(ctx context.Context) (outcome, error) {
 // statuses on its commit are green, complete and settled — read as the
 // inventory App, the identity of the unattended reads: the caller's token
 // through the App giantswarm-repo-manager has no statuses permission. A
-// failing status fails the phase at once. Without any status yet, the
-// reconciler run's release step decides: failed, or a red-release finding,
-// fails the phase; anything else waits for the statuses. Without the
+// failing status fails the phase at once. Until the tag pipeline itself has
+// reported on the commit, the reconciler run's release step decides — the
+// run read the tag's own pipeline, and the first tag's commit is the default
+// branch head, which the pipeline the run's follow starts builds too: a
+// branch pipeline's green statuses there never make the release, and a tag
+// no pipeline built (missed-tag-build) is nobody's to wait for. Without the
 // inventory App the release step alone decides, and the pending phase says
 // so.
 func (w *watcher) released(ctx context.Context) (outcome, error) {
@@ -426,7 +437,7 @@ func (w *watcher) released(ctx context.Context) (outcome, error) {
 	tag := rel.GetTagName()
 	w.out.Release = &WatchRelease{Tag: tag, URL: rel.GetHTMLURL()}
 	if w.t.d.App == nil {
-		if o := w.releaseStepVerdict(); o.failed {
+		if o := w.releaseStepVerdict(tag); o.failed {
 			return o, nil
 		}
 		return undecided(fmt.Sprintf("the CircleCI statuses on %s are not read — %v; the reconciler run's release step alone decides", tag, ErrNoApp)), nil
@@ -435,10 +446,27 @@ func (w *watcher) released(ctx context.Context) (outcome, error) {
 	if err != nil {
 		return undecided(fmt.Sprintf("read the statuses of %s/%s@%s as the inventory App: %v", w.org(), w.name, tag, err)), nil
 	}
-	if st.GetTotalCount() == 0 {
-		return w.releaseStepVerdict(), nil
+	if !w.tagPipelineReported(tag, st) {
+		if o := w.releaseStepVerdict(tag); o.failed || st.GetTotalCount() == 0 {
+			return o, nil
+		}
 	}
 	return w.statusesVerdict(ctx, tag, st)
+}
+
+// tagPipelineReported says whether a status on the release's commit is the
+// tag pipeline's for certain: its job is one the pipeline runs on the tag
+// and not on the default branch.
+func (w *watcher) tagPipelineReported(tag string, st *github.CombinedStatus) bool {
+	for _, s := range st.Statuses {
+		job := inventory.JobOf(s.GetContext())
+		for _, j := range w.jobs {
+			if j.Name == job && j.RunsOnTag(tag) && !j.RunsOnBranch(w.branch) {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 // statusesVerdict is the released phase once CircleCI has reported on the
@@ -521,9 +549,12 @@ func (w *watcher) hasDockerfile(ctx context.Context) (bool, error) {
 	return *w.dockerfile, nil
 }
 
-// releaseStepVerdict is the released phase while CircleCI has not reported:
-// the reconciler run's release step decides.
-func (w *watcher) releaseStepVerdict() outcome {
+// releaseStepVerdict is the released phase while the tag pipeline has not
+// reported: the reconciler run's release step decides. A failed step fails
+// the phase, so does a finding for tag that nothing will change by waiting —
+// the tag pipeline red (red-release), or no pipeline for the tag at all
+// (missed-tag-build) — with the finding's fix.
+func (w *watcher) releaseStepVerdict(tag string) outcome {
 	s := w.run.Result.Step(reconcile.StepRelease)
 	if s == nil {
 		return pending
@@ -532,8 +563,8 @@ func (w *watcher) releaseStepVerdict() outcome {
 		return failed(fmt.Sprintf("the reconciler's release step failed: %s (%s)", s.Summary, w.run.RunURL))
 	}
 	for _, f := range s.Findings {
-		if f.Kind == reconcile.FindingRedRelease {
-			return failed(f.Message)
+		if (f.Kind == reconcile.FindingRedRelease || f.Kind == reconcile.FindingMissedTagBuild) && strings.Contains(f.Message, tag) {
+			return failed(fmt.Sprintf("%s — %s (%s)", f.Message, f.Fix, w.run.RunURL))
 		}
 	}
 	return pending

@@ -540,9 +540,15 @@ type SweepSummary struct {
 	Archived     int       `json:"archived"`
 	EngineChecks int       `json:"engineChecks"`
 	Removed      int       `json:"removed"`
-	GraphQL      Budget    `json:"graphql"`
-	REST         Budget    `json:"rest"`
-	Errors       []string  `json:"errors,omitempty"`
+	// Resumes counts the pods that took the sweep up after the one that
+	// started it; Carried the records an earlier pod (or a refresh) had
+	// written since the start and this pass kept. EngineChecks, GraphQL and
+	// REST are the last pod's part.
+	Resumes int      `json:"resumes,omitempty"`
+	Carried int      `json:"carried,omitempty"`
+	GraphQL Budget   `json:"graphql"`
+	REST    Budget   `json:"rest"`
+	Errors  []string `json:"errors,omitempty"`
 }
 
 // Budget is what a sweep drew from one rate budget.

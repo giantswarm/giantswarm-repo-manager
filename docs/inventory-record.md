@@ -1,7 +1,7 @@
 # The inventory record
 
 giantswarm-repo-manager keeps one record per repository of the org in Valkey (key `repo:<owner>/<name>`), plus the last
-sweep's summary (`inventory:sweep`) and the reconciler poller's cursor (`inventory:reconciler`). The inventory is a cache: the team files in `giantswarm/github` stay the desired
+completed sweep's summary (`inventory:sweep`), the unfinished sweep's cursor (`inventory:sweep-cursor`) and the reconciler poller's cursor (`inventory:reconciler`). The inventory is a cache: the team files in `giantswarm/github` stay the desired
 state, GitHub the reality; a lost store costs one sweep. The Go types are `internal/inventory/record.go`; the JSON below
 is what `get_repository` and `refresh_repository` return.
 
@@ -9,7 +9,7 @@ is what `get_repository` and `refresh_repository` return.
 
 | Trigger | What | Source |
 |---|---|---|
-| Schedule (`inventory.sweep.interval`, default `24h`) | Full sweep: every repository of the org, records of repositories that are neither on GitHub nor declared are removed; the summary is stored | `sweep` |
+| Schedule (`inventory.sweep.interval`, default `24h`) | Full sweep: every repository of the org, each record written as soon as it is built and checked; after a complete pass the records of repositories that are neither on GitHub nor declared are removed and the summary is stored | `sweep` |
 | Reconciler poll (`inventory.reconciler.pollInterval`, default `5m`; every 30 s while an Align now is pending) | One repository per `reconcile-<name>` artifact of a completed reconciler run, read from GitHub as the inventory App; the run is stored as `setup.lastRun` | `reconciler` |
 | Tool `refresh_repository` | One repository on demand | `refresh` |
 | Release watch (`inventory.releases.interval`, default `5m`) | The latest release of a declared repository, from its tag to the end of the tag's own CircleCI pipeline: `setup.release` and the record's `release` step and findings are written; the rest of the record is untouched | the record's `source` is unchanged |
@@ -195,9 +195,21 @@ too beside a branch pipeline's statuses cannot be attributed — the release rea
 ## Sweep summary (`inventory:sweep`)
 
 `startedAt`, `finishedAt`, `duration`, `repositories`, `declared`, `undeclared`, `gone`, `archived`, `engineChecks`,
-`removed`, `graphql {calls, cost, remaining, limit, resetAt}`, `rest {calls, remaining, limit, resetAt}`,
+`removed`, `resumes`, `carried`, `graphql {calls, cost, remaining, limit, resetAt}`, `rest {calls, remaining, limit, resetAt}`,
 `errors[]` (source problems, a budget stop). The GitHub reads follow the prototype's paging:
 repository metadata 20 a page (halved down to 5 on a page GitHub cannot answer — over the whole org 50 a page was answered with 502 and 25 with a truncated body), default-branch history in aliased batches of 20 (halved on a failing batch), the team
 files, catalog, mapping and org teams in one query — one combined metadata+history query made GitHub answer 502. With
 `inventory.sweep.graphqlBudgetFloor` set, a sweep stops cleanly when the GraphQL budget falls below it: what was
-collected is stored, nothing is removed, the summary's `errors` say where it stopped.
+collected is stored, nothing is removed, the summary's `errors` say where it stopped. The engine's checks pause when
+the REST budget falls below `inventory.sweep.restBudgetFloor` (default 500) until its reset, one check waiting and the
+others queued behind it, instead of failing their steps with GitHub's rate-limit refusal
+(`sweep paused at the REST budget floor`, `sweep continues after the REST budget reset` in the log).
+
+A sweep stores its cursor (`inventory:sweep-cursor`: `startedAt`, `resumes`) before it reads anything and removes it
+after a complete pass. A pod that starts while a cursor younger than the interval is stored takes that sweep up at
+once (`unfinished sweep found, taking it up now`, `sweep resuming`) instead of waiting for the interval: the records
+refreshed since `startedAt` — by the pod before, or a refresh — are kept (`carried`) and their history not read again;
+the rest are read, checked and written. A pod stopped mid-sweep logs `sweep interrupted` with how far it got; a check
+the stop cut short is not written. `resumes` counts the pods that took the sweep up, `carried` the records they kept;
+`startedAt` and `duration` span the whole sweep, while `engineChecks`, `graphql` and `rest` are the last pod's part.
+`sweep progress` (`done`, `of`, `checks`, `restRemaining`) is logged every 50 records written and at the end.

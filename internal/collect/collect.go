@@ -42,6 +42,13 @@ type Options struct {
 	// BudgetFloor stops a sweep cleanly when the GraphQL budget's remaining
 	// points fall below it; 0 never stops.
 	BudgetFloor int
+	// RESTFloor pauses a sweep's engine checks until the REST budget resets
+	// when its remaining requests fall below it; 0 never pauses.
+	RESTFloor int
+	// Interval is the schedule's: RunSchedule sweeps every interval (0
+	// never), and a sweep takes up an unfinished one younger than it (0
+	// always starts afresh).
+	Interval time.Duration
 	// Reconciler says where the reconciler's runs are read from.
 	Reconciler ReconcilerOptions
 	// Releases tunes the release watch: the latest release of every declared
@@ -53,6 +60,9 @@ type Options struct {
 	Schema *reposetup.Schema
 	// Now is the clock; nil is time.Now.
 	Now func() time.Time
+	// Sleep waits d or until ctx ends — the schedule, the REST budget pause;
+	// nil is a timer.
+	Sleep func(ctx context.Context, d time.Duration) error
 }
 
 // DefaultPageSize is the repositories page a sweep starts with. The
@@ -80,9 +90,30 @@ func (o *Options) defaults() {
 	if o.Now == nil {
 		o.Now = time.Now
 	}
+	if o.Sleep == nil {
+		o.Sleep = sleep
+	}
 	o.Reconciler.defaults()
 	o.Releases.defaults()
 }
+
+// sleep waits d or until ctx ends.
+func sleep(ctx context.Context, d time.Duration) error {
+	if d <= 0 {
+		return ctx.Err()
+	}
+	t := time.NewTimer(d)
+	defer t.Stop()
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-t.C:
+		return nil
+	}
+}
+
+// progressEvery is how many written records a sweep logs its progress after.
+const progressEvery = 50
 
 // Checker runs the engine's checks in read mode for one accepted declaration.
 type Checker interface {
@@ -109,6 +140,8 @@ type Collector struct {
 	// blobs fetches artifact blobs from their signed URLs: no token.
 	blobs   *http.Client
 	running atomic.Bool
+	// paceMu lets one of a sweep's checks wait out the REST budget at a time.
+	paceMu sync.Mutex
 	// wake wakes the reconciler poller between ticks: WakeReconciler sends,
 	// the poller receives; one buffered wake is all a poll needs.
 	wake chan struct{}
@@ -140,56 +173,69 @@ func (c *Collector) Options() Options { return c.opts }
 func (c *Collector) Running() bool { return c.running.Load() }
 
 // Sweep fills one record per repository of the org and stores the summary.
-// A budget stop keeps what was collected and removes nothing.
+// Each record is written as soon as it is built and checked, so an
+// interrupted sweep keeps what it reached, and the cursor lets the next sweep
+// take an unfinished one up — the records refreshed since its start are kept
+// — instead of starting over. Stale records are removed and the cursor with
+// them only after a complete pass. A budget stop keeps what was collected
+// and removes nothing.
 func (c *Collector) Sweep(ctx context.Context) (*inventory.SweepSummary, error) {
 	if !c.running.CompareAndSwap(false, true) {
 		return nil, ErrSweepRunning
 	}
 	defer c.running.Store(false)
-	start := c.now()
-	sum := &inventory.SweepSummary{StartedAt: start}
-	restBefore := c.reader.Usage()
-	gqlBefore := c.gql.snapshot()
-	c.log.Info("sweep starting", "org", c.opts.Org, "identity", c.reader.Name(), "engineChecks", c.opts.EngineChecks && c.checker != nil)
-
-	src, err := c.fetchSources(ctx)
-	if err != nil && !errors.Is(err, ErrBudget) {
+	cur, err := c.cursor(ctx)
+	if err != nil {
 		return nil, err
 	}
+	sum := &inventory.SweepSummary{StartedAt: cur.StartedAt, Resumes: cur.Resumes}
+	restBefore := c.reader.Usage()
+	gqlBefore := c.gql.snapshot()
+	c.log.Info("sweep starting", "org", c.opts.Org, "identity", c.reader.Name(), "engineChecks", c.opts.EngineChecks && c.checker != nil,
+		"startedAt", cur.StartedAt, "resumes", cur.Resumes)
+
+	src, stop := c.fetchSources(ctx)
+	if stop != nil && !errors.Is(stop, ErrBudget) {
+		return nil, stop
+	}
 	c.setCachedSources(src)
-	complete := err == nil
 	sum.Errors = append(sum.Errors, src.problems...)
-
 	nodes := map[string]*repoNode{}
-	if complete {
-		nodes, err = c.fetchRepositories(ctx, sum)
-		if err != nil && !errors.Is(err, ErrBudget) {
-			return nil, err
+	if stop == nil {
+		if nodes, stop = c.fetchRepositories(ctx, sum); stop != nil && !errors.Is(stop, ErrBudget) {
+			return nil, stop
 		}
-		complete = err == nil
 	}
-	if complete {
-		var names []string
-		for n, node := range nodes {
-			if !node.IsEmpty {
-				names = append(names, n)
-			}
-		}
-		sort.Strings(names)
-		err = c.fetchHistories(ctx, names, nodes)
-		if err != nil && !errors.Is(err, ErrBudget) {
-			return nil, err
-		}
-		complete = err == nil
-	}
-	if !complete {
-		sum.Errors = append(sum.Errors, "stopped at the budget floor: "+err.Error())
-	}
-
+	// The records written since the sweep started — by a pod before this
+	// one, or a refresh — are done: kept as they are, their history not read
+	// again.
 	old, err := c.existing(ctx)
 	if err != nil {
 		return nil, err
 	}
+	done := map[string]bool{}
+	for _, r := range old {
+		if !r.RefreshedAt.Before(cur.StartedAt) {
+			done[r.Name] = true
+		}
+	}
+	if stop == nil {
+		var names []string
+		for n, node := range nodes {
+			if !node.IsEmpty && !done[n] {
+				names = append(names, n)
+			}
+		}
+		sort.Strings(names)
+		if stop = c.fetchHistories(ctx, names, nodes); stop != nil && !errors.Is(stop, ErrBudget) {
+			return nil, stop
+		}
+	}
+	complete := stop == nil
+	if !complete {
+		sum.Errors = append(sum.Errors, "stopped at the budget floor: "+stop.Error())
+	}
+
 	names := make([]string, 0, len(nodes))
 	for n := range nodes {
 		names = append(names, n)
@@ -203,29 +249,32 @@ func (c *Collector) Sweep(ctx context.Context) (*inventory.SweepSummary, error) 
 	}
 	sort.Strings(names)
 
+	key := func(name string) string { return c.opts.Org + "/" + name }
 	records := make([]*inventory.Record, 0, len(names))
 	for _, n := range names {
-		records = append(records, c.build(n, nodes[n], src, old[c.opts.Org+"/"+n], nil))
-	}
-	c.log.Info("records assembled", "repositories", len(records), "engineChecks", c.opts.EngineChecks && c.checker != nil)
-	if c.opts.EngineChecks {
-		sum.EngineChecks = c.runChecks(ctx, records, src, true)
-	}
-	kept := map[string]bool{}
-	for _, r := range records {
-		r.Finalize()
-		c.keepRelease(ctx, r)
-		r.RefreshedAt, r.Source = c.now(), inventory.SourceSweep
-		if err := c.store.Put(ctx, r); err != nil {
-			return nil, err
+		if done[n] {
+			c.count(sum, old[key(n)])
+			sum.Carried++
+			continue
 		}
-		kept[r.Repository] = true
+		records = append(records, c.build(n, nodes[n], src, old[key(n)], nil))
+	}
+	c.log.Info("records assembled", "repositories", len(names), "pending", len(records), "carried", sum.Carried, "engineChecks", c.opts.EngineChecks && c.checker != nil)
+	sum.EngineChecks, err = c.writeRecords(ctx, records, src, len(names), sum.Carried)
+	if err != nil {
+		return nil, err
+	}
+	for _, r := range records {
 		c.count(sum, r)
 	}
 	if complete {
+		want := make(map[string]bool, len(names))
+		for _, n := range names {
+			want[key(n)] = true
+		}
 		var stale []string
 		for k := range old {
-			if !kept[k] {
+			if !want[k] {
 				stale = append(stale, k)
 			}
 		}
@@ -236,7 +285,7 @@ func (c *Collector) Sweep(ctx context.Context) (*inventory.SweepSummary, error) 
 	}
 
 	sum.FinishedAt = c.now()
-	sum.Duration = sum.FinishedAt.Sub(start).Round(time.Second).String()
+	sum.Duration = sum.FinishedAt.Sub(sum.StartedAt).Round(time.Second).String()
 	sum.GraphQL = c.gql.snapshot()
 	sum.GraphQL.Calls -= gqlBefore.Calls
 	sum.GraphQL.Cost -= gqlBefore.Cost
@@ -249,13 +298,104 @@ func (c *Collector) Sweep(ctx context.Context) (*inventory.SweepSummary, error) 
 	if err := c.store.PutSweep(ctx, sum); err != nil {
 		return nil, err
 	}
+	if complete {
+		if err := c.store.DeleteSweepCursor(ctx); err != nil {
+			return nil, err
+		}
+	}
 	c.log.Info("sweep finished", "repositories", sum.Repositories, "declared", sum.Declared, "undeclared", sum.Undeclared, "gone", sum.Gone,
 		"duration", sum.Duration, "graphqlCalls", sum.GraphQL.Calls, "graphqlCost", sum.GraphQL.Cost, "graphqlRemaining", sum.GraphQL.Remaining,
-		"restCalls", sum.REST.Calls, "restRemaining", sum.REST.Remaining, "complete", complete)
+		"restCalls", sum.REST.Calls, "restRemaining", sum.REST.Remaining, "resumes", sum.Resumes, "carried", sum.Carried, "complete", complete)
 	if !complete {
 		return sum, ErrBudget
 	}
 	return sum, nil
+}
+
+// cursor is the sweep this run does: the unfinished one when it is younger
+// than the interval, taken up once more, else a new one from now. It is
+// stored before anything is read, so a pod that stops at any point leaves it
+// to the next.
+func (c *Collector) cursor(ctx context.Context) (*inventory.SweepCursor, error) {
+	now := c.now()
+	cur, err := c.store.SweepCursor(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if cur != nil && c.opts.Interval > 0 && now.Sub(cur.StartedAt) < c.opts.Interval {
+		cur.Resumes++
+		c.log.Info("sweep resuming", "startedAt", cur.StartedAt, "resumes", cur.Resumes, "age", now.Sub(cur.StartedAt).Round(time.Second).String())
+	} else {
+		cur = &inventory.SweepCursor{StartedAt: now}
+	}
+	if err := c.store.PutSweepCursor(ctx, cur); err != nil {
+		return nil, err
+	}
+	return cur, nil
+}
+
+// writeRecords checks and stores each record, Concurrency at a time, and
+// returns the engine checks it ran; total and carried are the sweep's
+// repositories and those done before, for the progress log. A check the
+// context's end cut short is no result: its record is not written, and the
+// sweep ends with the context's error.
+func (c *Collector) writeRecords(ctx context.Context, records []*inventory.Record, src *sources, total, carried int) (int, error) {
+	wctx, stop := context.WithCancelCause(ctx)
+	defer stop(nil)
+	var checks, written atomic.Int32
+	parallel(c.opts.Concurrency, records, func(r *inventory.Record) {
+		if wctx.Err() != nil {
+			return
+		}
+		if c.opts.EngineChecks && c.check(wctx, r, src, true, c.restPause) {
+			checks.Add(1)
+		}
+		if wctx.Err() != nil {
+			return
+		}
+		r.Finalize()
+		c.keepRelease(wctx, r)
+		r.RefreshedAt, r.Source = c.now(), inventory.SourceSweep
+		if err := c.store.Put(wctx, r); err != nil {
+			stop(err)
+			return
+		}
+		if n := int(written.Add(1)); n%progressEvery == 0 || n == len(records) {
+			c.log.Info("sweep progress", "done", carried+n, "of", total, "checks", checks.Load(), "restRemaining", c.reader.Usage().Remaining)
+		}
+	})
+	n := int(checks.Load())
+	if err := ctx.Err(); err != nil {
+		c.log.Info("sweep interrupted", "done", carried+int(written.Load()), "of", total, "checks", n, "error", err.Error())
+		return n, err
+	}
+	if wctx.Err() != nil {
+		return n, context.Cause(wctx)
+	}
+	return n, nil
+}
+
+// restPause holds a sweep's next check while the REST budget is below
+// RESTFloor and its reset is ahead, where the check would fail its steps
+// with GitHub's rate-limit refusal. One check waits at a time; the others
+// queue behind it and find the reset passed.
+func (c *Collector) restPause(ctx context.Context) error {
+	if c.opts.RESTFloor <= 0 {
+		return nil
+	}
+	c.paceMu.Lock()
+	defer c.paceMu.Unlock()
+	u := c.reader.Usage()
+	if u.Limit == 0 || u.Remaining >= c.opts.RESTFloor || !u.ResetAt.After(c.now()) {
+		return nil
+	}
+	wait := u.ResetAt.Sub(c.now()) + time.Second
+	c.log.Info("sweep paused at the REST budget floor", "restRemaining", u.Remaining, "floor", c.opts.RESTFloor, "resetAt", u.ResetAt, "wait", wait.Round(time.Second).String())
+	if err := c.opts.Sleep(ctx, wait); err != nil {
+		return err
+	}
+	c.log.Info("sweep continues after the REST budget reset", "resetAt", u.ResetAt)
+	return nil
 }
 
 func (c *Collector) count(sum *inventory.SweepSummary, r *inventory.Record) {
@@ -318,7 +458,7 @@ func (c *Collector) Refresh(ctx context.Context, repository string, run *invento
 		return nil, fmt.Errorf("%w: %s is neither declared nor on GitHub", inventory.ErrNotFound, key)
 	}
 	rec := c.build(name, node, src, old, run)
-	c.runChecks(ctx, []*inventory.Record{rec}, src, false)
+	c.check(ctx, rec, src, false, nil)
 	rec.Finalize()
 	rec.RefreshedAt, rec.Source = c.now(), source
 	if err := c.store.Put(ctx, rec); err != nil {
@@ -368,54 +508,55 @@ func (c *Collector) setCachedSources(src *sources) {
 	c.srcCache, c.srcAt = src, c.now()
 }
 
-// runChecks runs the engine's read-mode checks for every accepted, present
-// declaration; keepOld leaves an older result in place where a check does
-// not run.
-func (c *Collector) runChecks(ctx context.Context, records []*inventory.Record, src *sources, keepOld bool) int {
+// check runs the engine's read-mode check for one record of an accepted,
+// present declaration and says whether the engine ran; keepOld leaves an
+// older result in place where the check fails. pace, when set, runs right
+// before the engine does (the sweep's REST budget pause); its error, the
+// context's, leaves the record as it is.
+func (c *Collector) check(ctx context.Context, r *inventory.Record, src *sources, keepOld bool, pace func(context.Context) error) bool {
 	if c.checker == nil {
-		for _, r := range records {
-			if r.Declaration != nil && r.Setup.Checks == nil {
-				r.Setup.CheckError = "engine checks need a GitHub read identity"
-			}
+		if r.Declaration != nil && r.Setup.Checks == nil {
+			r.Setup.CheckError = "engine checks need a GitHub read identity"
 		}
-		return 0
+		return false
 	}
-	var n atomic.Int32
-	parallel(c.opts.Concurrency, records, func(r *inventory.Record) {
-		d := src.declarations[r.Name]
-		switch {
-		case r.Declaration == nil || d == nil:
-			r.Setup.Checks, r.Setup.CheckedAt, r.Setup.CheckError = nil, nil, ""
-			return
-		case !d.entry.Accepted:
-			// A refused entry is the engine's result without a run — the entry
-			// step reported, one finding per problem, what `devctl repo
-			// reconcile` prints for it. Read from the declaration alone, so a
-			// gone repository keeps the refusal beside declared-but-gone.
-			at := c.now()
-			r.Setup.Checks = reconcile.Refused(reconcile.Request{Owner: c.opts.Org, Team: d.Team, Entry: d.entry, Mode: reconcile.ModeCheck}, at)
-			r.Setup.CheckedAt, r.Setup.CheckError = &at, ""
-			return
-		case r.Reality == nil:
-			r.Setup.Checks, r.Setup.CheckedAt, r.Setup.CheckError = nil, nil, ""
-			return
-		}
-		res, err := c.checker.Check(ctx, d.Team, d.entry)
-		n.Add(1)
-		if err != nil {
-			if !keepOld {
-				r.Setup.Checks, r.Setup.CheckedAt = nil, nil
-			}
-			r.Setup.CheckError = err.Error()
-			return
-		}
-		// The engine has no CircleCI client here: its circleci and release
-		// steps come from the record's own sources instead.
-		fillClientlessSteps(res, r)
+	d := src.declarations[r.Name]
+	switch {
+	case r.Declaration == nil || d == nil:
+		r.Setup.Checks, r.Setup.CheckedAt, r.Setup.CheckError = nil, nil, ""
+		return false
+	case !d.entry.Accepted:
+		// A refused entry is the engine's result without a run — the entry
+		// step reported, one finding per problem, what `devctl repo
+		// reconcile` prints for it. Read from the declaration alone, so a
+		// gone repository keeps the refusal beside declared-but-gone.
 		at := c.now()
-		r.Setup.Checks, r.Setup.CheckedAt, r.Setup.CheckError = res, &at, ""
-	})
-	return int(n.Load())
+		r.Setup.Checks = reconcile.Refused(reconcile.Request{Owner: c.opts.Org, Team: d.Team, Entry: d.entry, Mode: reconcile.ModeCheck}, at)
+		r.Setup.CheckedAt, r.Setup.CheckError = &at, ""
+		return false
+	case r.Reality == nil:
+		r.Setup.Checks, r.Setup.CheckedAt, r.Setup.CheckError = nil, nil, ""
+		return false
+	}
+	if pace != nil {
+		if err := pace(ctx); err != nil {
+			return false
+		}
+	}
+	res, err := c.checker.Check(ctx, d.Team, d.entry)
+	if err != nil {
+		if !keepOld {
+			r.Setup.Checks, r.Setup.CheckedAt = nil, nil
+		}
+		r.Setup.CheckError = err.Error()
+		return true
+	}
+	// The engine has no CircleCI client here: its circleci and release
+	// steps come from the record's own sources instead.
+	fillClientlessSteps(res, r)
+	at := c.now()
+	r.Setup.Checks, r.Setup.CheckedAt, r.Setup.CheckError = res, &at, ""
+	return true
 }
 
 // parallel runs fn over items, concurrency at a time, and returns when every
@@ -596,32 +737,46 @@ func firstNonEmpty(ss ...string) string {
 	return ""
 }
 
-// RunSchedule sweeps at start when the last sweep is older than interval (or
-// none ran), then every interval; a failed sweep is retried after an hour at
-// most. It returns when ctx is done.
-func (c *Collector) RunSchedule(ctx context.Context, interval time.Duration) {
+// RunSchedule sweeps every Interval. At start it sweeps at once when an
+// unfinished sweep younger than the interval waits to be taken up, or the
+// last sweep is older than the interval (or none ran); else when the
+// interval since the last one is over. A failed sweep is retried after an
+// hour at most. It returns when ctx is done.
+func (c *Collector) RunSchedule(ctx context.Context) {
+	interval := c.opts.Interval
 	if interval <= 0 {
 		return
 	}
-	wait := time.Duration(0)
-	if last, err := c.store.Sweep(ctx); err == nil && last != nil {
-		if since := c.now().Sub(last.FinishedAt); since < interval {
-			wait = interval - since
-		}
-	}
+	wait := c.firstWait(ctx, interval)
 	for {
-		select {
-		case <-ctx.Done():
+		if err := c.opts.Sleep(ctx, wait); err != nil {
 			return
-		case <-time.After(wait):
 		}
 		if _, err := c.Sweep(ctx); err != nil {
+			if ctx.Err() != nil {
+				return
+			}
 			c.log.Error("scheduled sweep failed", "error", err)
 			wait = min(interval, time.Hour)
 			continue
 		}
 		wait = interval
 	}
+}
+
+// firstWait is how long the schedule waits before its first sweep.
+func (c *Collector) firstWait(ctx context.Context, interval time.Duration) time.Duration {
+	now := c.now()
+	if cur, err := c.store.SweepCursor(ctx); err == nil && cur != nil && now.Sub(cur.StartedAt) < interval {
+		c.log.Info("unfinished sweep found, taking it up now", "startedAt", cur.StartedAt, "resumes", cur.Resumes)
+		return 0
+	}
+	if last, err := c.store.Sweep(ctx); err == nil && last != nil {
+		if since := now.Sub(last.FinishedAt); since < interval {
+			return interval - since
+		}
+	}
+	return 0
 }
 
 // StartSweep runs a sweep in the background; false when one is running.

@@ -101,7 +101,9 @@ inventory:
   sweep:
     # -- Full sweep over the org every interval (a Go duration); `"0"` turns
     # the schedule off. The first sweep runs at start when the last one is
-    # older than the interval.
+    # older than the interval; an unfinished sweep younger than the interval,
+    # one a restarted pod left, is taken up at start and keeps the records it
+    # wrote.
     interval: 24h
     # -- Run the engine's set-up checks in read mode for every accepted
     # declaration during a sweep (REST as the App, about ten calls per
@@ -112,6 +114,10 @@ inventory:
     # -- Stop a sweep cleanly when the GraphQL budget's remaining points fall
     # below this; 0 never stops.
     graphqlBudgetFloor: 0
+    # -- Pause a sweep's engine checks until the REST budget resets when its
+    # remaining requests fall below this, instead of failing the remaining
+    # checks with GitHub's rate-limit refusal; 0 never pauses.
+    restBudgetFloor: 500
     # -- GitHub team slugs whose members may start a sweep on demand with the
     # tool `sweep_inventory` (membership checked on GitHub as the caller): the
     # teams that own the manager and the reconciler. Passed as `SWEEP_TEAMS`.

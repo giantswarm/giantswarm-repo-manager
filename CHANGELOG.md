@@ -18,6 +18,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   lifecycles}`: the values the validator's repositories schema allows, read from the one schema instance the tools and
   the collector validate against (the copy embedded in the engine's devctl version, which `origin` names); a field that
   cannot be read is `schema.error`, never an empty list.
+- The sweep survives a pod restart: each record is written as soon as it is built and checked, and a cursor
+  (`inventory:sweep-cursor`, the sweep's start) lets the next pod take an unfinished sweep younger than the interval up
+  at once, keeping the records written since its start and reading and checking only the rest; stale records are still
+  removed and the summary written only after a complete pass, which now carries `resumes` and `carried`. The log
+  reports the sweep's progress (`sweep progress`, every 50 records) and a stop (`sweep interrupted`). The engine's
+  checks pause at the REST budget's end until its reset instead of failing with GitHub's rate-limit refusal:
+  `inventory.sweep.restBudgetFloor` (default 500; `--rest-budget-floor`, `REST_BUDGET_FLOOR`).
 
 ### Changed
 

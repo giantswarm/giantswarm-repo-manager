@@ -19,12 +19,14 @@ import (
 	"github.com/valkey-io/valkey-go"
 )
 
-// Keys: repository records under KeyPrefix<owner>/<name>, the last sweep's
-// summary under SweepKey, the reconciler poller's cursor under ReconcilerKey.
+// Keys: repository records under KeyPrefix<owner>/<name>, the last completed
+// sweep's summary under SweepKey, the unfinished sweep's cursor under
+// SweepCursorKey, the reconciler poller's cursor under ReconcilerKey.
 const (
-	KeyPrefix     = "repo:"
-	SweepKey      = "inventory:sweep"
-	ReconcilerKey = "inventory:reconciler"
+	KeyPrefix      = "repo:"
+	SweepKey       = "inventory:sweep"
+	SweepCursorKey = "inventory:sweep-cursor"
+	ReconcilerKey  = "inventory:reconciler"
 )
 
 // Connection timing: one dial is bounded by dialTimeout, and WaitConnected
@@ -329,6 +331,35 @@ func (s *Store) Sweep(ctx context.Context) (*SweepSummary, error) {
 	return &sum, nil
 }
 
+// SweepCursor is the unfinished sweep: when it started and how often a new
+// pod took it up. A record refreshed at or after StartedAt is done for it,
+// so the cursor needs no list of names; it is removed when the sweep
+// completes.
+type SweepCursor struct {
+	StartedAt time.Time `json:"startedAt"`
+	Resumes   int       `json:"resumes,omitempty"`
+}
+
+// PutSweepCursor stores the unfinished sweep's cursor.
+func (s *Store) PutSweepCursor(ctx context.Context, cur *SweepCursor) error {
+	return s.putJSON(ctx, SweepCursorKey, "sweep cursor", cur)
+}
+
+// SweepCursor reads the unfinished sweep's cursor; nil without one.
+func (s *Store) SweepCursor(ctx context.Context) (*SweepCursor, error) {
+	var cur SweepCursor
+	ok, err := s.getJSON(ctx, SweepCursorKey, "sweep cursor", &cur)
+	if err != nil || !ok {
+		return nil, err
+	}
+	return &cur, nil
+}
+
+// DeleteSweepCursor removes the cursor: the sweep completed.
+func (s *Store) DeleteSweepCursor(ctx context.Context) error {
+	return s.del(ctx, SweepCursorKey)
+}
+
 // ReconcilerCursor is where the reconciler poller stands: every run created
 // before Watermark is consumed or given up; Consumed names the run attempts
 // at or after it that are consumed already ("<run id>/<attempt>"), with their
@@ -389,7 +420,19 @@ func (s *Store) getJSON(ctx context.Context, key, what string, out any) (bool, e
 	return true, nil
 }
 
-// Clear removes every record, the sweep summary and the reconciler cursor —
+// del removes one key.
+func (s *Store) del(ctx context.Context, key string) error {
+	c, err := s.conn()
+	if err != nil {
+		return err
+	}
+	if err := c.Do(ctx, c.B().Del().Key(key).Build()).Error(); err != nil {
+		return fail("delete "+key, err)
+	}
+	return nil
+}
+
+// Clear removes every record, the sweep summary and both cursors —
 // the store is a cache, so a forced rebuild (and a test on a shared Valkey)
 // starts from nothing.
 func (s *Store) Clear(ctx context.Context) error {
@@ -400,14 +443,10 @@ func (s *Store) Clear(ctx context.Context) error {
 	if err := s.Delete(ctx, keys...); err != nil {
 		return err
 	}
-	c, err := s.conn()
-	if err != nil {
-		return err
-	}
 	// One DEL per key: a multi-key command needs one hash slot.
-	for _, key := range []string{SweepKey, ReconcilerKey} {
-		if err := c.Do(ctx, c.B().Del().Key(key).Build()).Error(); err != nil {
-			return fail("delete "+key, err)
+	for _, key := range []string{SweepKey, SweepCursorKey, ReconcilerKey} {
+		if err := s.del(ctx, key); err != nil {
+			return err
 		}
 	}
 	return nil

@@ -570,7 +570,7 @@
         },
         "valkey": {
             "type": "object",
-            "description": "The inventory store: the Giant Swarm `valkey` app as a subchart (its values live under `valkey.valkey`, the upstream chart's). One replica on an RWO volume with `Recreate`, so a rollout does not deadlock on the volume; the store is a cache — every record is rebuilt from the team files and GitHub — so the restart gap costs nothing. Set `valkey.enabled: false` and `inventory.valkeyAddress` to use a Valkey outside the release.",
+            "description": "The inventory store: the Giant Swarm `valkey` app as a subchart (its values live under `valkey.valkey`, the upstream chart's). One replica on a 1Gi RWO volume with `Recreate`, so a rollout does not deadlock on the volume and the inventory survives a Valkey restart as well as a manager restart; the store is a cache — every record is rebuilt from the team files and GitHub — so the restart gap costs nothing. Set `valkey.enabled: false` and `inventory.valkeyAddress` to use a Valkey outside the release.",
             "additionalProperties": true
         }
     }

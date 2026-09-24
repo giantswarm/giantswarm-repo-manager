@@ -3,7 +3,7 @@
 # encode that `helm lint` and the values schema cannot check. Runs in the chart
 # workflow (.github/workflows/chart.yml) on every change and as
 # `make helm-verify`, after `make helm-deps` pulled the pinned dependencies.
-# Needs helm.
+# Needs helm and yq (mikefarah, v4; preinstalled on the GitHub runners).
 set -euo pipefail
 cd "$(dirname "$0")/.."
 CHART=helm/giantswarm-repo-manager
@@ -37,5 +37,40 @@ done <<'VERSIONS'
 0.10.12-dev.renova.2026-09-22.14-54-24+h1a2b3c4 giantswarm-repo-manager-0.10.12-dev.renova.2026-09-22.14-54-24
 0.10.12-dev.renova.2026-09-22.14-54---.h1a2b3c4 giantswarm-repo-manager-0.10.12-dev.renova.2026-09-22.14-54
 VERSIONS
+
+# The Valkey store with default values passes the restricted Pod Security
+# Standard and keeps its data on a volume: the pod runs under seccomp
+# RuntimeDefault, every container and init container carries the restricted
+# security context (the valkey chart applies valkey.valkey.securityContext to
+# its init container too, the exporter has its own), and the data volume is a
+# 1Gi ReadWriteOnce PersistentVolumeClaim of the render, not an emptyDir.
+render=$(helm template t "$CHART")
+pod=$(yq 'select(.kind == "Deployment" and .metadata.labels["app.kubernetes.io/name"] == "valkey") | .spec.template.spec' <<<"$render")
+[ -n "$pod" ] || fail "the default render has no Valkey Deployment"
+[ "$(yq '.securityContext.seccompProfile.type' <<<"$pod")" = RuntimeDefault ] ||
+  fail "Valkey pod: securityContext.seccompProfile.type is not RuntimeDefault"
+containers=$(yq '((.initContainers // []) + .containers)[].name' <<<"$pod")
+[ -n "$containers" ] || fail "Valkey pod: no containers"
+while IFS= read -r c; do
+  sc=$(yq "((.initContainers // []) + .containers)[] | select(.name == \"$c\") | .securityContext" <<<"$pod")
+  for rule in \
+    '.seccompProfile.type == "RuntimeDefault"' \
+    '.allowPrivilegeEscalation == false' \
+    '(.capabilities.drop // []) | contains(["ALL"])' \
+    '.readOnlyRootFilesystem == true' \
+    '.runAsNonRoot == true'; do
+    [ "$(yq "$rule" <<<"$sc")" = true ] || fail "Valkey container $c: securityContext $rule does not hold"
+  done
+done <<<"$containers"
+read -r vol claim < <(yq '.volumes[] | select(.persistentVolumeClaim) | .name + " " + .persistentVolumeClaim.claimName' <<<"$pod") ||
+  fail "Valkey pod: the data is on no PersistentVolumeClaim"
+[ "$(yq "[.containers[] | (.volumeMounts // [])[] | select(.name == \"$vol\")] | length" <<<"$pod")" -gt 0 ] ||
+  fail "Valkey pod: no container mounts the PersistentVolumeClaim $claim"
+pvc=$(yq "select(.kind == \"PersistentVolumeClaim\" and .metadata.name == \"$claim\") | .spec" <<<"$render")
+[ -n "$pvc" ] || fail "the default render has no PersistentVolumeClaim $claim"
+[ "$(yq '(.accessModes | length) == 1 and .accessModes[0] == "ReadWriteOnce"' <<<"$pvc")" = true ] ||
+  fail "PersistentVolumeClaim $claim: accessModes $(yq -o=json -I=0 '.accessModes' <<<"$pvc"), want [\"ReadWriteOnce\"]"
+[ "$(yq '.resources.requests.storage' <<<"$pvc")" = 1Gi ] ||
+  fail "PersistentVolumeClaim $claim: requests $(yq '.resources.requests.storage' <<<"$pvc"), want 1Gi"
 
 echo "verify-chart: ok"

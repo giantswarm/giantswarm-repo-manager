@@ -17,6 +17,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- The chart's Valkey is the `valkey` app 0.1.7 (was 0.1.4; 0.1.5 lacked its exporter image). From 0.1.5 on the
+  subchart's config checksums are pod annotations, so the first upgrade restarts the Valkey pod once.
 - devctl 8.96.0: the team-file schema the inventory and `create_repository` validate entries against knows
   `gen.ci.templateContent` ([devctl#2397](https://github.com/giantswarm/devctl/pull/2397)), the field a template
   repository sets beside `generate: false` when its `.circleci/config.yml` is content for the repositories created from it;
@@ -25,6 +27,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- The chart's Valkey keeps the inventory on a 1Gi ReadWriteOnce PersistentVolumeClaim by default
+  (`valkey.valkey.dataStorage`), as the chart's `Recreate` strategy assumed; it lived in an `emptyDir`, so a Valkey pod
+  restart emptied it. `make helm-verify` asserts the default render: the volume, and the restricted Pod Security
+  Standard contexts on the Valkey pod and every container and init container.
 - `watch_repository` ends on a first release no pipeline built instead of waiting for it forever: a creation followed
   from chat never answered. Auto-release tags the scaffold on `main` before the reconciler follows the project on
   CircleCI, so CircleCI never builds that tag; the follow builds `main`, whose head the tag names, and its `setup` and

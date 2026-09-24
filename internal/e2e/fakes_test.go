@@ -29,6 +29,7 @@ const (
 	kItems         = "items"
 	kTagName       = "tagName"
 	kTagCommit     = "tagCommit"
+	kOID           = "oid"
 	jobPushRelease = "push-to-registries-release"
 )
 

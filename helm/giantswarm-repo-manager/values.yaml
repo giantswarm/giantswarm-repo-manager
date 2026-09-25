@@ -142,7 +142,7 @@ inventory:
     # Go duration): one GraphQL query over the most recently pushed
     # repositories per pass, and CircleCI reads for the releases still
     # running. A red pipeline, or none within `grace`, is one notice to the
-    # owning team's `standupChannel`, told once; a rerun that goes green is
+    # owning team's `notices` channel, told once; a rerun that goes green is
     # silent. `"0"` turns the watch off. Public repositories are read without
     # a token; a private one needs `circleci.existingSecret`, else its release
     # reads `unchecked`.
@@ -169,7 +169,7 @@ inventory:
 
 teamFiles:
   # -- The repository that holds the team files (`repositories/<team>.yaml`,
-  # the desired state) and the policy files (`repository-setup/<team>.yaml`);
+  # the desired state) and the teams' channel files (`teams/<team>.yaml`);
   # every write is a pull request against it, opened as the caller.
   repository: giantswarm/github
   # -- The branch the files are read from and pull requests target.
@@ -189,9 +189,10 @@ circleci:
 reviews:
   # -- klaus-gateway's base URL as reached from the pod (for example
   # `http://klaus-gateway.agent-platform.svc:8080`): lifecycle and transfer
-  # asks go to `POST /reviews` into the team's `slackChannel`, notices (the
+  # asks go to `POST /reviews` into the team's `asks` channel, notices (the
   # giving team's transfer notice, what a reconciler run tells the team) to
-  # `POST /notices` into its `standupChannel`, authenticated with this pod's
+  # `POST /notices` into its `notices` channel (both from the team's
+  # `teams/<team>.yaml`), authenticated with this pod's
   # projected ServiceAccount token for `audience`. Empty leaves the asks
   # undelivered; the tools say so and approving on GitHub stays equivalent.
   # `get_info` reports it as `reviews.url` beside `reviews.configured`.
@@ -200,17 +201,15 @@ reviews:
   # this ServiceAccount must be in its `reviews.allowedCallers`. `get_info`
   # reports it as `reviews.audience`.
   audience: klaus-gateway
-  # -- Slack channel IDs by the channel names a team's policy file carries:
-  # `slackChannel` (asks with an Approve button) and `standupChannel`
-  # (notices). The gateway takes IDs, so every channel a policy file names
-  # needs an entry (`team-x: C…`, `standup-x: C…`) unless the file carries
-  # the ID itself.
+  # -- Unread: the channels are each team's `teams/<team>.yaml` in the
+  # team-files repository, their IDs and names. Still accepted, and ignored,
+  # so a values file that sets it keeps validating until it drops the key.
   channels: {}  # @schema additionalProperties: true
-  # -- A channel that receives every ask and notice instead of the channel the
-  # policy file names, the text closing with that channel (`… (for #team-x)`):
-  # a test round of the flows without disturbing the teams. A name `channels`
-  # resolves or a Slack channel ID; empty delivers to the policy file's channel.
-  debugChannel: ""
+  # -- A Slack channel ID that receives every ask and notice instead of the
+  # team's channel, the text closing with that channel's name (`… (for
+  # #team-x)`): a test round of the flows without disturbing the teams. Empty
+  # delivers to the channel the team's `teams/<team>.yaml` names.
+  debugChannel: ""  # @schema pattern: ^([CDG][A-Z0-9]{5,})?$
 
 mcp:
   # -- MCP streamable-HTTP endpoint path.

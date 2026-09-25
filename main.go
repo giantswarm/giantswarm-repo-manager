@@ -54,12 +54,12 @@ type options struct {
 	githubAppID, githubAppInstallationID  int64
 	devctlAppID                           int64
 
-	teamFilesRepository, teamFilesRef                                                   string
-	reconcilerWorkflow                                                                  string
-	reconcilerPollInterval                                                              time.Duration
-	releasesInterval, releasesGrace                                                     time.Duration
-	circleciToken, circleciAPIURL                                                       string
-	reviewsURL, reviewsTokenFile, reviewsAudience, reviewsChannels, reviewsDebugChannel string
+	teamFilesRepository, teamFilesRef                                  string
+	reconcilerWorkflow                                                 string
+	reconcilerPollInterval                                             time.Duration
+	releasesInterval, releasesGrace                                    time.Duration
+	circleciToken, circleciAPIURL                                      string
+	reviewsURL, reviewsTokenFile, reviewsAudience, reviewsDebugChannel string
 
 	oauthEnabled                           bool
 	oauthBaseURL, oauthAuthorizationServer string
@@ -88,7 +88,7 @@ func parseFlags(args []string) (*options, error) {
 	f.Int64Var(&o.githubAppInstallationID, "github-app-installation-id", envInt64("GITHUB_APP_INSTALLATION_ID"), "The inventory App's installation id on the org (GITHUB_APP_INSTALLATION_ID)")
 	f.StringVar(&o.githubAppPrivateKeyFile, "github-app-private-key-file", envOr("GITHUB_APP_PRIVATE_KEY_FILE", ""), "PEM private key of the inventory App (GITHUB_APP_PRIVATE_KEY_FILE)")
 	f.Int64Var(&o.devctlAppID, "devctl-app-id", envInt64("DEVCTL_APP_ID"), "Numeric id of the devctl GitHub App, the reconciler's bypass actor on the ruleset devctl: default branch. Set it only for a read identity that sees a ruleset's bypass actors (the inventory App does not: GitHub shows them to identities that administer the repository); 0, the default, compares the rules alone and reports the bypass list as not compared (DEVCTL_APP_ID)")
-	f.StringVar(&o.teamFilesRepository, "team-files-repository", envOr("TEAM_FILES_REPOSITORY", teamfiles.DefaultRepository), "owner/name of the repository that holds the team files and policy files (TEAM_FILES_REPOSITORY)")
+	f.StringVar(&o.teamFilesRepository, "team-files-repository", envOr("TEAM_FILES_REPOSITORY", teamfiles.DefaultRepository), "owner/name of the repository that holds the team files and the teams' channel files (TEAM_FILES_REPOSITORY)")
 	f.StringVar(&o.teamFilesRef, "team-files-ref", envOr("TEAM_FILES_REF", teamfiles.DefaultRef), "Branch the team files are read from and pull requests target (TEAM_FILES_REF)")
 	f.DurationVar(&o.releasesInterval, "releases-interval", envDuration("RELEASES_INTERVAL", collect.DefaultReleaseInterval), "Follow the latest release of every declared repository from its tag to the end of the tag's own CircleCI pipeline, reading every interval; a red pipeline, or none within the grace period, is one notice to the team's standup channel, told once; 0 turns the watch off (RELEASES_INTERVAL)")
 	f.DurationVar(&o.releasesGrace, "releases-grace", envDuration("RELEASES_GRACE", collect.DefaultReleaseGrace), "How long after its creation a release may have no CircleCI pipeline before it is a missed build (RELEASES_GRACE)")
@@ -97,8 +97,7 @@ func parseFlags(args []string) (*options, error) {
 	f.StringVar(&o.reviewsURL, "reviews-url", envOr("REVIEWS_URL", ""), "klaus-gateway's base URL for the team-review endpoint (POST /reviews, /notices); empty leaves the asks undelivered (REVIEWS_URL)")
 	f.StringVar(&o.reviewsTokenFile, "reviews-token-file", envOr("REVIEWS_TOKEN_FILE", "/var/run/secrets/klaus-gateway/token"), "Projected ServiceAccount token (audience reviews-audience) sent to the team-review endpoint (REVIEWS_TOKEN_FILE)")
 	f.StringVar(&o.reviewsAudience, "reviews-audience", envOr("REVIEWS_AUDIENCE", review.DefaultAudience), "Audience the reviews-token-file token is projected for, the gateway's reviews.audience; get_info reports it (REVIEWS_AUDIENCE)")
-	f.StringVar(&o.reviewsChannels, "reviews-channels", envOr("REVIEWS_CHANNELS", ""), "Comma-separated name=ID pairs mapping a policy file's slackChannel to its Slack channel ID (REVIEWS_CHANNELS)")
-	f.StringVar(&o.reviewsDebugChannel, "reviews-debug-channel", envOr("REVIEWS_DEBUG_CHANNEL", ""), "A channel that receives every ask and notice instead of the policy file's channel, the text naming that channel: a name reviews-channels resolves or a Slack channel ID; empty delivers to the policy file's channel (REVIEWS_DEBUG_CHANNEL)")
+	f.StringVar(&o.reviewsDebugChannel, "reviews-debug-channel", envOr("REVIEWS_DEBUG_CHANNEL", ""), "A Slack channel ID that receives every ask and notice instead of the team's channel, the text naming that channel; empty delivers to the channel the team's teams/<team>.yaml names (REVIEWS_DEBUG_CHANNEL)")
 	f.BoolVar(&o.oauthEnabled, "enable-oauth", envBool("OAUTH_ENABLED"), "Require a GitHub user token as the bearer of every MCP request — behind muster the person's own, through the App giantswarm-repo-manager — verified with GET /user; the caller and the token travel with the request (OAUTH_ENABLED)")
 	f.StringVar(&o.oauthBaseURL, "oauth-base-url", envOr("OAUTH_BASE_URL", ""), "URL muster reaches this server at, without the MCP path: the resource of its OAuth protected-resource metadata (OAUTH_BASE_URL)")
 	f.StringVar(&o.oauthAuthorizationServer, "oauth-authorization-server", envOr("OAUTH_AUTHORIZATION_SERVER", server.DefaultAuthorizationServer), "Issuer identity of the authorization server muster pins for this server, named in the protected-resource metadata (OAUTH_AUTHORIZATION_SERVER)")
@@ -123,7 +122,7 @@ func main() {
 
 // run wires the components and serves until ctx is done.
 func run(ctx context.Context, o *options, log *slog.Logger) error {
-	reviews, err := review.New(review.Config{BaseURL: o.reviewsURL, TokenFile: o.reviewsTokenFile, Audience: o.reviewsAudience, Channels: channelMap(o.reviewsChannels), DebugChannel: o.reviewsDebugChannel})
+	reviews, err := review.New(review.Config{BaseURL: o.reviewsURL, TokenFile: o.reviewsTokenFile, Audience: o.reviewsAudience, DebugChannel: o.reviewsDebugChannel})
 	if err != nil {
 		return err
 	}
@@ -332,17 +331,6 @@ func envDuration(key string, def time.Duration) time.Duration {
 		return def
 	}
 	return d
-}
-
-// channelMap parses "name=ID,name=ID".
-func channelMap(s string) map[string]string {
-	out := map[string]string{}
-	for _, p := range splitList(s) {
-		if name, id, ok := strings.Cut(p, "="); ok {
-			out[strings.TrimPrefix(strings.TrimSpace(name), "#")] = strings.TrimSpace(id)
-		}
-	}
-	return out
 }
 
 func splitList(s string) []string {

@@ -1,16 +1,19 @@
 // Package teamfiles is giantswarm/github as the writes see it: the team
-// files (repositories/<team>.yaml, the desired state), the per-team policy
-// files (repository-setup/<team>.yaml: Slack channels, repair opt-in), and the
+// files (repositories/<team>.yaml, the desired state), a team's channel file
+// (teams/<team>.yaml: the Slack channels it is messaged in), and the
 // one way a change lands — a branch and a pull request, opened with the
 // GitHub client the caller passes in (the person's token for every write, the
 // App for unattended reads). Nothing here decides who the client is.
 package teamfiles
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
+	"regexp"
 	"sort"
 	"strings"
 
@@ -23,8 +26,8 @@ const (
 	// DefaultRepository and DefaultRef are where the team files live.
 	DefaultRepository = "giantswarm/github"
 	DefaultRef        = "main"
-	// PolicyDir holds the per-team policy files (PRD D6).
-	PolicyDir = "repository-setup"
+	// ChannelsDir holds each team's channel file, teams/<team>.yaml.
+	ChannelsDir = "teams"
 	// ReconcilerWorkflow is the reconciler's workflow file in the repository
 	// (giantswarm/github#6031); its workflow_dispatch takes repository, team
 	// and dry-run.
@@ -214,42 +217,85 @@ func (r Repo) FindEntry(ctx context.Context, name, hint string) (*TeamFile, erro
 	return nil, fmt.Errorf("%w: %s (looked in %s)", ErrEntryNotFound, name, strings.Join(teams, ", "))
 }
 
-// Policy is a team's repository-setup policy file: the two channels every
-// message of the set-up automation goes to — asks with an Approve button
-// (archive, deprecate, an incoming transfer, a repair review) to
-// SlackChannel, notices (what someone did, a failed step, a finding) to
-// StandupChannel. Both channels are required; a file without one is
-// refused, nothing stands in for it. The file holds no opt-in: a
-// repository's opt-in to alignment is the `align: true` of its own entry in
-// the team file (FieldAlign).
-type Policy struct {
-	Team           string `json:"team" yaml:"-"`
-	SlackChannel   string `json:"slackChannel" yaml:"slackChannel"`
-	StandupChannel string `json:"standupChannel" yaml:"standupChannel"`
+// Channels is a team's channel file, teams/<team>.yaml: the Slack channels
+// the team is messaged in, each an ID (what a message is delivered to) and a
+// name (what is shown). Asks with an Approve button (archive, deprecate, an
+// incoming transfer, a repair review) go to Asks, notices (what someone did,
+// a failed step, a finding, a red release) to Notices. Notices is required;
+// Asks is optional and is the team's opt-in to repository set-up messages:
+// a file without it gets none, notices included. Neither stands in for the
+// other. A repository's opt-in to alignment is the `align: true` of its own
+// entry in the team file (FieldAlign), not here.
+type Channels struct {
+	Team    string   `json:"team" yaml:"-"`
+	Asks    *Channel `json:"asks,omitempty" yaml:"asks"`
+	Notices Channel  `json:"notices" yaml:"notices"`
 }
 
-// Policy reads repository-setup/<team>.yaml.
-func (r Repo) Policy(ctx context.Context, team string) (*Policy, error) {
-	f, err := r.Read(ctx, PolicyDir+"/"+team+".yaml")
+// Channel is one Slack channel of a team's channel file.
+type Channel struct {
+	// ID is the Slack channel ID messages are delivered to.
+	ID string `json:"id" yaml:"id"`
+	// Name is the channel's name without the #, only ever shown.
+	Name string `json:"name" yaml:"name"`
+}
+
+var (
+	channelIDPattern   = regexp.MustCompile(`^[CDG][A-Z0-9]{5,}$`)
+	channelNamePattern = regexp.MustCompile(`^[a-z0-9][a-z0-9._-]*$`)
+)
+
+// Channels reads teams/<team>.yaml.
+func (r Repo) Channels(ctx context.Context, team string) (*Channels, error) {
+	f, err := r.Read(ctx, ChannelsPath(team))
 	if err != nil {
 		return nil, err
 	}
-	return ParsePolicy(team, f.Path, f.Content)
+	return ParseChannels(team, f.Path, f.Content)
 }
 
-// ParsePolicy parses a team's policy file; path names it in errors.
-func ParsePolicy(team, path string, content []byte) (*Policy, error) {
-	p := Policy{Team: team}
-	if err := yaml.Unmarshal(content, &p); err != nil {
+// ChannelsPath is the team's channel file in the repository.
+func ChannelsPath(team string) string { return ChannelsDir + "/" + team + ".yaml" }
+
+// ParseChannels parses a team's channel file strictly, as its schema
+// (teams/policy.schema.json) does: one document, no unknown key, notices
+// required, every channel an ID and a name. path names the file in errors.
+func ParseChannels(team, path string, content []byte) (*Channels, error) {
+	c := Channels{Team: team}
+	dec := yaml.NewDecoder(bytes.NewReader(content))
+	dec.KnownFields(true)
+	if err := dec.Decode(&c); err != nil {
+		if errors.Is(err, io.EOF) {
+			return nil, fmt.Errorf("%s: notices is missing", path)
+		}
 		return nil, fmt.Errorf("%s: %w", path, err)
 	}
-	if p.SlackChannel == "" {
-		return nil, fmt.Errorf("%s: slackChannel is empty", path)
+	var extra any
+	if err := dec.Decode(&extra); !errors.Is(err, io.EOF) {
+		return nil, fmt.Errorf("%s: one YAML document expected", path)
 	}
-	if p.StandupChannel == "" {
-		return nil, fmt.Errorf("%s: standupChannel is empty", path)
+	if c.Notices == (Channel{}) {
+		return nil, fmt.Errorf("%s: notices is missing", path)
 	}
-	return &p, nil
+	if err := c.Notices.check("notices"); err != nil {
+		return nil, fmt.Errorf("%s: %w", path, err)
+	}
+	if c.Asks != nil {
+		if err := c.Asks.check("asks"); err != nil {
+			return nil, fmt.Errorf("%s: %w", path, err)
+		}
+	}
+	return &c, nil
+}
+
+func (ch Channel) check(key string) error {
+	if !channelIDPattern.MatchString(ch.ID) {
+		return fmt.Errorf("%s.id %q is not a Slack channel ID (C…)", key, ch.ID)
+	}
+	if !channelNamePattern.MatchString(ch.Name) {
+		return fmt.Errorf("%s.name %q is not a Slack channel name (without the #)", key, ch.Name)
+	}
+	return nil
 }
 
 // Change is one pull request: the files as they should read on the branch.

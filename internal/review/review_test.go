@@ -15,7 +15,6 @@ const (
 	teamChannel   = "team-x"
 	teamChannelID = "C0TEAMX00001"
 	standupID     = "C0STANDUPX01"
-	debugChannel  = "debug-x"
 	debugID       = "C0DEBUGX0001"
 	token         = "sa-token"
 	hello         = "hello"
@@ -54,9 +53,8 @@ func gateway(t *testing.T) (*Client, *[]posted, func(Config) (*Client, error)) {
 	if err := os.WriteFile(tokenFile, []byte(token+"\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	channels := map[string]string{teamChannel: teamChannelID, "standup-x": standupID, debugChannel: debugID}
 	with := func(cfg Config) (*Client, error) {
-		cfg.BaseURL, cfg.TokenFile, cfg.Channels = srv.URL, tokenFile, channels
+		cfg.BaseURL, cfg.TokenFile = srv.URL, tokenFile
 		return New(cfg)
 	}
 	c, err := with(Config{})
@@ -79,22 +77,12 @@ func TestNewWithoutURLIsOff(t *testing.T) {
 	}
 }
 
-func TestChannelID(t *testing.T) {
-	c, _, _ := gateway(t)
-	for in, want := range map[string]string{teamChannelID: teamChannelID, teamChannel: teamChannelID, "#" + teamChannel: teamChannelID, " standup-x ": standupID} {
-		if got, err := c.ChannelID(in); err != nil || got != want {
-			t.Errorf("ChannelID(%q) = %q, %v; want %q", in, got, err, want)
-		}
-	}
-	if _, err := c.ChannelID("team-unknown"); err == nil || !strings.Contains(err.Error(), "reviews.channels") {
-		t.Errorf("unknown name: %v", err)
-	}
-}
-
 func TestNewRefusesADebugChannelWithoutID(t *testing.T) {
 	_, _, with := gateway(t)
-	if _, err := with(Config{DebugChannel: "nowhere"}); err == nil || !strings.Contains(err.Error(), `debug channel: slack channel "nowhere" has no ID`) {
-		t.Fatalf("New: %v", err)
+	for _, name := range []string{"nowhere", "#debug-x"} {
+		if _, err := with(Config{DebugChannel: name}); err == nil || !strings.Contains(err.Error(), `debug channel "`+name+`" is not a Slack channel ID`) {
+			t.Errorf("New(%q): %v", name, err)
+		}
 	}
 }
 
@@ -115,22 +103,22 @@ func TestDeliveryUnchangedWithoutDebugChannel(t *testing.T) {
 }
 
 // With one, every ask and notice lands there, the text closing with the
-// channel the policy file chose: its name when Channels maps it, else the
-// ID as the file carries it. Everything else on the wire is as given.
+// name of the team's channel the caller passes; the name never goes on the
+// wire otherwise. Everything else on the wire is as given.
 func TestDebugChannelReceivesEveryAskAndNotice(t *testing.T) {
 	_, got, with := gateway(t)
-	c, err := with(Config{DebugChannel: "#" + debugChannel})
+	c, err := with(Config{DebugChannel: debugID})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if c.DebugChannel() != "#"+debugChannel {
+	if c.DebugChannel() != debugID {
 		t.Errorf("DebugChannel() = %q", c.DebugChannel())
 	}
 	ctx := context.Background()
-	if p, err := c.Review(ctx, Ask{Team: teamChannel, Channel: teamChannelID, Text: hello, Link: "https://example.invalid/pr/1", Approve: Approve{Tool: approveTool}}); err != nil || p.Channel != debugID {
+	if p, err := c.Review(ctx, Ask{Team: teamChannel, Channel: teamChannelID, ChannelName: teamChannel, Text: hello, Link: "https://example.invalid/pr/1", Approve: Approve{Tool: approveTool}}); err != nil || p.Channel != debugID {
 		t.Fatalf("Review: %+v %v", p, err)
 	}
-	if _, err := c.Notify(ctx, Notice{Team: teamChannel, Channel: "C0UNMAPPED01", Text: hello}); err != nil {
+	if _, err := c.Notify(ctx, Notice{Team: teamChannel, Channel: standupID, ChannelName: "standup-x", Text: hello}); err != nil {
 		t.Fatal(err)
 	}
 	if len(*got) != 2 {
@@ -138,10 +126,10 @@ func TestDebugChannelReceivesEveryAskAndNotice(t *testing.T) {
 	}
 	ask, notice := (*got)[0], (*got)[1]
 	if ask.Path != pathReviews || ask.Body["channel"] != debugID || ask.Body["text"] != hello+" (for #"+teamChannel+")" ||
-		ask.Body["team"] != teamChannel || ask.Body["link"] != "https://example.invalid/pr/1" || ask.Body["approve"].(map[string]any)["tool"] != approveTool {
+		ask.Body["team"] != teamChannel || ask.Body["link"] != "https://example.invalid/pr/1" || ask.Body["approve"].(map[string]any)["tool"] != approveTool || ask.Body["channelName"] != nil {
 		t.Errorf("ask: %+v", ask)
 	}
-	if notice.Path != pathNotices || notice.Body["channel"] != debugID || notice.Body["text"] != hello+" (for C0UNMAPPED01)" || notice.Body["team"] != teamChannel {
+	if notice.Path != pathNotices || notice.Body["channel"] != debugID || notice.Body["text"] != hello+" (for #standup-x)" || notice.Body["team"] != teamChannel {
 		t.Errorf("notice: %+v", notice)
 	}
 }

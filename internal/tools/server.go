@@ -133,7 +133,7 @@ func (ts *Tools) MCPServer() *mcpserver.MCPServer {
 		mcpserver.WithInstructions("Giant Swarm's repository set-up service. The team files in giantswarm/github (repositories/team-*.yaml) are the desired state of every repository; GitHub is the reality. Call get_info first: it reports who you are to this server (the GitHub login of the token muster put on the call — your own authorization of the App giantswarm-repo-manager), the identity of the unattended reads — the read-only App giantswarm-repo-manager-inventory — and the inventory store. The inventory (list_repositories, get_repository) is one record per repository of the org — declaration, GitHub reality, set-up state, findings — refreshed by a scheduled sweep, after every reconciler run and on refresh_repository; every record carries its age. Every write tool takes dryRun and mode; the only write mode is commit — a team-file pull request opened as you — and apply is refused."),
 	)
 	s.AddTool(mcp.NewTool(ToolGetInfo,
-		mcp.WithDescription("Read-only. Report the service version and how this call is authenticated: the caller (the GitHub login and id GET /user answered for the bearer muster put on the call — the person's own user token through the App giantswarm-repo-manager) and the authorization server pinned for it; whether your credential reaches the team files (teamFiles.readable); the identity of the unattended inventory reads (the read-only App giantswarm-repo-manager-inventory, or not configured) and the inventory store; where the inventory's CircleCI facts come from (commit statuses and the reconciler's run artifact, and for the latest release the release watch's read of the tag's own pipeline — circleci.tagPipelines says whether it reads anonymously, which CircleCI answers for public projects, or with a configured token, and so where watch_repository decides the released phase from the tag pipeline rather than the commit statuses); the team-review endpoint (reviews.configured; when configured, reviews.url, the gateway the asks and notices go to, and reviews.audience, the audience of the projected ServiceAccount token it admits; reviews.debugChannel when one channel receives every ask and notice instead of the channels the per-team policy files name); the engine (devctl reposetup package); the declaration vocabulary (schema: the values the validator's repositories schema allows for componentType, gen.flavours, gen.language, visibility and lifecycle, in the schema's order, and its origin — the copy embedded in the engine's devctl version — or schema.error when they cannot be read); and the write modes. Call first."),
+		mcp.WithDescription("Read-only. Report the service version and how this call is authenticated: the caller (the GitHub login and id GET /user answered for the bearer muster put on the call — the person's own user token through the App giantswarm-repo-manager) and the authorization server pinned for it; whether your credential reaches the team files (teamFiles.readable); the identity of the unattended inventory reads (the read-only App giantswarm-repo-manager-inventory, or not configured) and the inventory store; where the inventory's CircleCI facts come from (commit statuses and the reconciler's run artifact, and for the latest release the release watch's read of the tag's own pipeline — circleci.tagPipelines says whether it reads anonymously, which CircleCI answers for public projects, or with a configured token, and so where watch_repository decides the released phase from the tag pipeline rather than the commit statuses); the team-review endpoint (reviews.configured; when configured, reviews.url, the gateway the asks and notices go to, and reviews.audience, the audience of the projected ServiceAccount token it admits; reviews.debugChannel when one channel receives every ask and notice instead of the channels each team's teams/<team>.yaml names); the engine (devctl reposetup package); the declaration vocabulary (schema: the values the validator's repositories schema allows for componentType, gen.flavours, gen.language, visibility and lifecycle, in the schema's order, and its origin — the copy embedded in the engine's devctl version — or schema.error when they cannot be read); and the write modes. Call first."),
 		mcp.WithReadOnlyHintAnnotation(true),
 	), t.getInfo)
 	t.registerInventory(s)
@@ -262,8 +262,8 @@ const (
 
 // ReviewsInfo is the team-review endpoint: whether asks and notices are
 // delivered at all, to which gateway with which token audience, and the
-// debug channel when one receives them all. The channels themselves are the
-// per-team policy files'.
+// debug channel when one receives them all. The channels themselves are each
+// team's channel file's (teams/<team>.yaml).
 type ReviewsInfo struct {
 	// Configured says whether the gateway is set (REVIEWS_URL).
 	Configured bool `json:"configured"`
@@ -272,8 +272,8 @@ type ReviewsInfo struct {
 	// Audience is the audience of the projected ServiceAccount token the
 	// gateway admits through a TokenReview (REVIEWS_AUDIENCE).
 	Audience string `json:"audience,omitempty"`
-	// DebugChannel, when set, receives every ask and notice instead of the
-	// channel the policy file names; the text names that channel.
+	// DebugChannel, when set, is the channel ID that receives every ask and
+	// notice instead of the team's channel; the text names that channel.
 	DebugChannel string `json:"debugChannel,omitempty"`
 }
 

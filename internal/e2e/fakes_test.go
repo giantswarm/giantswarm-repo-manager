@@ -47,7 +47,7 @@ type fakeGitHub struct {
 	userCalls atomic.Int64
 	// org answers GraphQL for the fake org (the inventory reads).
 	org *fakeOrg
-	// files is the fake giantswarm/github: team files, policy files, pull
+	// files is the fake giantswarm/github: team files, channel files, pull
 	// requests, reviews, dispatches; actions its reconciler workflow's runs
 	// and their artifacts.
 	files   *fakeTeamFiles

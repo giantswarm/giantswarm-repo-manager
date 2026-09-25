@@ -53,6 +53,9 @@ func change(kind string) *inventory.Change {
 	return &inventory.Change{Kind: kind, By: "alice", PullRequest: &inventory.ChangePullRequest{Number: 4711, URL: testPRURL}}
 }
 
+// testNotices is the team's notices channel the completion tests post to.
+var testNotices = teamfiles.Channel{ID: "C0STANDUP001", Name: "standup-t"}
+
 var (
 	okStep      = reconcile.StepResult{Step: reconcile.StepRelease, Verdict: reconcile.VerdictOK, Summary: "v0.1.0 built"}
 	failedStep  = reconcile.StepResult{Step: reconcile.StepCircleCI, Verdict: reconcile.VerdictFailed, Summary: "CircleCI answered 502"}
@@ -331,7 +334,7 @@ func runs(t *testing.T, client *review.Client, posted *[]string, steps ...[]reco
 		rec := record(change(inventory.ChangeChanged), st...)
 		rec.Setup.Told = told
 		before := len(*posted)
-		found, err := ts.tell(context.Background(), rec, testTeam, teamfiles.Channel{ID: "C0STANDUP001", Name: "standup-t"}, Completions(rec))
+		found, err := ts.tell(context.Background(), rec, testTeam, testNotices, Completions(rec))
 		if err != nil {
 			t.Fatalf("tell: %v", err)
 		}
@@ -370,7 +373,7 @@ func TestAFindingThatDoesNotReachTheChannelStaysUntold(t *testing.T) {
 	client, posted := notices(t, map[string]bool{main: true})
 	rec := record(change(inventory.ChangeChanged), ruleset("protect-main"))
 	ts := &Tools{t: &tools{d: Deps{Log: slog.New(slog.NewTextHandler(new(bytes.Buffer), nil)), Review: client}}}
-	told, err := ts.tell(context.Background(), rec, testTeam, teamfiles.Channel{ID: "C0STANDUP001", Name: "standup-t"}, Completions(rec))
+	told, err := ts.tell(context.Background(), rec, testTeam, testNotices, Completions(rec))
 	if len(*posted) != 0 || len(told) != 0 || err != nil || !rec.Setup.LastRun.Told {
 		t.Errorf("a refused finding: posted %q, told %q, err %v, run told %v", *posted, told, err, rec.Setup.LastRun.Told)
 	}
@@ -390,7 +393,7 @@ func TestARefusedChangeSentenceIsToldOnceLater(t *testing.T) {
 	accepting, posted := notices(t, nil)
 	tell := func(client *review.Client) error {
 		ts := &Tools{t: &tools{d: Deps{Log: slog.New(slog.NewTextHandler(new(bytes.Buffer), nil)), Review: client}}}
-		_, err := ts.tell(context.Background(), rec, testTeam, teamfiles.Channel{ID: "C0STANDUP001", Name: "standup-t"}, Completions(rec))
+		_, err := ts.tell(context.Background(), rec, testTeam, testNotices, Completions(rec))
 		return err
 	}
 	if err := tell(refusing); err == nil || rec.Setup.LastRun.Told {

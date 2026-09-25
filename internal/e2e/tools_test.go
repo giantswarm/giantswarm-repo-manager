@@ -300,8 +300,8 @@ func TestTransferNamesBothTeams(t *testing.T) {
 	c := st.as(t, aliceToken)
 	var plan tools.Plan
 	st.callJSON(t, c, tools.ToolTransferRepository, map[string]any{argDryRun: true, kRepository: repoPresent, argToTeam: teamPlaneteers}, &plan)
-	if plan.Team != teamPlaneteers || plan.FromTeam != team || len(plan.PullRequest.Files) != 2 || plan.Ask == nil || !plan.Ask.Deliverable || plan.Ask.Channel != planeteersChannel ||
-		plan.Notice == nil || plan.Notice.Channel != bumblebeeStandup || plan.PullRequest.As != alice || !strings.HasPrefix(plan.Ask.Text, alice+" asks to transfer") {
+	if plan.Team != teamPlaneteers || plan.FromTeam != team || len(plan.PullRequest.Files) != 2 || plan.Ask == nil || !plan.Ask.Deliverable || plan.Ask.Channel != planeteersChannel || plan.Ask.ChannelName != teamPlaneteers ||
+		plan.Notice == nil || plan.Notice.Channel != bumblebeeStandup || plan.Notice.ChannelName != bumblebeeStandupName || plan.PullRequest.As != alice || !strings.HasPrefix(plan.Ask.Text, alice+" asks to transfer") {
 		t.Fatalf("plan: %+v ask=%+v notice=%+v", plan, plan.Ask, plan.Notice)
 	}
 	var out tools.Committed
@@ -327,13 +327,13 @@ func TestTransferNamesBothTeams(t *testing.T) {
 
 // TestDebugChannelReceivesEveryAskAndNotice: with reviews.debugChannel set,
 // the transfer's ask and notice both land in the debug channel, each closing
-// with the channel the policy file chose — the name reviews.channels maps,
-// or the ID as the file carries it; the pull request and the tools' answers
-// read as without it; get_info shows the channel.
+// with the name of the team's channel from its teams/<team>.yaml; the pull
+// request and the tools' answers read as without it (the team's channel ID
+// and name beside the debug channel); get_info shows the channel.
 func TestDebugChannelReceivesEveryAskAndNotice(t *testing.T) {
-	st := newStackWith(t, debugChannelName)
+	st := newStackWith(t, debugChannelID)
 	c := st.as(t, aliceToken)
-	if info := getInfo(t, c); !info.Reviews.Configured || info.Reviews.DebugChannel != debugChannelName {
+	if info := getInfo(t, c); !info.Reviews.Configured || info.Reviews.DebugChannel != debugChannelID {
 		t.Errorf("get_info reviews: %+v", info.Reviews)
 	}
 	var out tools.Committed
@@ -349,11 +349,11 @@ func TestDebugChannelReceivesEveryAskAndNotice(t *testing.T) {
 		!strings.HasSuffix(ask["link"].(string), fmt.Sprintf("/pull/%d", pr.Number)) {
 		t.Errorf("ask: %v", ask)
 	}
-	if notice[kChannel] != debugChannelID || notice["team"] != team || !strings.HasSuffix(noticeText, " (for "+bumblebeeStandup+")") {
+	if notice[kChannel] != debugChannelID || notice["team"] != team || !strings.HasSuffix(noticeText, " (for #"+bumblebeeStandupName+")") {
 		t.Errorf("notice: %v", notice)
 	}
-	if out.Ask == nil || !out.Ask.Delivered || out.Ask.Channel != debugChannelID || out.Ask.IntendedChannel != planeteersChannel ||
-		out.Notice == nil || !out.Notice.Delivered || out.Notice.Channel != debugChannelID || out.Notice.IntendedChannel != bumblebeeStandup {
+	if out.Ask == nil || !out.Ask.Delivered || out.Ask.Channel != debugChannelID || out.Ask.IntendedChannel != planeteersChannel || out.Ask.ChannelName != teamPlaneteers ||
+		out.Notice == nil || !out.Notice.Delivered || out.Notice.Channel != debugChannelID || out.Notice.IntendedChannel != bumblebeeStandup || out.Notice.ChannelName != bumblebeeStandupName {
 		t.Errorf("answer: ask=%+v notice=%+v", out.Ask, out.Notice)
 	}
 }
@@ -394,6 +394,29 @@ func TestSetLifecycleDeletedNeedsTheTypedName(t *testing.T) {
 	if len(asks) != 1 || !strings.Contains(asks[0]["text"].(string), alice+" asks to delete `"+org+"/"+repoPresent+"` (owned by "+team+")") ||
 		!strings.Contains(asks[0]["text"].(string), "Reason: retired.") || !strings.Contains(asks[0]["text"].(string), "A member of "+team+" other than "+alice+" approves.") {
 		t.Fatalf("ask: %v", asks)
+	}
+}
+
+// TestSetLifecycleDryRunNamesTheTeamsChannel: the plan's ask names the
+// channel of the team's teams/<team>.yaml, its ID and its name; a file that
+// names no asks is the team not messaged, and the plan says why.
+func TestSetLifecycleDryRunNamesTheTeamsChannel(t *testing.T) {
+	st := newStack(t)
+	c := st.as(t, aliceToken)
+	args := map[string]any{argDryRun: true, kRepository: repoPresent, argLifecycle: lifecycleArchived}
+	var plan tools.Plan
+	st.callJSON(t, c, tools.ToolSetLifecycle, args, &plan)
+	if plan.Team != team || plan.Ask == nil || !plan.Ask.Deliverable || plan.Ask.Channel != bumblebeeChannel || plan.Ask.ChannelName != team || plan.Ask.Reason != "" {
+		t.Fatalf("plan: %+v ask=%+v", plan, plan.Ask)
+	}
+	path := "teams/" + team + ".yaml"
+	st.ghs.files.mu.Lock()
+	st.ghs.files.files[path] = channelFile("", "", bumblebeeStandup, bumblebeeStandupName)
+	st.ghs.files.mu.Unlock()
+	plan = tools.Plan{}
+	st.callJSON(t, c, tools.ToolSetLifecycle, args, &plan)
+	if plan.Ask == nil || plan.Ask.Deliverable || plan.Ask.Channel != "" || plan.Ask.Reason != path+" names no asks channel: repository set-up does not message the team" {
+		t.Fatalf("plan for a team without asks: ask=%+v", plan.Ask)
 	}
 }
 

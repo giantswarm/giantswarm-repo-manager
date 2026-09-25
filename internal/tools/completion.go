@@ -2,6 +2,7 @@ package tools
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 
@@ -9,11 +10,12 @@ import (
 
 	"github.com/giantswarm/giantswarm-repo-manager/internal/inventory"
 	"github.com/giantswarm/giantswarm-repo-manager/internal/review"
+	"github.com/giantswarm/giantswarm-repo-manager/internal/teamfiles"
 )
 
 // Reconciled is the collector's hook after a reconciler run refreshed a
 // record (the poller read the run's artifact as lastRun): what the run tells
-// the team, to the owning team's standup channel, read from its policy file
+// the team, to the owning team's notices channel, read from its channel file
 // as the unattended identity — one sentence about the change when a person
 // made one, one per failed step and per finding of that person's run that is
 // news; nothing when the run has nothing to tell, and nothing at all for a
@@ -54,7 +56,11 @@ func (ts *Tools) Reconciled(ctx context.Context, rec *inventory.Record) error {
 		t.d.Log.Warn("completion message not delivered", "repository", rec.Repository, "error", err)
 		return err
 	}
-	channel, err := t.policyChannel(ctx, repo, team, false)
+	channel, err := t.teamChannel(ctx, repo, team, false)
+	if errors.Is(err, errNotMessaged) {
+		t.d.Log.Info("completion message not delivered", "repository", rec.Repository, "team", team, "reason", err.Error())
+		return nil
+	}
 	if err != nil {
 		t.d.Log.Warn("completion message not delivered", "repository", rec.Repository, "team", team, "reason", err.Error())
 		return err
@@ -70,7 +76,7 @@ func (ts *Tools) Reconciled(ctx context.Context, rec *inventory.Record) error {
 // reach the channel stays untold and is told by the next run. The change
 // sentence is posted once per run: posted, or absent, it marks the run
 // told; the error is its post refused.
-func (ts *Tools) tell(ctx context.Context, rec *inventory.Record, team, channel string, msgs []Completion) ([]string, error) {
+func (ts *Tools) tell(ctx context.Context, rec *inventory.Record, team string, channel teamfiles.Channel, msgs []Completion) ([]string, error) {
 	t := ts.t
 	run := rec.Setup.LastRun
 	known := set(rec.Setup.Told)
@@ -86,14 +92,14 @@ func (ts *Tools) tell(ctx context.Context, rec *inventory.Record, team, channel 
 			t.d.Log.Info("change already told", "repository", rec.Repository, "team", team, "run", run.RunURL)
 			continue
 		}
-		if _, err := t.d.Review.Notify(ctx, review.Notice{Team: team, Channel: channel, Text: m.Text, Link: m.Link}); err != nil {
+		if _, err := t.d.Review.Notify(ctx, review.Notice{Team: team, Channel: channel.ID, ChannelName: channel.Name, Text: m.Text, Link: m.Link}); err != nil {
 			t.d.Log.Warn("completion message not delivered", "repository", rec.Repository, "team", team, "error", err)
 			if m.Change {
 				notTold = err
 			}
 			continue
 		}
-		t.d.Log.Info("completion message posted", "repository", rec.Repository, "team", team, "channel", channel, "text", m.Text)
+		t.d.Log.Info("completion message posted", "repository", rec.Repository, "team", team, "channel", channel.ID, "channelName", channel.Name, "text", m.Text)
 		if m.Finding {
 			told = append(told, m.Text)
 		}

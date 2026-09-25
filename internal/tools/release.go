@@ -14,12 +14,12 @@ import (
 
 // Released is the release watch's hook when it settles a release nothing was
 // published for — the tag's own pipeline red, or no pipeline within the
-// grace period: the one sentence about it to the owning team's standup
-// channel, read from its policy file as the unattended identity, linking
+// grace period: the one sentence about it to the owning team's notices
+// channel, read from its channel file as the unattended identity, linking
 // the failed workflow. It returns the sentence and whether it reached the
 // channel; the watch stores the sentence as the release's Told, so the team
 // hears about a release once, and a later pass over the same red tag posts
-// nothing. A team without a policy file is not messaged, and neither is
+// nothing. A team without a channel file naming asks is not messaged, nor is
 // anyone without a team-review endpoint: both are final, so the sentence is
 // returned as told without a message and the watch stops asking — a red
 // release is read again every pass until the next tag, and would otherwise
@@ -46,20 +46,20 @@ func (ts *Tools) Released(ctx context.Context, rec *inventory.Record) (told stri
 		t.d.Log.Warn("release notice not delivered", "repository", rec.Repository, "team", team, "error", err)
 		return "", false
 	}
-	channel, err := t.policyChannel(ctx, repo, team, false)
+	channel, err := t.teamChannel(ctx, repo, team, false)
 	if err != nil {
-		if errors.Is(err, teamfiles.ErrFileNotFound) {
-			t.d.Log.Info("release notice not delivered", "repository", rec.Repository, "team", team, "reason", "the team has no policy file and is not messaged", "text", n.Text)
+		if errors.Is(err, teamfiles.ErrFileNotFound) || errors.Is(err, errNotMessaged) {
+			t.d.Log.Info("release notice not delivered", "repository", rec.Repository, "team", team, "reason", "the team is not messaged: "+err.Error(), "text", n.Text)
 			return n.Text, false
 		}
 		t.d.Log.Warn("release notice not delivered", "repository", rec.Repository, "team", team, "reason", err.Error())
 		return "", false
 	}
-	if _, err := t.d.Review.Notify(ctx, review.Notice{Team: team, Channel: channel, Text: n.Text, Link: n.Link}); err != nil {
+	if _, err := t.d.Review.Notify(ctx, review.Notice{Team: team, Channel: channel.ID, ChannelName: channel.Name, Text: n.Text, Link: n.Link}); err != nil {
 		t.d.Log.Warn("release notice not delivered", "repository", rec.Repository, "team", team, "error", err)
 		return "", false
 	}
-	t.d.Log.Info("release notice posted", "repository", rec.Repository, "team", team, "channel", channel, "tag", rec.Setup.Release.Tag, "text", n.Text)
+	t.d.Log.Info("release notice posted", "repository", rec.Repository, "team", team, "channel", channel.ID, "channelName", channel.Name, "tag", rec.Setup.Release.Tag, "text", n.Text)
 	return n.Text, true
 }
 

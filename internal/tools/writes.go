@@ -95,9 +95,12 @@ type PlannedPullRequest struct {
 
 // PlannedMessage is an ask or notice before it is posted.
 type PlannedMessage struct {
-	Team    string `json:"team"`
-	Channel string `json:"channel,omitempty"`
-	Text    string `json:"text"`
+	Team string `json:"team"`
+	// Channel is the Slack channel ID the message is delivered to, from the
+	// team's channel file; ChannelName is that channel's name, for display.
+	Channel     string `json:"channel,omitempty"`
+	ChannelName string `json:"channelName,omitempty"`
+	Text        string `json:"text"`
 	// Deliverable says whether the gateway and channel are configured.
 	Deliverable bool   `json:"deliverable"`
 	Reason      string `json:"reason,omitempty"`
@@ -122,9 +125,12 @@ const pendingRunSentence = " The record shows setup.pendingRun until the reconci
 type Delivery struct {
 	Team string `json:"team"`
 	// Channel is where the gateway posted (Posted.Channel): the debug
-	// channel under reviews.debugChannel, else the policy channel.
+	// channel under reviews.debugChannel, else the team's channel.
 	Channel string `json:"channel,omitempty"`
-	// IntendedChannel is the policy channel, present only when a debug
+	// ChannelName is the name of the team's channel, for display — also
+	// when a debug redirect posted to the debug channel instead.
+	ChannelName string `json:"channelName,omitempty"`
+	// IntendedChannel is the team's channel ID, present only when a debug
 	// redirect sent the message somewhere else.
 	IntendedChannel string `json:"intendedChannel,omitempty"`
 	Delivered       bool   `json:"delivered"`
@@ -192,17 +198,17 @@ func (pl *Plan) finish(repo teamfiles.Repo, as, branch, title, body string) {
 	pl.Accepted = len(pl.Problems) == 0
 }
 
-// message plans an ask or a notice to a team from its policy file: an ask
-// (an Approve button) goes to the team's slackChannel, a notice to its
-// standupChannel.
+// message plans an ask or a notice to a team from its channel file: an ask
+// (an Approve button) goes to the team's asks channel, a notice to its
+// notices channel; a team whose file names no asks is not messaged.
 func (t *tools) message(ctx context.Context, repo teamfiles.Repo, team, text string, ask bool) *PlannedMessage {
 	m := &PlannedMessage{Team: team, Text: text}
 	if t.d.Review == nil {
 		m.Reason = review.ErrNotConfigured.Error()
 		return m
 	}
-	channel, err := t.policyChannel(ctx, repo, team, ask)
-	m.Channel = channel
+	channel, err := t.teamChannel(ctx, repo, team, ask)
+	m.Channel, m.ChannelName = channel.ID, channel.Name
 	if err != nil {
 		m.Reason = err.Error()
 		return m
@@ -211,23 +217,25 @@ func (t *tools) message(ctx context.Context, repo teamfiles.Repo, team, text str
 	return m
 }
 
-// policyChannel reads a team's policy file and resolves the channel an ask
-// (slackChannel) or a notice (standupChannel) goes to, as the ID the
-// gateway takes. A name the map does not resolve comes back with the error.
-func (t *tools) policyChannel(ctx context.Context, repo teamfiles.Repo, team string, ask bool) (string, error) {
-	pol, err := repo.Policy(ctx, team)
+// errNotMessaged says the team's channel file names no asks channel: the
+// team has not opted in to repository set-up messages, asks and notices alike.
+var errNotMessaged = errors.New("names no asks channel: repository set-up does not message the team")
+
+// teamChannel reads a team's channel file (teams/<team>.yaml) and returns
+// the channel an ask (asks) or a notice (notices) goes to; errNotMessaged
+// when the file names no asks.
+func (t *tools) teamChannel(ctx context.Context, repo teamfiles.Repo, team string, ask bool) (teamfiles.Channel, error) {
+	chs, err := repo.Channels(ctx, team)
 	if err != nil {
-		return "", err
+		return teamfiles.Channel{}, err
 	}
-	name := pol.StandupChannel
+	if chs.Asks == nil {
+		return teamfiles.Channel{}, fmt.Errorf("%s %w", teamfiles.ChannelsPath(team), errNotMessaged)
+	}
 	if ask {
-		name = pol.SlackChannel
+		return *chs.Asks, nil
 	}
-	id, err := t.d.Review.ChannelID(name)
-	if err != nil {
-		return name, err
-	}
-	return id, nil
+	return chs.Notices, nil
 }
 
 // commit opens the plan's pull request as the person and posts its messages.
@@ -309,7 +317,7 @@ func (t *tools) putExpectedRun(ctx context.Context, rec *inventory.Record) error
 // deliver posts a planned message; a failure is reported, not fatal — the
 // pull request exists and approving on GitHub is equivalent (PRD D6).
 func (t *tools) deliver(ctx context.Context, m *PlannedMessage, pr *teamfiles.PullRequest, ask bool) *Delivery {
-	d := &Delivery{Team: m.Team, Channel: m.Channel}
+	d := &Delivery{Team: m.Team, Channel: m.Channel, ChannelName: m.ChannelName}
 	if !m.Deliverable {
 		d.Error = m.Reason
 		return d
@@ -321,10 +329,10 @@ func (t *tools) deliver(ctx context.Context, m *PlannedMessage, pr *teamfiles.Pu
 	var posted *review.Posted
 	var err error
 	if ask {
-		posted, err = t.d.Review.Review(ctx, review.Ask{Team: m.Team, Channel: m.Channel, Text: text, Link: pr.URL,
+		posted, err = t.d.Review.Review(ctx, review.Ask{Team: m.Team, Channel: m.Channel, ChannelName: m.ChannelName, Text: text, Link: pr.URL,
 			Approve: review.Approve{Tool: "x_" + ToolPrefix + "_" + ToolApproveChange, Arguments: map[string]any{argPullRequest: pr.Number, ArgMode: string(ModeCommit)}}})
 	} else {
-		posted, err = t.d.Review.Notify(ctx, review.Notice{Team: m.Team, Channel: m.Channel, Text: text, Link: pr.URL})
+		posted, err = t.d.Review.Notify(ctx, review.Notice{Team: m.Team, Channel: m.Channel, ChannelName: m.ChannelName, Text: text, Link: pr.URL})
 	}
 	if err != nil {
 		d.Error = err.Error()

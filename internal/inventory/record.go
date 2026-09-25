@@ -312,7 +312,7 @@ type ReleaseWatch struct {
 	SettledAt *time.Time `json:"settledAt,omitempty"`
 	// Told is the sentence the team heard about the release — a red or an
 	// unbuilt one, once — and ToldAt when; empty while nothing was posted.
-	// A team that is not messaged (no policy file, no team-review endpoint)
+	// A team that is not messaged (no channel file naming asks, no team-review endpoint)
 	// gets the sentence recorded here too, so the watch stops asking.
 	Told   string     `json:"told,omitempty"`
 	ToldAt *time.Time `json:"toldAt,omitempty"`

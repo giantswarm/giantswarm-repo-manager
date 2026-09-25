@@ -113,8 +113,6 @@ spec:
               value: /var/run/secrets/klaus-gateway/token
             - name: REVIEWS_AUDIENCE
               value: {{ .Values.reviews.audience | quote }}
-            - name: REVIEWS_CHANNELS
-              value: {{ include "giantswarm-repo-manager.reviewChannels" . | quote }}
             {{- with .Values.reviews.debugChannel }}
             - name: REVIEWS_DEBUG_CHANNEL
               value: {{ . | quote }}

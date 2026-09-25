@@ -113,8 +113,8 @@ func (t *tools) teamFiles(c *github.Client) (teamfiles.Repo, error) {
 var ErrNoApp = errors.New("the inventory App giantswarm-repo-manager-inventory is not configured (GITHUB_APP_ID, GITHUB_APP_INSTALLATION_ID, GITHUB_APP_PRIVATE_KEY_FILE): no identity for unattended reads")
 
 // unattended is the team-files repository as the inventory App's
-// installation — for reads that need no person: the policy file for a
-// completion message.
+// installation — for reads that need no person: the team's channel file
+// for a completion message.
 func (t *tools) unattended() (teamfiles.Repo, error) {
 	if t.d.App == nil {
 		return teamfiles.Repo{}, ErrNoApp

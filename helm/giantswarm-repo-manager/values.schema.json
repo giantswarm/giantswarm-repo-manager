@@ -439,11 +439,6 @@
                     "type": "string",
                     "description": "The audience of the projected token — the gateway's `reviews.audience`; this ServiceAccount must be in its `reviews.allowedCallers`. `get_info` reports it as `reviews.audience`."
                 },
-                "channels": {
-                    "type": "object",
-                    "description": "Unread: the channels are each team's `teams/<team>.yaml` in the team-files repository, their IDs and names. Still accepted, and ignored, so a values file that sets it keeps validating until it drops the key.",
-                    "additionalProperties": true
-                },
                 "debugChannel": {
                     "type": "string",
                     "description": "A Slack channel ID that receives every ask and notice instead of the team's channel, the text closing with that channel's name (`… (for #team-x)`): a test round of the flows without disturbing the teams. Empty delivers to the channel the team's `teams/<team>.yaml` names.",

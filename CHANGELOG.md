@@ -48,6 +48,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   an entry carrying it was refused as an unknown field before. The record's release step and `devctl pr wait` treat a
   repository CircleCI has never run a pipeline for as GitHub-only ([devctl#2396](https://github.com/giantswarm/devctl/pull/2396)).
 
+### Removed
+
+- `reviews.channels` is gone from the chart: its values, schema and README. `reviews` takes no unknown key, so a values
+  file that still sets it fails the schema; a team's channels are its `teams/<team>.yaml` in the team-files repository.
+
 ### Fixed
 
 - The engine check compares CODEOWNERS with the repository's align-files override

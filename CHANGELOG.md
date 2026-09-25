@@ -11,6 +11,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Every planned message (`ask`, `notice`) and every delivery reports `channelName`, the name of the team's channel,
+  beside the channel ID it is delivered to; under a debug redirect, the team's channel name beside the debug channel.
 - `get_info` reports the team-review endpoint's wiring: `reviews.url`, the gateway the asks and notices go to, and
   `reviews.audience`, the audience of the projected ServiceAccount token it admits (the chart passes `reviews.audience`
   as `REVIEWS_AUDIENCE`); without `REVIEWS_URL` the object stays `configured: false` alone.
@@ -28,6 +30,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- A team's channels come from its channel file in the team-files repository, `teams/<team>.yaml`: `asks` and
+  `notices`, each `{id, name}`, read strictly (an unknown key, a channel without its ID or name, or a file without
+  `notices` is refused). Naming `asks` is the team's opt-in to repository set-up messages: a team whose file names no
+  `asks` gets none, notices included. `repository-setup/<team>.yaml` is no longer read.
+- `reviews.channels` is no longer read (the chart still accepts the key, unread) and `REVIEWS_CHANNELS` no longer
+  exists; `reviews.debugChannel` is a Slack channel ID, the chart's schema refuses a name.
 - devctl 8.98.1 (was 8.96.0): the engine's `(*reposetup.Schema).FieldValues`
   ([devctl#2405](https://github.com/giantswarm/devctl/issues/2405)) reads `get_info`'s schema lists; the validator's
   schema is built once at startup instead of on every validation.

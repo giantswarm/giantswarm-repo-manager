@@ -38,14 +38,10 @@ type Config struct {
 	// Audience is the projected token's audience, the gateway's
 	// reviews.audience: the kubelet mints the token for it, get_info reports it.
 	Audience string
-	// Channels maps a policy file's channel names — slackChannel for asks,
-	// standupChannel for notices — to their Slack IDs: the gateway refuses
-	// names, and the policy files carry names today.
-	Channels map[string]string
-	// DebugChannel, when set, receives every ask and notice instead of the
-	// channel the policy file names, the text naming that channel — a test
-	// round without disturbing the teams. A name Channels resolves or an ID;
-	// empty delivers to the policy file's channel.
+	// DebugChannel, when set, is the Slack channel ID that receives every
+	// ask and notice instead of the team's channel, the text naming that
+	// channel — a test round without disturbing the teams. Empty delivers to
+	// the channel the team's channel file names.
 	DebugChannel string
 	// HTTPClient defaults to a 15 s client.
 	HTTPClient *http.Client
@@ -57,13 +53,10 @@ type Client struct {
 	http *http.Client
 	// debug is the debug channel's ID, empty without one.
 	debug string
-	// names are Channels reversed: the policy file's name by channel ID,
-	// for the text of a redirected message.
-	names map[string]string
 }
 
 // New returns a client, or nil when BaseURL is empty (the endpoint is off);
-// a debug channel neither an ID nor a name Channels resolves is an error.
+// a debug channel that is not a Slack channel ID is an error.
 func New(cfg Config) (*Client, error) {
 	if cfg.BaseURL == "" {
 		return nil, nil
@@ -72,21 +65,10 @@ func New(cfg Config) (*Client, error) {
 	if hc == nil {
 		hc = &http.Client{Timeout: 15 * time.Second}
 	}
-	c := &Client{cfg: cfg, http: hc, names: make(map[string]string, len(cfg.Channels))}
-	for name, id := range cfg.Channels {
-		// Two names for one ID: the first in order, so the text is stable.
-		if prev, ok := c.names[id]; !ok || name < prev {
-			c.names[id] = name
-		}
+	if cfg.DebugChannel != "" && !channelID.MatchString(cfg.DebugChannel) {
+		return nil, fmt.Errorf("debug channel %q is not a Slack channel ID (C…): the gateway takes channel IDs", cfg.DebugChannel)
 	}
-	if cfg.DebugChannel != "" {
-		id, err := c.ChannelID(cfg.DebugChannel)
-		if err != nil {
-			return nil, fmt.Errorf("debug channel: %w", err)
-		}
-		c.debug = id
-	}
-	return c, nil
+	return &Client{cfg: cfg, http: hc, debug: cfg.DebugChannel}, nil
 }
 
 // DebugChannel is the debug channel as configured, empty without one.
@@ -126,6 +108,8 @@ type Ask struct {
 	Text    string  `json:"text"`
 	Link    string  `json:"link,omitempty"`
 	Approve Approve `json:"approve"`
+	// ChannelName is Channel's name, for the text of a redirected ask.
+	ChannelName string `json:"-"`
 }
 
 // Notice is a message without buttons.
@@ -134,6 +118,8 @@ type Notice struct {
 	Channel string `json:"channel"`
 	Text    string `json:"text"`
 	Link    string `json:"link,omitempty"`
+	// ChannelName is Channel's name, for the text of a redirected notice.
+	ChannelName string `json:"-"`
 }
 
 // Posted is the gateway's 201 answer.
@@ -143,52 +129,27 @@ type Posted struct {
 	TS      string `json:"ts"`
 }
 
-// ChannelID resolves a policy file's channel (slackChannel or
-// standupChannel) to the ID the gateway accepts: an ID as written, else
-// through Config.Channels.
-func (c *Client) ChannelID(name string) (string, error) {
-	name = strings.TrimPrefix(strings.TrimSpace(name), "#")
-	if channelID.MatchString(name) {
-		return name, nil
-	}
-	if c != nil {
-		if id, ok := c.cfg.Channels[name]; ok && channelID.MatchString(id) {
-			return id, nil
-		}
-	}
-	return "", fmt.Errorf("slack channel %q has no ID: the gateway takes channel IDs; map it in reviews.channels (%s: C…)", name, name)
-}
-
 // Review posts an ask.
 func (c *Client) Review(ctx context.Context, a Ask) (*Posted, error) {
-	a.Channel, a.Text = c.route(a.Channel, a.Text)
+	a.Channel, a.Text = c.route(a.Channel, a.ChannelName, a.Text)
 	return c.post(ctx, "/reviews", a)
 }
 
 // Notify posts a notice.
 func (c *Client) Notify(ctx context.Context, n Notice) (*Posted, error) {
-	n.Channel, n.Text = c.route(n.Channel, n.Text)
+	n.Channel, n.Text = c.route(n.Channel, n.ChannelName, n.Text)
 	return c.post(ctx, "/notices", n)
 }
 
 // route is where a message goes and what it says: the channel and text as
 // given, or — with a debug channel — that channel and the text closing with
-// the channel the policy file chose, "(for #team-x)", so a reader tells the
-// redirect from a misconfiguration.
-func (c *Client) route(channel, text string) (string, string) {
+// the team's channel, "(for #team-x)", so a reader tells the redirect from a
+// misconfiguration.
+func (c *Client) route(channel, name, text string) (string, string) {
 	if c == nil || c.debug == "" {
 		return channel, text
 	}
-	return c.debug, text + " (for " + c.channelName(channel) + ")"
-}
-
-// channelName is a channel as the policy file names it: "#<name>" when
-// Channels maps a name to the ID, else the ID.
-func (c *Client) channelName(id string) string {
-	if name, ok := c.names[id]; ok {
-		return "#" + name
-	}
-	return id
+	return c.debug, text + " (for #" + name + ")"
 }
 
 func (c *Client) post(ctx context.Context, path string, body any) (*Posted, error) {

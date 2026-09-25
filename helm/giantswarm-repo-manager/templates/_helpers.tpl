@@ -93,12 +93,3 @@ oauth.baseURL, else the in-cluster Service URL.
 {{- define "giantswarm-repo-manager.oauthBaseURL" -}}
 {{- .Values.oauth.baseURL | default (include "giantswarm-repo-manager.serviceURL" .) }}
 {{- end }}
-
-{{/*
-Slack channel IDs by policy-file channel name, as name=ID pairs.
-*/}}
-{{- define "giantswarm-repo-manager.reviewChannels" -}}
-{{- $pairs := list }}
-{{- range $name, $id := .Values.reviews.channels }}{{- $pairs = append $pairs (printf "%s=%s" $name $id) }}{{- end }}
-{{- join "," $pairs }}
-{{- end }}

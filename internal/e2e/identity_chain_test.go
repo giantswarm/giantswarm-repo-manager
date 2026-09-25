@@ -152,8 +152,8 @@ func withTagPipelines(mode string) stackOption {
 	}
 }
 
-// newStackWith is the stack with the review client's debug channel set (as
-// a name reviews.channels resolves), or without one for "", and the options
+// newStackWith is the stack with the review client's debug channel set (a
+// channel ID), or without one for "", and the options
 // applied to the tools' dependencies.
 func newStackWith(t *testing.T, debugChannel string, opts ...stackOption) *stack {
 	t.Helper()
@@ -203,8 +203,7 @@ func newStackWith(t *testing.T, debugChannel string, opts ...stackOption) *stack
 	}
 	st := &stack{ghs: ghs, gw: gw, cc: newFakeCircleCI(t), app: app, store: store, checker: &fakeChecker{release: ghs.org.latestTag}, schema: schema, log: log}
 	st.col = st.newCollector(0)
-	reviews, err := review.New(review.Config{BaseURL: gws.URL, TokenFile: tokenFile, DebugChannel: debugChannel,
-		Channels: map[string]string{teamPlaneteers: planeteersChannel, "standup-planeteers": planeteersStandup, debugChannelName: debugChannelID}})
+	reviews, err := review.New(review.Config{BaseURL: gws.URL, TokenFile: tokenFile, DebugChannel: debugChannel})
 	if err != nil {
 		t.Fatal(err)
 	}

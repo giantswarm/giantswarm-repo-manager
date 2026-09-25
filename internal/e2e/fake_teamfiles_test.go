@@ -21,16 +21,17 @@ import (
 const (
 	teamPlaneteers = "team-planeteers"
 	teamOther      = "team-other"
-	// Channel IDs: bumblebee's policy carries the IDs, planeteers' names the
-	// server maps (reviews.channels). The team channel takes the asks, the
-	// standup channel the notices.
-	bumblebeeChannel  = "C0BUMBLEBEE"
-	bumblebeeStandup  = "C0STANDUPBEE"
-	planeteersChannel = "C0PLANETEERS"
-	planeteersStandup = "C0STANDUPPLA"
-	// The debug channel: a name reviews.channels resolves, like a team's.
-	debugChannelName = "repo-manager-debug"
-	debugChannelID   = "C0DEBUGROUND"
+	// The teams' channel files (teams/<team>.yaml), fake IDs: the asks
+	// channel takes the asks, the notices channel the notices, each an ID and
+	// the name shown beside it.
+	bumblebeeChannel      = "C0BUMBLEBEE"
+	bumblebeeStandup      = "C0STANDUPBEE"
+	bumblebeeStandupName  = "standup-bumblebee"
+	planeteersChannel     = "C0PLANETEERS"
+	planeteersStandup     = "C0STANDUPPLA"
+	planeteersStandupName = "standup-planeteers"
+	// The debug channel: an ID (reviews.debugChannel).
+	debugChannelID = "C0DEBUGROUND"
 
 	// Tool arguments and values the scenarios repeat.
 	argDryRun      = "dryRun"
@@ -132,13 +133,22 @@ type fakeTeamFiles struct {
 	reads map[string]int
 }
 
+// channelFile is a team's teams/<team>.yaml; an empty asksID leaves asks out.
+func channelFile(asksID, asksName, noticesID, noticesName string) []byte {
+	s := "# The team's Slack channels.\n"
+	if asksID != "" {
+		s += "asks:\n  id: " + asksID + "\n  name: " + asksName + "\n"
+	}
+	return []byte(s + "notices:\n  id: " + noticesID + "\n  name: " + noticesName + "\n")
+}
+
 func newFakeTeamFiles() *fakeTeamFiles {
 	f := &fakeTeamFiles{
 		files: map[string][]byte{
-			"repositories/" + team + ".yaml":               []byte(teamFile),
-			"repositories/" + teamPlaneteers + ".yaml":     []byte(planeteersFile),
-			"repository-setup/" + team + ".yaml":           []byte("slackChannel: " + bumblebeeChannel + "\nstandupChannel: " + bumblebeeStandup + "\n"),
-			"repository-setup/" + teamPlaneteers + ".yaml": []byte("slackChannel: " + teamPlaneteers + "\nstandupChannel: standup-planeteers\n"),
+			"repositories/" + team + ".yaml":           []byte(teamFile),
+			"repositories/" + teamPlaneteers + ".yaml": []byte(planeteersFile),
+			"teams/" + team + ".yaml":                  channelFile(bumblebeeChannel, team, bumblebeeStandup, bumblebeeStandupName),
+			"teams/" + teamPlaneteers + ".yaml":        channelFile(planeteersChannel, teamPlaneteers, planeteersStandup, planeteersStandupName),
 		},
 		refs: map[string]string{headsPrefix + mainBranch: "base000"}, trees: map[string]map[string][]byte{}, commits: map[string]string{}, parents: map[string]string{}, pulls: map[int]*fakePullRequest{}, next: 4711,
 		reads: map[string]int{},

@@ -58,8 +58,8 @@ creation rules appear only in `validate_repository`'s dry run for an added entry
 
 **Asks and messages go through Swarmgeist.** Lifecycle and transfer asks — naming the asking person — are
 posted to klaus-gateway's team-review endpoint (`POST /reviews`, an Approve button calling `approve_change`
-as the clicking member) into the team's `slackChannel`. Notices go to `POST /notices` into the team's
-`standupChannel`: the giving team's transfer notice, and after a reconciler run one sentence about the
+as the clicking member) into the team's `asks` channel. Notices go to `POST /notices` into the team's
+`notices` channel: the giving team's transfer notice, and after a reconciler run one sentence about the
 change for the team, rendered from the artifact's `change` block and the declaration — `alice created a
 new repo: bumblebee-repo (app, go)`, `alice added the existing repo … to team-bumblebee`, `alice
 transferred the repo … (app, go) from team-planeteers to team-bumblebee`, `alice archived the repo …`,
@@ -96,7 +96,7 @@ pushed repositories (a tag follows the push of its commit within minutes), and f
 running the tag's pipeline on CircleCI — found by its `vcs.tag`, never a branch pipeline at the same
 commit, which the commit's statuses cannot tell apart — its workflows (the newest run per name: a rerun
 from failed is a second run of the same name) and the jobs of a failed one. A red pipeline is one
-sentence to the team's `standupChannel`, naming the tag, the pull request behind it, the failed jobs and
+sentence to the team's `notices` channel, naming the tag, the pull request behind it, the failed jobs and
 how they failed, the rerun from failed as the fix and `devctl release wait` to confirm, linking the failed
 workflow: `backstage: release v2.58.8 (pull request #2567) is red, the tag pipeline 11508 failed in
 build-image-arm64 (timed out) — rerun the workflow from failed on CircleCI, then devctl release wait
@@ -107,10 +107,14 @@ same red tag says nothing, a rerun that goes green turns the record built silent
 new watch. The record's `release` step and findings (`red-release`, `missed-tag-build`) follow the watch
 once it has read the tag, so the Repositories page and `devctl repo status` say what the notice said. A
 public repository's pipeline is read without a token, as CircleCI answers it; a private one needs
-`circleci.existingSecret`, and reads `unchecked` without it — nothing is posted. A team without a policy
-file hears nothing. Both channels come from the team's policy file (`repository-setup/<team>.yaml`);
-a file without either is refused, nothing stands in. A channel name is mapped to its Slack ID through
-`reviews.channels` (the gateway takes IDs). Authentication is this pod's projected ServiceAccount token
+`circleci.existingSecret`, and reads `unchecked` without it — nothing is posted. Both channels come from
+the team's channel file in the team-files repository, `teams/<team>.yaml` (`asks: {id, name}`,
+`notices: {id, name}`), read strictly: an unknown key, a channel without its ID or name, or a file
+without `notices` is refused, and nothing stands in for a missing channel. Messages are delivered to the
+`id`; the `name` is only shown, as `channelName` beside the ID in every planned message and delivery.
+Naming `asks` is the team's opt-in: a team whose file has no `asks`, or no file, hears nothing from
+repository set-up, notices included. `reviews.debugChannel` (a channel ID) redirects every ask and notice
+for a test round, the text closing with the team's channel name. Authentication is this pod's projected ServiceAccount token
 (audience `klaus-gateway`). An undelivered ask is reported in the result; approving on GitHub is equivalent.
 
 ## The pattern

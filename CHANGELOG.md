@@ -28,6 +28,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- devctl v8.99.2: the engine's minimal scaffold (a repository without generated CI) carries `renovate.json5`, so `create_repository` no longer starts such a repository with a Renovate finding ([devctl#2419](https://github.com/giantswarm/devctl/issues/2419)); the catalog step no longer expects a private repository's chart in the apps-to-teams mapping ([devctl#2429](https://github.com/giantswarm/devctl/issues/2429)).
 - devctl 8.98.1 (was 8.96.0): the engine's `(*reposetup.Schema).FieldValues`
   ([devctl#2405](https://github.com/giantswarm/devctl/issues/2405)) reads `get_info`'s schema lists; the validator's
   schema is built once at startup instead of on every validation.

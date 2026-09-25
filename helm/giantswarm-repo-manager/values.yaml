@@ -201,10 +201,6 @@ reviews:
   # this ServiceAccount must be in its `reviews.allowedCallers`. `get_info`
   # reports it as `reviews.audience`.
   audience: klaus-gateway
-  # -- Unread: the channels are each team's `teams/<team>.yaml` in the
-  # team-files repository, their IDs and names. Still accepted, and ignored,
-  # so a values file that sets it keeps validating until it drops the key.
-  channels: {}  # @schema additionalProperties: true
   # -- A Slack channel ID that receives every ask and notice instead of the
   # team's channel, the text closing with that channel's name (`… (for
   # #team-x)`): a test round of the flows without disturbing the teams. Empty

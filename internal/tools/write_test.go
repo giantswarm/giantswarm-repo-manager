@@ -395,9 +395,9 @@ func TestParseEntriesOptsEveryEntryIn(t *testing.T) {
 // private, in the team files' key order; one that declares public keeps it;
 // the caller's map is left as it was.
 func TestParseEntriesWritesThePrivateDefault(t *testing.T) {
-	bare := map[string]any{teamfiles.FieldName: "bare-service", teamfiles.FieldComponentType: "service"}
-	public := map[string]any{teamfiles.FieldName: "open-service", teamfiles.FieldComponentType: "service", teamfiles.FieldVisibility: "public"}
-	null := map[string]any{teamfiles.FieldName: "null-service", teamfiles.FieldComponentType: "service", teamfiles.FieldVisibility: nil}
+	bare := map[string]any{teamfiles.FieldName: "bare-service", teamfiles.FieldComponentType: testService}
+	public := map[string]any{teamfiles.FieldName: "open-service", teamfiles.FieldComponentType: testService, teamfiles.FieldVisibility: "public"}
+	null := map[string]any{teamfiles.FieldName: "null-service", teamfiles.FieldComponentType: testService, teamfiles.FieldVisibility: nil}
 	tf, err := parseEntries(testTeam, []any{bare, public, null})
 	if err != nil {
 		t.Fatal(err)

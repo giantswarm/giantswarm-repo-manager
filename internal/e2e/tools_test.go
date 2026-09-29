@@ -139,6 +139,9 @@ func TestCreateCommitCreatesScaffoldsThenOpensThePullRequestAsThePerson(t *testi
 	if repo == nil || !repo.admins[alice] {
 		t.Fatalf("shiny-service created as alice: %+v", repo)
 	}
+	if !repo.private {
+		t.Error("shiny-service declares no visibility: it must be created private, the org's default")
+	}
 	// The declared entry carries the opt-in and the private default, in the
 	// team files' key order.
 	if file := string(st.ghs.files.pullRequests()[0].Files["repositories/"+team+".yaml"]); !strings.Contains(file, "- name: "+shinyService+"\n  componentType: "+kService+"\n  visibility: private\n  align: true\n  gen:\n") {

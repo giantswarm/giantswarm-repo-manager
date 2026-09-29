@@ -38,7 +38,8 @@ const (
 	// createdOptedIn is the sentence of the creation tools' descriptions
 	// about the field every created entry carries.
 	createdOptedIn = "Every entry is written with `align: true` — the creation is the repository's opt-in to alignment, so the reconciler run after the pull request " +
-		"merges sets the repository up; an entry saying `align: false` is refused. "
+		"merges sets the repository up; an entry saying `align: false` is refused. An entry without a visibility is written with " +
+		"`visibility: private`, the org's default; say `visibility: public` for a public repository. "
 )
 
 // Validation is validate_repository's result: the engine's dry run plus who
@@ -415,12 +416,12 @@ func parseEntries(team string, entries []any) (*reposetup.TeamFile, error) {
 
 // optedIn returns the entry with align: true — the creation is the opt-in
 // to alignment — and refuses one that says otherwise. An entry without a
-// visibility gets visibility: private, the org's default: the developer
-// portal writes none for its "Private" choice, the engine creates such an
-// entry private, and the file must say so — for a repository that exists,
-// an entry without a visibility leaves GitHub's as it is, and align-files
-// reads the file. A value that is not a mapping is returned as it is for
-// the parser to refuse.
+// visibility (the key missing, null or empty) gets visibility: private, the
+// org's default: the developer portal writes none for its "Private" choice,
+// and without the field the engine's create step made the repository public
+// (devctl before giantswarm/devctl#2448) and align-files, which reads the
+// file, treats it as public (the OSSF Scorecard workflow). A value that is
+// not a mapping is returned as it is for the parser to refuse.
 func optedIn(entry any) (any, error) {
 	m, ok := entry.(map[string]any)
 	if !ok {
@@ -435,7 +436,7 @@ func optedIn(entry any) (any, error) {
 		out[k] = v
 	}
 	out[teamfiles.FieldAlign] = true
-	if v, set := out[teamfiles.FieldVisibility]; !set || v == "" {
+	if v := out[teamfiles.FieldVisibility]; v == nil || v == "" {
 		out[teamfiles.FieldVisibility] = teamfiles.VisibilityPrivate
 	}
 	return out, nil

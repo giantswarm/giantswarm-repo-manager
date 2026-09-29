@@ -397,7 +397,8 @@ func TestParseEntriesOptsEveryEntryIn(t *testing.T) {
 func TestParseEntriesWritesThePrivateDefault(t *testing.T) {
 	bare := map[string]any{teamfiles.FieldName: "bare-service", teamfiles.FieldComponentType: "service"}
 	public := map[string]any{teamfiles.FieldName: "open-service", teamfiles.FieldComponentType: "service", teamfiles.FieldVisibility: "public"}
-	tf, err := parseEntries(testTeam, []any{bare, public})
+	null := map[string]any{teamfiles.FieldName: "null-service", teamfiles.FieldComponentType: "service", teamfiles.FieldVisibility: nil}
+	tf, err := parseEntries(testTeam, []any{bare, public, null})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -406,6 +407,9 @@ func TestParseEntriesWritesThePrivateDefault(t *testing.T) {
 	}
 	if y, _ := tf.Entries[1].YAML(); !strings.Contains(y, "\n  visibility: public\n") || strings.Contains(y, "private") {
 		t.Errorf("public, rendered:\n%s", y)
+	}
+	if y, _ := tf.Entries[2].YAML(); !strings.Contains(y, "\n  visibility: private\n") {
+		t.Errorf("visibility: null, rendered:\n%s", y)
 	}
 	if _, set := bare[teamfiles.FieldVisibility]; set {
 		t.Error("the caller's entry was changed")

@@ -145,8 +145,9 @@ func TestCreateCommitOpensTheDeclarationAsThePerson(t *testing.T) {
 	}
 	pr := prs[0]
 	file := string(pr.Files["repositories/"+team+".yaml"])
-	// The declared entry carries the opt-in, after the keys the caller wrote.
-	if !strings.Contains(file, "- name: "+shinyService+"\n  componentType: "+kService+"\n  align: true\n  gen:\n") {
+	// The declared entry carries the opt-in and the private default, in the
+	// team files' key order.
+	if !strings.Contains(file, "- name: "+shinyService+"\n  componentType: "+kService+"\n  visibility: private\n  align: true\n  gen:\n") {
 		t.Errorf("the creation pull request's entry should be opted in:\n%s", file)
 	}
 	if !strings.Contains(pr.Title, "declare shiny-service for "+team) || !strings.Contains(file, "- name: "+repoPresent) ||

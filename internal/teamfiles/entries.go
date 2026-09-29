@@ -29,7 +29,14 @@ const (
 	// FieldGen is the generators' block, the tail of an entry in the team
 	// files: a field an edit adds goes before it.
 	FieldGen = "gen"
+	// FieldVisibility is the repository's visibility on GitHub: private or
+	// public. An entry without one leaves an existing repository's as it is.
+	FieldVisibility = "visibility"
 )
+
+// VisibilityPrivate is the org's default visibility, the one a creation
+// writes when the caller gives none.
+const VisibilityPrivate = "private"
 
 // Lifecycle values (the schema's; the reconciler acts on them): deprecated
 // and archived per PRD D5, deleted per the deletion decision of 2026-09-18.
@@ -241,7 +248,7 @@ func ParseEntry(text []byte) (reposetup.Declaration, error) {
 
 // keyOrder is the order the team files write an entry's keys in; keys not
 // listed follow alphabetically.
-var keyOrder = []string{FieldName, FieldComponentType, "description", "visibility", FieldLifecycle, "defaultBranch", FieldAlign, "system", "choreReviewers", "requiredChecks", "replace", FieldGen}
+var keyOrder = []string{FieldName, FieldComponentType, "description", FieldVisibility, FieldLifecycle, "defaultBranch", FieldAlign, "system", "choreReviewers", "requiredChecks", "replace", FieldGen}
 
 // EntryFromValue renders a JSON-compatible value (a tool argument) as a
 // declaration, its keys in the team files' order (name first).

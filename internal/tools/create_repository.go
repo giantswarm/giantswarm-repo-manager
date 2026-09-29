@@ -247,9 +247,9 @@ func (t *tools) planCreation(ctx context.Context, p *person, v *Validation, args
 }
 
 // parseEntries renders the tool's entries as a team file of the team, each
-// opted in to alignment: the one place a created entry gets its field, so
-// the dry run's rendered entry, the validation and the pull request's diff
-// all carry it.
+// opted in to alignment and with its visibility written out: the one place
+// a created entry gets its fields, so the dry run's rendered entry, the
+// validation and the pull request's diff all carry them.
 func parseEntries(team string, entries []any) (*reposetup.TeamFile, error) {
 	var b strings.Builder
 	for _, e := range entries {
@@ -274,8 +274,13 @@ func parseEntries(team string, entries []any) (*reposetup.TeamFile, error) {
 }
 
 // optedIn returns the entry with align: true — the creation is the opt-in
-// to alignment — and refuses one that says otherwise. A value that is not a
-// mapping is returned as it is for the parser to refuse.
+// to alignment — and refuses one that says otherwise. An entry without a
+// visibility gets visibility: private, the org's default: the developer
+// portal writes none for its "Private" choice, the engine creates such an
+// entry private, and the file must say so — for a repository that exists,
+// an entry without a visibility leaves GitHub's as it is, and align-files
+// reads the file. A value that is not a mapping is returned as it is for
+// the parser to refuse.
 func optedIn(entry any) (any, error) {
 	m, ok := entry.(map[string]any)
 	if !ok {
@@ -290,6 +295,9 @@ func optedIn(entry any) (any, error) {
 		out[k] = v
 	}
 	out[teamfiles.FieldAlign] = true
+	if v, set := out[teamfiles.FieldVisibility]; !set || v == "" {
+		out[teamfiles.FieldVisibility] = teamfiles.VisibilityPrivate
+	}
 	return out, nil
 }
 

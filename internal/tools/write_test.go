@@ -378,7 +378,7 @@ func TestParseEntriesOptsEveryEntryIn(t *testing.T) {
 			t.Errorf("%s: %+v %v", d.Name, f, err)
 		}
 	}
-	if y, _ := tf.Entries[0].YAML(); !strings.Contains(y, "\n  componentType: service\n  align: true\n  gen:\n") {
+	if y, _ := tf.Entries[0].YAML(); !strings.Contains(y, "\n  componentType: service\n  visibility: private\n  align: true\n  gen:\n") {
 		t.Errorf("rendered:\n%s", y)
 	}
 	if _, set := validEntry[teamfiles.FieldAlign]; set {
@@ -387,6 +387,28 @@ func TestParseEntriesOptsEveryEntryIn(t *testing.T) {
 	_, err = parseEntries(testTeam, []any{map[string]any{teamfiles.FieldName: "opted-out", teamfiles.FieldAlign: false}})
 	if err == nil || err.Error() != "opted-out: "+alignRefusal {
 		t.Errorf("align: false: %v", err)
+	}
+}
+
+// TestParseEntriesWritesThePrivateDefault: an entry without a visibility --
+// the developer portal's "Private" choice -- is written with visibility:
+// private, in the team files' key order; one that declares public keeps it;
+// the caller's map is left as it was.
+func TestParseEntriesWritesThePrivateDefault(t *testing.T) {
+	bare := map[string]any{teamfiles.FieldName: "bare-service", teamfiles.FieldComponentType: "service"}
+	public := map[string]any{teamfiles.FieldName: "open-service", teamfiles.FieldComponentType: "service", teamfiles.FieldVisibility: "public"}
+	tf, err := parseEntries(testTeam, []any{bare, public})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if y, _ := tf.Entries[0].YAML(); !strings.Contains(y, "\n  componentType: service\n  visibility: private\n  align: true\n") {
+		t.Errorf("no visibility, rendered:\n%s", y)
+	}
+	if y, _ := tf.Entries[1].YAML(); !strings.Contains(y, "\n  visibility: public\n") || strings.Contains(y, "private") {
+		t.Errorf("public, rendered:\n%s", y)
+	}
+	if _, set := bare[teamfiles.FieldVisibility]; set {
+		t.Error("the caller's entry was changed")
 	}
 }
 

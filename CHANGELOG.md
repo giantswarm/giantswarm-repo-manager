@@ -108,7 +108,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   it already adds: the developer portal writes none for its "Private" choice, and the pull request's entry then said
   nothing, so align-files, which reads the file, treated the repository as public (the OSSF Scorecard workflow) and
   the metadata step never enforced the visibility. giantswarm/honeybadger-plans was chosen private and created public.
-  The dry run's rendered entry, the validation and the pull request's diff carry the default alike.
+  The dry run's rendered entry, the validation and the pull request's diff carry the default alike; a `null` or
+  empty visibility gets it too, and the creation tools' descriptions say so.
 - A reconciler run that read the tag's own pipeline built decides the release step ahead of the tag commit's
   statuses: a private repository whose tag built, with a branch pipeline at the same commit failing a job the tag
   runs too, had read `unchecked`, so *not in sync*, until its next release.

@@ -209,8 +209,7 @@ func newStackWith(t *testing.T, debugChannel string, opts ...stackOption) *stack
 	}
 	deps := tools.Deps{Version: testVersion, GitHubAPIURL: apiURL, AuthorizationServer: server.DefaultAuthorizationServer, App: app, Inventory: store, Collector: st.col, Schema: schema, Log: log,
 		TeamFilesRepository: org + "/github", TeamFilesRef: mainBranch, SweepTeams: []string{team, teamPlaneteers}, WatchInterval: 20 * time.Millisecond, WatchSettle: watchSettle,
-		Review:   reviews,
-		Scaffold: fakeScaffold{}}
+		Review: reviews}
 	for _, o := range opts {
 		o(st, &deps)
 	}

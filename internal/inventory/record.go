@@ -684,6 +684,14 @@ func (r *Record) Dispatched(now time.Time, by string) {
 	r.expectRun(PendingRun{DispatchedAt: now, By: by, Kind: ChangeDispatched})
 }
 
+// AwaitsCreation says the record stands for a declaration pull request whose
+// repository the reconciler creates once it merges: neither declared on main
+// nor on GitHub yet, its run expected. A sweep keeps it until the run reports,
+// is given up or the pull request is closed.
+func (r *Record) AwaitsCreation() bool {
+	return r.Declaration == nil && r.Reality == nil && r.Setup.PendingRun != nil
+}
+
 // Opened marks a team-file pull request pr of kind (created, archived,
 // deleted, deprecated, transferred, changed) opened by login at now: setup.pendingRun
 // expects the reconciler run that follows the merge — without a deadline

@@ -240,3 +240,18 @@ func TestRunFailedNamesTheRunAndItsConclusion(t *testing.T) {
 		t.Errorf("after the next dispatch: %+v findings %+v", r.Setup, r.Findings)
 	}
 }
+
+func TestAwaitsCreation(t *testing.T) {
+	r := &Record{Repository: "giantswarm/new", Name: "new"}
+	if r.AwaitsCreation() {
+		t.Error("a record without a pending run awaits no creation")
+	}
+	r.Opened(time.Now(), "alice", ChangeCreated, ChangePullRequest{Number: 1})
+	if !r.AwaitsCreation() {
+		t.Error("an undeclared record without a repository and with a pending run awaits its creation")
+	}
+	r.Reality = &Reality{}
+	if r.AwaitsCreation() {
+		t.Error("a record with a repository awaits no creation")
+	}
+}

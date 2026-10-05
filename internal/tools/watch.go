@@ -41,17 +41,18 @@ const (
 // chart (build-chart, push-chart).
 const contextImagePush = "push-to-registries"
 
-// The phases of a new repository, in order: the repository exists, its
-// default branch carries the scaffold, the declaration pull request is open,
-// merged, the reconciler run of that pull request has reported, and the
+// The phases of a new repository, in order: the declaration pull request is
+// open, merged, the reconciler created the repository, its default branch
+// carries the scaffold, the reconciler run of that pull request has
+// reported, and the
 // first release exists with its tag pipeline's workflows green — or, where
 // the manager reads no tag pipeline, its CircleCI statuses green, complete
 // for the declaration and settled.
 const (
-	PhaseCreated    = "created"
-	PhaseScaffolded = "scaffolded"
 	PhaseDeclared   = "declared"
 	PhaseMerged     = "merged"
+	PhaseCreated    = "created"
+	PhaseScaffolded = "scaffolded"
 	PhaseSetUp      = "setUp"
 	PhaseReleased   = "released"
 )
@@ -118,8 +119,8 @@ func (t *tools) registerWatch(s *mcpserver.MCPServer) {
 		mcp.WithDescription("Read-only. Follow a new repository to readiness after create_repository, and return when it is ready, when a phase fails, "+
 			"as soon as a phase completes that was not complete when the call started (changed is true — narrate it and call again), "+
 			"or when timeout runs out — with the phases reached either way, each with its timestamp and the seconds since the phase before: "+
-			"created (the repository exists), scaffolded (its default branch carries the scaffold commit), declared (the declaration pull request is open), "+
-			"merged, setUp (the reconciler run of that pull request has reported: a failed step or a refused entry fails the phase, the run's other findings are "+
+			"declared (the declaration pull request is open), merged, created (the reconciler created the repository), scaffolded (its default branch carries "+
+			"the scaffold commit), setUp (the reconciler run of that pull request has reported: a failed step or a refused entry fails the phase, the run's other findings are "+
 			"carried as findings), released (the first release exists and its build is green, decided on one of two paths — get_info's circleci.tagPipelines says which "+
 			"this deployment runs: token reads the tag pipeline of every repository, anonymous of the public ones, off of none. The tag pipeline path reads the tag's own "+
 			"pipeline on CircleCI by the release watch's rule: a failed workflow fails the phase with its failed jobs, every workflow green is done at once, otherwise "+
@@ -284,8 +285,8 @@ func (w *watcher) advance(ctx context.Context) error {
 		name  string
 		check func(context.Context) (outcome, error)
 	}{
-		{PhaseCreated, w.created}, {PhaseScaffolded, w.scaffolded}, {PhaseDeclared, w.declared},
-		{PhaseMerged, w.merged}, {PhaseSetUp, w.setUp}, {PhaseReleased, w.released},
+		{PhaseDeclared, w.declared}, {PhaseMerged, w.merged}, {PhaseCreated, w.created},
+		{PhaseScaffolded, w.scaffolded}, {PhaseSetUp, w.setUp}, {PhaseReleased, w.released},
 	}
 	for _, c := range checks[len(w.out.Phases):] {
 		o, err := c.check(ctx)

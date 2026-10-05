@@ -14,7 +14,6 @@ import (
 
 	"github.com/giantswarm/devctl/v8/pkg/circleciclient"
 	"github.com/giantswarm/devctl/v8/pkg/reposetup"
-	"github.com/giantswarm/devctl/v8/pkg/reposetup/reconcile"
 	"github.com/mark3labs/mcp-go/mcp"
 	mcpserver "github.com/mark3labs/mcp-go/server"
 
@@ -96,11 +95,6 @@ type Deps struct {
 	// TagPipelines is TagPipelinesToken — and from the commit statuses
 	// without it.
 	CircleCI *circleciclient.Client
-	// Scaffold renders the scaffold create_repository pushes as the caller.
-	// nil is the engine's renderer over the templates on GitHub, downloaded
-	// with the caller's token (giantswarm/template is private); tests set a
-	// fixed one.
-	Scaffold reconcile.ScaffoldRenderer
 	// Schema is the repositories schema of the process: the one the
 	// validator checks every declaration against and the one get_info
 	// reports the enumerations of (the collector's validator is handed the

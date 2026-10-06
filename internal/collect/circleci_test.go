@@ -49,6 +49,7 @@ func TestCircleCIDerivation(t *testing.T) {
 	converged := convergedCircleCI + ", " + webhookPresent
 	missing := reconcile.Finding{Kind: reconcile.FindingCircleCIWebhookMissing, Message: "giantswarm/x is followed on CircleCI but carries no active CircleCI webhook"}
 	unreadable := reconcile.Finding{Kind: reconcile.FindingUnchecked, Message: "the webhooks of giantswarm/x are not readable by this identity"}
+	keysUnreadable := reconcile.Finding{Kind: reconcile.FindingUnchecked, Message: "the deploy keys of giantswarm/x are not readable by this identity"}
 	const circleA, circleB = "ci/circleci: a", "ci/circleci: b"
 	const setup, webhook, followed = inventory.CircleCIFactSetupWorkflows, inventory.CircleCIFactWebhook, inventory.CircleCIFactFollowed
 	yes, no := true, false
@@ -73,6 +74,8 @@ func TestCircleCIDerivation(t *testing.T) {
 			inventory.CircleCI{Followed: true, SetupWorkflows: &yes, Webhook: &no, Source: inventory.CircleCISourceBoth}},
 		{"run could not read the hooks: webhook unknown", head(false), step(reconcile.ModeCheck, reconcile.StepResult{Verdict: reconcile.VerdictReported, Summary: convergedCircleCI + ", webhook not readable by this identity", Findings: []reconcile.Finding{unreadable}}),
 			inventory.CircleCI{Followed: true, SetupWorkflows: &yes, Source: inventory.CircleCISourceBoth, Unknown: []string{webhook}}},
+		{"run could not read the deploy keys, the webhook verified all the same: present", head(false), step(reconcile.ModeCheck, reconcile.StepResult{Verdict: reconcile.VerdictReported, Summary: convergedCircleCI + ", deploy keys not readable by this identity, " + webhookPresent, Findings: []reconcile.Finding{keysUnreadable}}),
+			inventory.CircleCI{Followed: true, SetupWorkflows: &yes, Webhook: &yes, Source: inventory.CircleCISourceBoth}},
 		{"repair run that followed: the hook CircleCI did not install is missing", head(false), step(reconcile.ModeRepair, reconcile.StepResult{Verdict: reconcile.VerdictRepaired, Changes: []string{followX}, Findings: []reconcile.Finding{missing}}),
 			inventory.CircleCI{Followed: true, SetupWorkflows: &yes, Webhook: &no, Source: inventory.CircleCISourceBoth}},
 		{"check run: follow planned, settings and webhook unread", head(false), run(reconcile.ModeCheck, reconcile.VerdictDrift, followX, "enable setup workflows", "create a deploy key"),

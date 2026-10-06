@@ -113,7 +113,8 @@ func runStep(last *inventory.LastRun, step reconcile.Step) *reconcile.StepResult
 const alignFix = "run Align now: the reconciler's check reads CircleCI directly, and for a repository that has not opted in to alignment (`align: true` in its entry) it changes nothing"
 
 // convergedCircleCI is the engine's summary of a converged circleci step up
-// to its word on the webhook (webhookClause).
+// to its words on the deploy keys and the webhook (webhookClause): the
+// composed line of a run whose step left no summary (convergedWords).
 const convergedCircleCI = "followed, setup workflows on, checkout key present"
 
 // circleCIStep is the circleci step from the record's CircleCI state: the
@@ -153,7 +154,7 @@ func circleCIStep(slug, branch string, cc *inventory.CircleCI, ci *inventory.CI,
 			if len(sr.Findings) > 0 {
 				sr.Verdict = reconcile.VerdictReported
 			}
-			sr.Summary = join(builds, convergedCircleCI+webhookClause(cc.Webhook)+" ("+from+")")
+			sr.Summary = join(builds, convergedWords(run, cc.Webhook)+" ("+from+")")
 		}
 		return sr
 	}
@@ -176,6 +177,19 @@ func circleCIStep(slug, branch string, cc *inventory.CircleCI, ci *inventory.CI,
 		sr.Changes = []string{"follow " + slug, "enable setup workflows", "create a deploy key"}
 	}
 	return sr
+}
+
+// convergedWords is the engine's own summary of the run's circleci step —
+// the settings, the repository's deploy keys on GitHub and the webhook as
+// the run read them, the one place an identity without the administration
+// permission reads the keys from — when the step left one: a step without
+// changes. A repaired step leaves none (after the run the project is set
+// up), and the composed words with the record's webhook stand for it.
+func convergedWords(run *reconcile.StepResult, webhook *bool) string {
+	if run.Summary != "" {
+		return run.Summary
+	}
+	return convergedCircleCI + webhookClause(webhook)
 }
 
 // webhookClause is the converged summary's word on CircleCI's webhook, as

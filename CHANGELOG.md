@@ -38,6 +38,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- `create_repository` opens the declaration pull request and nothing else: the reconciler of giantswarm/github creates
+  the repository as its App once the pull request merges, pushes the scaffold and sets it up. It no longer creates or
+  scaffolds the repository as the caller and no longer needs the caller's org owner role. The record of a repository
+  awaiting its creation keeps the expected run, and `watch_repository`'s phases follow the new order: `declared`,
+  `merged`, `created`, `scaffolded`, `setUp`, `released`.
 - A team's channels come from its channel file in the team-files repository, `teams/<team>.yaml`: `asks` and
   `notices`, each `{id, name}`, read strictly (an unknown key, a channel without its ID or name, or a file without
   `notices` is refused). Naming `asks` is the team's opt-in to repository set-up messages: a team whose file names no

@@ -1,12 +1,10 @@
 package e2e
 
 import (
-	"context"
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"net/http"
-	"os"
 	"path/filepath"
 	"slices"
 	"sort"
@@ -14,7 +12,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/giantswarm/devctl/v8/pkg/reposetup"
 	"github.com/google/go-github/v92/github"
 )
 
@@ -339,27 +336,4 @@ func (f *fakeRepos) register(mux *http.ServeMux, g *fakeGitHub) {
 		repo.files, repo.empty, repo.head, repo.headAt = files, false, in.SHA, time.Now()
 		writeJSON(w, http.StatusOK, map[string]any{kRef: "refs/" + r.PathValue(kRef), kObject: map[string]any{kSHA: in.SHA}})
 	}))
-}
-
-// scaffoldFiles is what the fake renderer writes: the engine's renderer is
-// devctl's, tested there; the stack proves the push and the order.
-var scaffoldFiles = map[string]string{
-	readmeFile:   "# shiny-service\n",
-	"CODEOWNERS": reposetup.Codeowners(team),
-	"Makefile":   "include Makefile.*.mk\n",
-}
-
-// fakeScaffold stands in for the engine's renderer.
-type fakeScaffold struct{}
-
-func (fakeScaffold) Render(_ context.Context, req reposetup.RenderRequest) (*reposetup.Scaffold, error) {
-	files := make([]string, 0, len(scaffoldFiles))
-	for p, c := range scaffoldFiles {
-		if err := os.WriteFile(filepath.Join(req.Dir, p), []byte(c), 0o600); err != nil {
-			return nil, err
-		}
-		files = append(files, p)
-	}
-	sort.Strings(files)
-	return &reposetup.Scaffold{Dir: req.Dir, Template: req.Entry.Template, Files: files}, nil
 }

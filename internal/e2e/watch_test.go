@@ -27,7 +27,7 @@ const (
 	shinyURL   = "https://github.com/" + org + "/" + shinyService
 	// throughMerged are the phases done once the pull request is merged,
 	// throughSetUp once the reconciler run has reported.
-	throughMerged = "created scaffolded declared merged"
+	throughMerged = "declared merged created scaffolded"
 	throughSetUp  = throughMerged + " setUp"
 	allPhases     = throughSetUp + " released"
 	// watchSettle is the stack's settle window: how long the release's
@@ -53,7 +53,9 @@ func (st *stack) createShiny(t *testing.T, c *client.Client) (tools.Created, str
 	return st.create(t, c, newEntry)
 }
 
-// create creates the repository entry declares as alice and merges nothing.
+// create declares the repository entry names as alice and merges nothing;
+// the repository then exists as the reconciler's creation would leave it,
+// which the watch reads only once the pull request merged.
 func (st *stack) create(t *testing.T, c *client.Client, entry map[string]any) (tools.Created, string) {
 	t.Helper()
 	var out tools.Created
@@ -61,6 +63,7 @@ func (st *stack) create(t *testing.T, c *client.Client, entry map[string]any) (t
 	if out.PullRequest == nil {
 		t.Fatalf("create_repository: %+v", out)
 	}
+	st.ghs.repos.add(entry[kName].(string), alice)
 	return out, fmt.Sprintf("https://github.com/%s/github/pull/%d", org, out.PullRequest.Number)
 }
 
@@ -104,10 +107,8 @@ func names(ps []tools.Phase) string {
 	return strings.Join(out, " ")
 }
 
-// TestWatchRepositoryFollowsACreationToReadiness: the creation leaves the
-// record expecting the run of its pull request — without a deadline while
-// the pull request is open, so the poller does not hurry; before the merge
-// the watch answers with merged pending and the three phases done; a merge arriving mid-call ends the call within
+// TestWatchRepositoryFollowsACreationToReadiness: before the merge the watch
+// answers with merged pending and the declared phase done; a merge arriving mid-call ends the call within
 // a poll interval with the merged phase and changed, setUp pending; after
 // the run, with the release there but CircleCI silent, released stays
 // pending, as it does while CircleCI's statuses are pending — a call that
@@ -120,11 +121,8 @@ func TestWatchRepositoryFollowsACreationToReadiness(t *testing.T) {
 	c := st.as(t, aliceToken)
 	created, prURL := st.createShiny(t, c)
 	pr := created.PullRequest.Number
-	if p := created.Repositories[0].PendingRun; p == nil || p.Kind != inventory.ChangeCreated || !p.Follows(pr) || p.By != alice || !strings.Contains(created.Then, tools.ToolWatchRepository) {
-		t.Fatalf("the creation's pending run: %+v then=%q", p, created.Then)
-	}
-	if rec := st.record(t, shinyService); !rec.Setup.PendingRun.Follows(pr) || rec.Reality == nil {
-		t.Fatalf("record after the creation: %+v", rec.Setup)
+	if !strings.Contains(created.Then, tools.ToolWatchRepository) {
+		t.Fatalf("the creation's then: %q", created.Then)
 	}
 	if p := st.poll(t); p.Pending != 0 || p.Missing != 0 {
 		t.Errorf("poll while the pull request is open: %+v", p)
@@ -134,7 +132,7 @@ func TestWatchRepositoryFollowsACreationToReadiness(t *testing.T) {
 	}
 
 	w := st.watch(t, c, pr, 0.3)
-	if w.Ready || w.Changed || w.Pending != tools.PhaseMerged || w.Failure != nil || names(w.Phases) != "created scaffolded declared" || w.Repository != shinyURL || w.PullRequest != prURL {
+	if w.Ready || w.Changed || w.Pending != tools.PhaseMerged || w.Failure != nil || names(w.Phases) != "declared" || w.Repository != "" || w.PullRequest != prURL {
 		t.Fatalf("before the merge: %+v", w)
 	}
 	for i, ph := range w.Phases {
@@ -285,7 +283,7 @@ func TestWatchRepositoryAwaitsTheRunFromTheMerge(t *testing.T) {
 	if rec := st.record(t, shinyService); !rec.Setup.PendingRun.Follows(pr) || rec.Setup.PendingRun.MergedAt != nil || rec.Setup.MissingRun != nil || hasKind(rec, inventory.FindingReconcileRunMissing) {
 		t.Fatalf("record with the pull request open: %+v findings %+v", rec.Setup, rec.Findings)
 	}
-	if w := st.watch(t, c, pr, 0.3); w.Failure != nil || w.Pending != tools.PhaseMerged || names(w.Phases) != "created scaffolded declared" {
+	if w := st.watch(t, c, pr, 0.3); w.Failure != nil || w.Pending != tools.PhaseMerged || names(w.Phases) != "declared" {
 		t.Fatalf("watch with the pull request open: %+v failure=%+v", w, w.Failure)
 	}
 

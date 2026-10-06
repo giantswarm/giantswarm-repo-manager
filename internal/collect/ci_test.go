@@ -48,12 +48,12 @@ func TestCIFactsGenerated(t *testing.T) {
 		jobs[j.Name] = j
 	}
 	for name, want := range map[string]struct{ tag, branch, anyBranch bool }{
-		setupJob:              {true, true, true},
-		"go-build":            {true, true, true},
-		"push-to-registries":  {false, false, true},
-		releaseJobName:        {true, false, false},
-		"execute-chart-tests": {false, false, true},
-		"push-chart-release":  {true, false, false},
+		setupJob:             {true, true, true},
+		goBuildJob:           {true, true, true},
+		"push-to-registries": {false, false, true},
+		releaseJobName:       {true, false, false},
+		chartTestsJob:        {false, false, true},
+		"push-chart-release": {true, false, false},
 	} {
 		j, ok := jobs[name]
 		if !ok {

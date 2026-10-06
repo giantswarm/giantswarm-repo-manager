@@ -56,15 +56,17 @@ func converge(res *reconcile.Result) {
 // rewriteReleaseStep writes the record's release step from the release
 // watch's state, when the record has checks with a release step and the
 // watch has a release: the watch read the tag's own pipeline, which is the
-// answer the step asks for, and it read it after the checks ran. Converged
-// follows.
+// answer the step asks for, and it read it after the checks ran. A step the
+// engine skipped for another reason than a missing CircleCI client (no
+// CircleCI pipeline, an archived repository, a tag not vX.Y.Z) stays
+// skipped: there is no tag build to verify. Converged follows.
 func rewriteReleaseStep(rec *inventory.Record) {
 	w := rec.Setup.Release
 	if w == nil || rec.Setup.Checks == nil || rec.Reality == nil {
 		return
 	}
 	sr := rec.Setup.Checks.Step(reconcile.StepRelease)
-	if sr == nil {
+	if sr == nil || (sr.Verdict == reconcile.VerdictSkipped && !clientless(sr)) {
 		return
 	}
 	*sr = releaseStep(rec.Repository, w.Tag, rec.Reality.DefaultBranch, rec.Reality.LatestRelease, rec.CI, rec.Setup.LastRun, w)

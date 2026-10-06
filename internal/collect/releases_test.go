@@ -284,6 +284,56 @@ func TestReleaseStepFromTheWatch(t *testing.T) {
 	}
 }
 
+// TestReleaseStepWithoutPipeline: on a repository without a CircleCI
+// pipeline (GitHub Actions only) the engine skips the release step, and it
+// stays skipped — no finding, converged — whether the release is newer than
+// the inventory's read or the read has it without any CircleCI status. A
+// repository with a pipeline whose tag commit carries no CircleCI status
+// still reads missed-tag-build.
+func TestReleaseStepWithoutPipeline(t *testing.T) {
+	const slug, tag = "giantswarm/x", "v0.10.0"
+	at := time.Date(2026, 10, 6, 8, 0, 0, 0, time.UTC)
+	unchecked := &inventory.ReleaseWatch{Tag: tag, State: inventory.ReleaseUnchecked, Reason: "no CircleCI pipeline on the default branch: nothing builds the tag", CheckedAt: at}
+	checks := func(release reconcile.StepResult) *reconcile.Result {
+		return &reconcile.Result{Steps: []reconcile.StepResult{{Step: reconcile.StepSettings, Verdict: reconcile.VerdictOK}, release}}
+	}
+	noPipeline := reconcile.StepResult{Step: reconcile.StepRelease, Verdict: reconcile.VerdictSkipped, Summary: "no CircleCI pipeline"}
+	noClient := reconcile.StepResult{Step: reconcile.StepRelease, Verdict: reconcile.VerdictSkipped, Summary: "release " + tag + ": no CircleCI client to verify the pipeline"}
+	cases := []struct {
+		name    string
+		latest  *inventory.Release
+		engine  reconcile.StepResult
+		verdict reconcile.Verdict
+		finding reconcile.FindingKind
+	}{
+		{"actions only, released after the read", &inventory.Release{Tag: "v0.9.0"}, noPipeline, reconcile.VerdictSkipped, ""},
+		{"actions only, after the next read", &inventory.Release{Tag: tag}, noPipeline, reconcile.VerdictSkipped, ""},
+		{"circleci, no status on the tag commit", &inventory.Release{Tag: tag}, noClient, reconcile.VerdictReported, reconcile.FindingMissedTagBuild},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			rec := &inventory.Record{Repository: slug, Name: "x", Declaration: &inventory.Declaration{Team: "team-bumblebee"},
+				Reality: &inventory.Reality{DefaultBranch: mainBranch, LatestRelease: tc.latest}}
+			res := checks(tc.engine)
+			fillClientlessSteps(res, rec)
+			rec.Setup.Checks = res
+			rec.Setup.Release = unchecked
+			rewriteReleaseStep(rec)
+			rec.Finalize()
+			sr := rec.Setup.Checks.Step(reconcile.StepRelease)
+			if sr.Verdict != tc.verdict {
+				t.Errorf("verdict=%s summary=%q, want %s", sr.Verdict, sr.Summary, tc.verdict)
+			}
+			switch {
+			case tc.finding == "" && (len(rec.Findings) != 0 || !rec.Setup.Checks.Converged):
+				t.Errorf("findings=%+v converged=%v, want none and converged", rec.Findings, rec.Setup.Checks.Converged)
+			case tc.finding != "" && (len(sr.Findings) != 1 || sr.Findings[0].Kind != tc.finding || rec.Setup.Checks.Converged):
+				t.Errorf("findings=%+v converged=%v, want one %s, not converged", sr.Findings, rec.Setup.Checks.Converged, tc.finding)
+			}
+		})
+	}
+}
+
 func TestFailedJobsNameHow(t *testing.T) {
 	jobs := []circleciclient.Job{{Name: "a", Status: stateSuccess}, {Name: "b", Status: statusTimedOut}, {Name: "c", Status: "infrastructure_fail"}, {Name: "d", Status: "not_run"}, {Name: "e", Status: "canceled"}}
 	got := strings.Join(failedJobs(jobs), "; ")

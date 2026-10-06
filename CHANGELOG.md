@@ -9,6 +9,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- `repo status`'s `circleci` line (`setup.checks`) is the reconciler run's own summary when its step left one — the
+  settings, the repository's deploy keys on GitHub as the run read them (`deploy keys on GitHub: CircleCI (read-only)`,
+  devctl 8.116.0) and the webhook — instead of fixed words that dropped the keys; a repaired step, which leaves no
+  summary, keeps the composed words. The webhook is read as present from a summary that ends on it whatever else the
+  step could not read (an `unchecked` finding on the deploy keys no longer hides a verified webhook).
+
 ### Added
 
 - Every planned message (`ask`, `notice`) and every delivery reports `channelName`, the name of the team's channel,
@@ -30,6 +38,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- `create_repository` opens the declaration pull request and nothing else: the reconciler of giantswarm/github creates
+  the repository as its App once the pull request merges, pushes the scaffold and sets it up. It no longer creates or
+  scaffolds the repository as the caller and no longer needs the caller's org owner role. The record of a repository
+  awaiting its creation keeps the expected run, and `watch_repository`'s phases follow the new order: `declared`,
+  `merged`, `created`, `scaffolded`, `setUp`, `released`.
 - A team's channels come from its channel file in the team-files repository, `teams/<team>.yaml`: `asks` and
   `notices`, each `{id, name}`, read strictly (an unknown key, a channel without its ID or name, or a file without
   `notices` is refused). Naming `asks` is the team's opt-in to repository set-up messages: a team whose file names no
@@ -61,7 +74,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   the metadata step never enforced the visibility. giantswarm/honeybadger-plans was chosen private and created public.
   The dry run's rendered entry, the validation and the pull request's diff carry the default alike; a `null` or
   empty visibility gets it too, and the creation tools' descriptions say so.
-
+- A reconciler run that read the tag's own pipeline built decides the release step ahead of the tag commit's
+  statuses: a private repository whose tag built, with a branch pipeline at the same commit failing a job the tag
+  runs too, had read `unchecked`, so *not in sync*, until its next release.
+- A release step the engine skipped for another reason than a missing CircleCI client (no CircleCI pipeline, an
+  archived repository, a tag not vX.Y.Z) stays skipped when the release watch settles: a repository built by GitHub
+  Actions alone had read `unchecked` after a new release and `missed-tag-build` from the next read on.
 - The engine check compares CODEOWNERS with the repository's align-files override
   (`repositories/override/<repository>/CODEOWNERS` in giantswarm/github) when it has one: a repository whose CODEOWNERS
   is exactly its override had read *not in sync* against the generated single-team file. A sweep and a refresh list the

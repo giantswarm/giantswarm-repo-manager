@@ -83,20 +83,26 @@ func applyStep(out *inventory.CircleCI, mode reconcile.Mode, sr *reconcile.StepR
 // webhookPresent is how the engine's converged circleci step ends its
 // summary when the repository carries CircleCI's webhook (devctl
 // pkg/reposetup/reconcile, step_circleci.go): "followed, setup workflows on,
-// checkout key present, webhook present".
+// checkout key present, deploy keys on GitHub: CircleCI (read-only), webhook
+// present".
 const webhookPresent = "webhook present"
 
 // stepWebhook is CircleCI's webhook as the reconciler's circleci step
 // verified it: missing when the step reports it missing (finding
 // circleci-webhook-missing), present when a step without changes says so in
-// its summary. Nil otherwise, nothing is guessed: a failed step, an identity
-// that could not read the hooks (finding unchecked), a check run that plans
-// the follow, a step with changes, whose summary names no webhook, and a run
-// of an engine that did not verify the webhook yet, whose converged summary
-// ends at the checkout key.
+// its summary — whatever else the step could not read, the deploy keys for
+// one (finding unchecked beside a summary that ends on the webhook). Nil
+// otherwise, nothing is guessed: a failed step, an identity that could not
+// read the hooks (finding unchecked, the summary ending on their
+// unreadability), a check run that plans the follow, a step with changes,
+// whose summary names no webhook, and a run of an engine that did not
+// verify the webhook yet, whose converged summary ends at the checkout key.
 func stepWebhook(sr *reconcile.StepResult) *bool {
 	if sr.Verdict == reconcile.VerdictFailed {
 		return nil
+	}
+	if strings.HasSuffix(sr.Summary, webhookPresent) {
+		return ptr(true)
 	}
 	for _, f := range sr.Findings {
 		switch f.Kind {
@@ -105,9 +111,6 @@ func stepWebhook(sr *reconcile.StepResult) *bool {
 		case reconcile.FindingUnchecked:
 			return nil
 		}
-	}
-	if strings.HasSuffix(sr.Summary, webhookPresent) {
-		return ptr(true)
 	}
 	return nil
 }

@@ -289,6 +289,11 @@ func (t *tools) expectRun(ctx context.Context, p *person, repository, kind strin
 	if errors.Is(err, inventory.ErrNotFound) {
 		rec, err = t.d.Collector.Refresh(ctx, repository, nil, inventory.SourceRefresh)
 	}
+	if errors.Is(err, inventory.ErrNotFound) && kind == inventory.ChangeCreated {
+		// A repository the reconciler creates once the pull request merges:
+		// the record awaits its creation (Record.AwaitsCreation).
+		rec, err = &inventory.Record{Repository: repository, Name: strings.TrimPrefix(repository, t.org()+"/")}, nil
+	}
 	if err != nil {
 		t.d.Log.Error("pending run not stored: record unreadable", "repository", repository, "error", err)
 		return nil

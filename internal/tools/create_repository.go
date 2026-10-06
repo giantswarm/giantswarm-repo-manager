@@ -2,10 +2,7 @@ package tools
 
 import (
 	"context"
-	"errors"
 	"fmt"
-	"log/slog"
-	"net/http"
 	"strings"
 	"time"
 
@@ -61,42 +58,26 @@ type Validation struct {
 	// reconciler report, one per problem naming the field to fix.
 	Findings []reconcile.Finding `json:"findings,omitempty"`
 	// Creation is what create_repository in mode commit writes as the
-	// caller, in order: each repository created, its scaffold pushed, the
-	// pull request. Nil without the caller's token or when the entries are
-	// refused (the problems say why nothing would be written).
+	// caller: the declaration pull request. Nil without the caller's token or
+	// when the entries are refused (the problems say why nothing would be
+	// written).
 	Creation *CreationPlan `json:"creation,omitempty"`
-	// resumed names the entries validated for an existing repository: the
-	// caller's own creations interrupted after the create step.
-	resumed []string
 }
 
-// CreationPlan is the dry run of create_repository's three writes as the
-// caller: the engine's create and scaffold steps in check mode, then the
-// declaration pull request.
+// CreationPlan is the dry run of create_repository's one write as the
+// caller: the declaration pull request. The reconciler creates, scaffolds and
+// sets the repositories up once it merges, as its App.
 type CreationPlan struct {
-	// Refusal is why the creation would not run — the engine's text when the
-	// caller is not an owner of the organization, or the team file unreadable
-	// as the caller. Nothing would be written.
+	// Refusal is why the pull request would not be opened — the team file
+	// unreadable as the caller, an entry declared already. Nothing would be
+	// written.
 	Refusal string `json:"refusal,omitempty"`
-	// Repositories are the create and scaffold steps planned per entry.
-	Repositories []RepositoryPlan `json:"repositories,omitempty"`
-	// PullRequest is the declaration pull request that follows.
+	// PullRequest is the declaration pull request.
 	PullRequest *PlannedPullRequest `json:"pullRequest,omitempty"`
-	// Resumed names the entries whose repository exists and the caller
-	// administers: a creation resumed, the create step skipped.
-	Resumed []string `json:"resumed,omitempty"`
 }
 
-// RepositoryPlan is one repository's create and scaffold steps as planned.
-type RepositoryPlan struct {
-	Name string `json:"name"`
-	// Repository is the URL when it exists already (a creation resumed).
-	Repository string                 `json:"repository,omitempty"`
-	Steps      []reconcile.StepResult `json:"steps"`
-}
-
-// Created is create_repository's result in mode commit: the repositories
-// created and scaffolded as the caller, then the declaration pull request.
+// Created is create_repository's result in mode commit: the declaration
+// pull request and the repositories the reconciler creates once it merges.
 type Created struct {
 	Repositories []CreatedRepository `json:"repositories"`
 	*Committed
@@ -107,21 +88,15 @@ type Created struct {
 
 // createdThen is what follows a creation: the repository is minutes from
 // usable, and watch_repository follows it there.
-const createdThen = "the repositories are not ready yet: the pull request merges, the reconciler sets them up and the first release builds — " +
+const createdThen = "the repositories do not exist yet: the pull request merges, the reconciler creates and sets them up and the first release builds — " +
 	"follow each with " + ToolWatchRepository + " (repository, pullRequest: pullRequest.number) and report the link when it answers ready; " +
 	"get_repository shows setup.pendingRun until the reconciler run of the pull request has reported"
 
-// CreatedRepository is one repository after the create and scaffold steps.
+// CreatedRepository is one repository the declaration pull request creates.
 type CreatedRepository struct {
 	Name string `json:"name"`
-	// Repository is the URL on GitHub.
+	// Repository is the URL on GitHub once the reconciler created it.
 	Repository string `json:"repository"`
-	// Created says this call created it; false when it existed already (a
-	// creation resumed).
-	Created bool `json:"created"`
-	// ScaffoldCommit is the scaffold at the head of the default branch.
-	ScaffoldCommit string                 `json:"scaffoldCommit,omitempty"`
-	Steps          []reconcile.StepResult `json:"steps"`
 	// PendingRun is the record's expectation of the reconciler run that
 	// follows the pull request's merge, the way an Align now leaves one: the
 	// inventory reads the run's artifact within its pending interval.
@@ -148,8 +123,8 @@ func (t *tools) registerValidate(s *mcpserver.MCPServer) {
 			"the minimal scaffold otherwise) and its options, whether the name is free on GitHub, and the refusals of the creation rules as data " +
 			"(entries[].problems, and as the engine's findings entry-refused / gen-circleci-refused). " + createdOptedIn +
 			"Plus the guard notices a person sees before any pull request exists: team-review when the author is outside the " +
-			"owning team and team-planeteers, batch-review above three entries, names-unchecked without the App. And the creation as you (creation): the create and scaffold steps the engine " +
-			"would run with your token and the pull request that follows, its body carrying your reason — or the refusal when you are not an owner of the org (the org lets only owners create repositories). Writes nothing. " +
+			"owning team and team-planeteers, batch-review above three entries, names-unchecked without the App. And the creation (creation): the declaration pull request " +
+			"opened as you, its body carrying your reason, from which the reconciler creates the repositories as its App once it merges — or the refusal. Writes nothing. " +
 			"Takes the same arguments as create_repository (team, entry or entries, reason), so you run it with exactly the arguments you commit. " +
 			"Use it before create_repository; an existing repository that no team file declares is declared with adopt_repository, and its state is read with get_repository."),
 		mcp.WithReadOnlyHintAnnotation(true),
@@ -159,25 +134,20 @@ func (t *tools) registerValidate(s *mcpserver.MCPServer) {
 	})
 }
 
-// createRepository creates new repositories as the caller: after the dry
-// run, with the caller's own GitHub token, the engine's create step (the
-// repository, the caller its admin) and scaffold step (one commit on the
-// default branch), then the creation-only pull request to
-// repositories/<team>.yaml — which the Validate workflow of giantswarm/github
-// approves by machine when no notice stands, and whose merge sets the
-// repositories up through the reconciler, which never creates.
+// createRepository declares new repositories: after the dry run, the pull
+// request adding the entries to repositories/<team>.yaml, opened as the
+// caller. Once it merges, the reconciler of giantswarm/github creates each
+// repository as its App, pushes the scaffold and sets it up.
 func (t *tools) createRepository() WriteTool {
 	return WriteTool{
 		Name: ToolCreateRepository,
-		Description: "Create one or more new repositories of the giantswarm org as you, in this order: the repository (you are its admin), one scaffold commit " +
-			"on its default branch rendered by the engine from the declaration (" + FirstRelease + "), then the pull request adding the entries to the team's file " +
-			"(repositories/<team>.yaml in giantswarm/github) — the reconciler sets the repositories up once it merges and never creates. " + createdOptedIn + "An owner role in the org is " +
-			"required: the org lets only owners create repositories, and the dry run tells you so before any write. dryRun: true is validate_repository's result with the " +
-			"creation plan (creation: the create and scaffold steps, the pull request) and writes nothing; refusals are data (entries[].problems, creation.refusal), an error " +
-			"means the validation could not run. mode commit refuses before any write — the engine's refusals, a taken name, a missing owner role — and resumes a creation " +
-			"interrupted by a failure: a repository you administer whose default branch carries at most one commit is not created again, a scaffold on the default branch not " +
-			"pushed again, an open pull request for the branch is reported; a repository with a history is somebody's work and is refused, its refusal naming adopt_repository, " +
-			"which declares it. The pull request is machine-approved when you are in the team (or team-planeteers) and at most three entries are added, else your team reviews it.",
+		Description: "Create one or more new repositories of the giantswarm org: the pull request adding the entries to the team's file " +
+			"(repositories/<team>.yaml in giantswarm/github), opened as you; once it merges, the reconciler creates each repository as its App, pushes one scaffold " +
+			"commit rendered by the engine from the declaration (" + FirstRelease + ") and sets it up. No owner role in the org is needed. " + createdOptedIn +
+			"dryRun: true is validate_repository's result with the creation plan (creation: the pull request) and writes nothing; refusals are data " +
+			"(entries[].problems, creation.refusal), an error means the validation could not run. mode commit refuses before any write — the engine's refusals, " +
+			"a taken name (an existing repository no team file declares is declared with adopt_repository) — and reports the pull request already open for the branch. " +
+			"A declaration of a repository that does not exist yet keeps the owning team's review.",
 		Options: creationArguments(),
 		DryRun:  func(ctx context.Context, args map[string]any) (any, error) { return t.validate(ctx, args) },
 		Commit:  t.commitCreate,
@@ -199,9 +169,8 @@ func entriesArg(args map[string]any) ([]any, error) {
 	return out, nil
 }
 
-// validate is the dry run with the creation as the caller planned: the
-// engine's create and scaffold steps in check mode (the caller's role in the
-// org read, nothing written) and the pull request.
+// validate is the dry run with the declaration pull request planned as the
+// caller.
 func (t *tools) validate(ctx context.Context, args map[string]any) (*Validation, error) {
 	var p *person
 	var perr error
@@ -222,7 +191,7 @@ func (t *tools) validate(ctx context.Context, args map[string]any) (*Validation,
 
 // dryRun runs the engine's validation for the entries, with the author's
 // GitHub teams when they can be read as the author (p; nil with the reason
-// in perr), and resumes the caller's own interrupted creations.
+// in perr).
 func (t *tools) dryRun(ctx context.Context, args map[string]any, p *person, perr error) (*Validation, error) {
 	team, _ := args[argTeam].(string)
 	team = strings.TrimSpace(team)
@@ -257,11 +226,6 @@ func (t *tools) dryRun(ctx context.Context, args map[string]any, p *person, perr
 	if err != nil {
 		return nil, err
 	}
-	if p != nil {
-		if res, v.resumed, err = t.resumed(ctx, p, req, res); err != nil {
-			return nil, err
-		}
-	}
 	v.Result = res
 	v.MachineApproved = res.Accepted && len(res.Notices) == 0
 	now := time.Now()
@@ -273,118 +237,14 @@ func (t *tools) dryRun(ctx context.Context, args map[string]any, p *person, perr
 	return &v, nil
 }
 
-// adoptHint closes the taken-name refusal of a repository with content: it
-// is somebody's work, not a creation interrupted after the create step, and
-// adopt_repository is the way to declare it.
-const adoptHint = " — the repository has a history, so it is not a creation of yours interrupted after the create step: declare it with " + ToolAdoptRepository
-
-// resumed validates again, for repositories that exist, the entries refused
-// for their taken name alone whose repository the caller administers and
-// whose default branch carries at most one commit — the caller's own
-// creations interrupted after the create or the scaffold step. Anyone else's
-// repository stays refused, and so does one with a history, its refusal
-// naming adopt_repository. The entries are validated as the creation
-// rendered them, defaults written out (gen.ci.generate): a resumed creation
-// is still a creation, and an existing-mode read takes an entry as declared.
-// The ModeExisting verdicts replace the resumed entries; the guard notices
-// are the creation's.
-func (t *tools) resumed(ctx context.Context, p *person, req reposetup.Request, res *reposetup.Result) (*reposetup.Result, []string, error) {
-	var names []string
-	for i, e := range res.Entries {
-		if !e.RefusedForTakenName() {
-			continue
-		}
-		repo, resp, err := p.gh.Repositories.Get(ctx, t.org(), e.Name)
-		switch {
-		case err != nil && resp != nil && resp.StatusCode == http.StatusNotFound:
-			continue
-		case err != nil:
-			return nil, nil, fmt.Errorf("read %s/%s as you: %w", t.org(), e.Name, err)
-		case strings.EqualFold(repo.GetFullName(), t.org()+"/"+e.Name) && repo.GetPermissions().GetAdmin():
-			initial, err := initialOnly(ctx, p.gh, t.org(), e.Name, repo.GetDefaultBranch())
-			if err != nil {
-				return nil, nil, err
-			}
-			if !initial {
-				for j := range res.Entries[i].Problems {
-					if res.Entries[i].Problems[j].Field == teamfiles.FieldName {
-						res.Entries[i].Problems[j].Message += adoptHint
-					}
-				}
-				continue
-			}
-			names = append(names, e.Name)
-		}
-	}
-	if len(names) == 0 {
-		return res, nil, nil
-	}
-	tf, err := renderedTeamFile(req.TeamFile.Team, res.Entries, names)
-	if err != nil {
-		return nil, nil, err
-	}
-	req.TeamFile, req.Names, req.Mode = tf, names, reposetup.ModeExisting
-	existing, err := t.runValidator(ctx, req)
-	if err != nil {
-		return nil, nil, err
-	}
-	byName := make(map[string]reposetup.Entry, len(existing.Entries))
-	for _, e := range existing.Entries {
-		byName[e.Name] = e
-	}
-	res.Accepted = true
-	for i, e := range res.Entries {
-		if x, ok := byName[e.Name]; ok {
-			res.Entries[i] = x
-		}
-		res.Accepted = res.Accepted && res.Entries[i].Accepted
-	}
-	return res, names, nil
-}
-
-// renderedTeamFile is a team file of the named entries as the creation's dry
-// run rendered them: the entry as it would be written, the creation defaults
-// out.
-func renderedTeamFile(team string, entries []reposetup.Entry, names []string) (*reposetup.TeamFile, error) {
-	resumed := make(map[string]bool, len(names))
-	for _, n := range names {
-		resumed[n] = true
-	}
-	var b strings.Builder
-	for _, e := range entries {
-		if !resumed[e.Name] {
-			continue
-		}
-		b.WriteString(e.Rendered)
-		if !strings.HasSuffix(e.Rendered, "\n") {
-			b.WriteByte('\n')
-		}
-	}
-	return reposetup.ParseTeamFile(team, strings.NewReader(b.String()))
-}
-
-// planCreation is the creation as the caller, in check mode: the engine
-// reads the caller's role in the org and plans the create and scaffold steps
-// of every entry; the declaration pull request is rendered. Nothing is
-// written; a refusal is reported in place of the plan.
+// planCreation is the declaration pull request planned as the caller; a
+// refusal is reported in its place. Nothing is written.
 func (t *tools) planCreation(ctx context.Context, p *person, v *Validation, args map[string]any) *CreationPlan {
-	plan := &CreationPlan{Resumed: v.resumed}
-	runner := t.engine(ctx, p)
-	for _, e := range v.Entries {
-		res, err := runner.Create(ctx, reconcile.CreateRequest{Owner: t.org(), Team: v.Team, Entry: e, Mode: reconcile.ModeCheck})
-		if err != nil {
-			plan.Refusal = t.refusal(err).Error()
-			return plan
-		}
-		plan.Repositories = append(plan.Repositories, RepositoryPlan{Name: e.Name, Repository: res.URL, Steps: res.Steps})
-	}
 	pl, err := t.declaration(ctx, p, v, args)
 	if err != nil {
-		plan.Refusal = err.Error()
-		return plan
+		return &CreationPlan{Refusal: err.Error()}
 	}
-	plan.PullRequest = &pl.PullRequest
-	return plan
+	return &CreationPlan{PullRequest: &pl.PullRequest}
 }
 
 // parseEntries renders the tool's entries as a team file of the team, each
@@ -456,39 +316,7 @@ func (t *tools) runValidator(ctx context.Context, req reposetup.Request) (*repos
 	return v.Validate(ctx, req)
 }
 
-// engine is the set-up engine as the caller: their client creates the
-// repository and pushes the scaffold, their token downloads the templates
-// (giantswarm/template is private). The steps' lines go to the log.
-func (t *tools) engine(ctx context.Context, p *person) reconcile.Runner {
-	r := reconcile.Runner{GitHub: p.gh, Renderer: t.d.Scaffold, Log: stepLog{log: t.d.Log, as: p.login}}
-	if r.Renderer == nil {
-		tok, _ := identity.TokenFromContext(ctx)
-		r.Renderer = reposetup.Renderer{Templates: reposetup.GitHubTemplates{Token: tok}}
-	}
-	return r
-}
-
-// refusal is the engine's refusal of the caller as the tool's error: devctl's
-// text, word for word, for a caller who is not an owner of the org.
-func (t *tools) refusal(err error) error {
-	if reconcile.IsNotOwner(err) {
-		return errors.New(reconcile.NotOwnerRefusal(t.org()))
-	}
-	return err
-}
-
-// stepLog forwards the engine's step lines to the server log.
-type stepLog struct {
-	log *slog.Logger
-	as  string
-}
-
-func (l stepLog) Write(b []byte) (int, error) {
-	l.log.Info(strings.TrimSpace(string(b)), "tool", ToolCreateRepository, "as", l.as)
-	return len(b), nil
-}
-
-// declaration plans the creation-only pull request: the entries inserted
+// declaration plans the declaration pull request: the entries inserted
 // into the team file read as the person, refused when one is declared
 // already. It writes nothing.
 func (t *tools) declaration(ctx context.Context, p *person, v *Validation, args map[string]any) (*Plan, error) {
@@ -520,18 +348,15 @@ func (t *tools) declaration(ctx context.Context, p *person, v *Validation, args 
 		notices = "\n\nNotices from the dry run:" + notices
 	}
 	pl.finish(p.repo, p.login, "reposetup/create-"+strings.Join(names, "-"), fmt.Sprintf("feat(repositories): declare %s for %s", strings.Join(names, ", "), team),
-		fmt.Sprintf("## Problem\n\nNew repositories of %s: `%s`.\n\n## Solution\n\nThe repositories exist — created and scaffolded as @%s before this pull request was opened, so %s:%s\n\nEntries added to `%s`; the reconciler sets the repositories up once this merges and never creates.%s\n\n%s\n\nOpened by giantswarm-repo-manager (`%s`) as the caller.",
-			team, strings.Join(names, "`, `"), p.login, FirstRelease, repos, tf.Path, notices, reasonLine(reason), ToolCreateRepository))
+		fmt.Sprintf("## Problem\n\nNew repositories of %s: `%s`.\n\n## Solution\n\nEntries added to `%s`. Once this merges, the reconciler creates the repositories as its App, pushes their scaffold (%s) and sets them up:%s%s\n\n%s\n\nOpened by giantswarm-repo-manager (`%s`) as @%s.",
+			team, strings.Join(names, "`, `"), tf.Path, FirstRelease, repos, notices, reasonLine(reason), ToolCreateRepository, p.login))
 	return pl, nil
 }
 
-// commitCreate creates the repositories as the person, in order: the dry
+// commitCreate opens the declaration pull request as the person: the dry
 // run and the pull request's plan (the refusals — the engine's, a taken
-// name, a declaration already there — before any write), then per entry the
-// engine's create step (the caller's role in the org read first; a non-owner
-// is refused with the engine's text) and scaffold step, then the pull
-// request. A step that fails ends the call with its cause; the next call
-// resumes where it stopped.
+// name, a declaration already there — before any write), then the pull
+// request. The reconciler creates the repositories once it merges.
 func (t *tools) commitCreate(ctx context.Context, args map[string]any) (any, error) {
 	p, err := t.person(ctx)
 	if err != nil {
@@ -548,32 +373,24 @@ func (t *tools) commitCreate(ctx context.Context, args map[string]any) (any, err
 				refused = append(refused, e.Name+": "+problemsText(e.Problems))
 			}
 		}
-		return nil, fmt.Errorf("the engine refuses the declaration: %s — fix it and run again (dryRun: true shows the rendered entries); nothing was created", strings.Join(refused, "; "))
+		return nil, fmt.Errorf("the engine refuses the declaration: %s — fix it and run again (dryRun: true shows the rendered entries); no pull request was opened", strings.Join(refused, "; "))
 	}
 	pl, err := t.declaration(ctx, p, v, args)
 	if err != nil {
 		return nil, err
 	}
-	runner := t.engine(ctx, p)
-	out := &Created{FirstRelease: FirstRelease}
-	for _, e := range v.Entries {
-		res, err := runner.Create(ctx, reconcile.CreateRequest{Owner: t.org(), Team: v.Team, Entry: e, Mode: reconcile.ModeRepair})
-		if err != nil {
-			return nil, t.refusal(err)
-		}
-		if failed := res.Failed(); len(failed) > 0 {
-			return nil, fmt.Errorf("%s: the %s step failed: %s — fix the cause and run again; the creation resumes where it stopped (a repository you administer is not created again, a scaffold on the default branch not pushed again)", res.Repository, failed[0].Step, failed[0].Summary)
-		}
-		out.Repositories = append(out.Repositories, CreatedRepository{Name: e.Name, Repository: res.URL, Created: res.Created, ScaffoldCommit: res.ScaffoldCommit, Steps: res.Steps})
-		t.d.Log.Info("repository created as the caller", "repository", res.Repository, "created", res.Created, "scaffoldCommit", res.ScaffoldCommit, "as", p.login)
-	}
 	committed, err := t.commit(ctx, p, pl)
 	if err != nil {
-		return nil, fmt.Errorf("the repositories stand, the pull request does not: %w — run again to open it", err)
+		return nil, err
 	}
-	out.Committed, out.Then = committed, createdThen
-	for i := range out.Repositories {
-		out.Repositories[i].PendingRun = t.expectRun(ctx, p, t.org()+"/"+out.Repositories[i].Name, inventory.ChangeCreated, committed.PullRequest)
+	out := &Created{Committed: committed, FirstRelease: FirstRelease, Then: createdThen}
+	for _, e := range v.Entries {
+		name := t.org() + "/" + e.Name
+		out.Repositories = append(out.Repositories, CreatedRepository{
+			Name:       e.Name,
+			Repository: "https://github.com/" + name,
+			PendingRun: t.expectRun(ctx, p, name, inventory.ChangeCreated, committed.PullRequest),
+		})
 	}
 	return out, nil
 }

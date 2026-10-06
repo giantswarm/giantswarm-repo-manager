@@ -4,11 +4,9 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"net/http"
 	"strings"
 
 	"github.com/giantswarm/devctl/v8/pkg/reposetup"
-	"github.com/google/go-github/v92/github"
 	"github.com/mark3labs/mcp-go/mcp"
 
 	"github.com/giantswarm/giantswarm-repo-manager/internal/inventory"
@@ -255,19 +253,4 @@ func insertEntries(team string, tf *teamfiles.TeamFile, ds []reposetup.Declarati
 		names = append(names, d.Name)
 	}
 	return content, names, nil
-}
-
-// initialOnly says whether the default branch of owner/name carries at most
-// one commit -- the initial README of a creation, or the scaffold the engine
-// makes the only commit -- read as the person: a creation interrupted after
-// the create or the scaffold step. A history is somebody's work.
-func initialOnly(ctx context.Context, c *github.Client, owner, name, branch string) (bool, error) {
-	commits, resp, err := c.Repositories.ListCommits(ctx, owner, name, &github.CommitsListOptions{SHA: branch, ListOptions: github.ListOptions{PerPage: 2}})
-	switch {
-	case err != nil && resp != nil && (resp.StatusCode == http.StatusConflict || resp.StatusCode == http.StatusNotFound):
-		return true, nil // no commit yet ("Git Repository is empty")
-	case err != nil:
-		return false, fmt.Errorf("read the history of %s/%s as you: %w", owner, name, err)
-	}
-	return len(commits) <= 1, nil
 }

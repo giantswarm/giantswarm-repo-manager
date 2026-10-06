@@ -95,12 +95,11 @@ func TestCreateDryRunOpensNothingAndApplyIsRefusedEverywhere(t *testing.T) {
 	}
 }
 
-// The writes of a creation, in order: the repository, its scaffold (the
-// branch moved to the scaffold commit), the declaration pull request.
+// The writes a creation must never make as the person: the repository and
+// its scaffold are the reconciler's, after the merge.
 var (
-	writeCreate   = "POST /api/v3/orgs/" + org + "/repos"
-	writeScaffold = "POST /api/v3/repos/" + org + "/shiny-service/git/commits"
-	writePull     = "POST /api/v3/repos/" + org + "/github/pulls"
+	writeCreate = "POST /api/v3/orgs/" + org + "/repos"
+	writePull   = "POST /api/v3/repos/" + org + "/github/pulls"
 )
 
 // index is where s first appears in list, -1 when it does not.
@@ -113,73 +112,63 @@ func index(list []string, s string) int {
 	return -1
 }
 
-// assertNoCreationWrites fails when any write of a creation happened.
-func assertNoCreationWrites(t *testing.T, st *stack) {
+// assertNoRepositoryWrites fails when the repository was created or written
+// as the person.
+func assertNoRepositoryWrites(t *testing.T, st *stack) {
 	t.Helper()
 	for _, w := range st.ghs.written() {
-		if w == writeCreate || strings.HasPrefix(w, "POST /api/v3/repos/"+org+"/shiny-service/") || w == writePull {
+		if w == writeCreate || strings.HasPrefix(w, "POST /api/v3/repos/"+org+"/shiny-service/") {
 			t.Errorf("written: %s", w)
 		}
 	}
-	if st.ghs.repos.get(shinyService) != nil && len(st.ghs.repos.get(shinyService).files) != 1 {
-		t.Errorf("shiny-service changed: %v", st.ghs.repos.get(shinyService).files)
+	if st.ghs.repos.get(shinyService) != nil {
+		t.Errorf("shiny-service exists: %+v", st.ghs.repos.get(shinyService))
 	}
 }
 
-// TestCreateCommitCreatesScaffoldsThenOpensThePullRequestAsThePerson: alice
-// (an owner of the org) gets the repository created as her — she administers
-// it — its scaffold pushed as one commit on main, and then the creation-only
-// pull request under her name, in that order; the result names all three.
-func TestCreateCommitCreatesScaffoldsThenOpensThePullRequestAsThePerson(t *testing.T) {
+// TestCreateCommitOpensTheDeclarationAsThePerson: alice gets the declaration
+// pull request under her name and nothing else; the repository is the
+// reconciler's to create once it merges. The result names the pull request
+// and the repository to come.
+func TestCreateCommitOpensTheDeclarationAsThePerson(t *testing.T) {
 	st := newStack(t)
 	var out tools.Created
 	st.callJSON(t, st.as(t, aliceToken), tools.ToolCreateRepository, map[string]any{argMode: modeCommit, argTeam: team, argEntry: newEntry, argReason: "the shiny thing"}, &out)
 
-	repo := st.ghs.repos.get(shinyService)
-	if repo == nil || !repo.admins[alice] {
-		t.Fatalf("shiny-service created as alice: %+v", repo)
-	}
-	if !repo.private {
-		t.Error("shiny-service declares no visibility: it must be created private, the org's default")
-	}
-	// The declared entry carries the opt-in and the private default, in the
-	// team files' key order.
-	if file := string(st.ghs.files.pullRequests()[0].Files["repositories/"+team+".yaml"]); !strings.Contains(file, "- name: "+shinyService+"\n  componentType: "+kService+"\n  visibility: private\n  align: true\n  gen:\n") {
-		t.Errorf("the creation pull request's entry should be opted in:\n%s", file)
-	}
-	if _, ok := repo.files["CODEOWNERS"]; !ok || repo.files[readmeFile] != scaffoldFiles[readmeFile] {
-		t.Errorf("the scaffold replaced the initial README: %v", repo.files)
-	}
-	if len(out.Repositories) != 1 || !out.Repositories[0].Created || out.Repositories[0].Repository != "https://github.com/"+org+"/shiny-service" ||
-		out.Repositories[0].ScaffoldCommit == "" || out.Repositories[0].ScaffoldCommit != repo.head || out.FirstRelease != tools.FirstRelease {
-		t.Errorf("result: %+v (head %s)", out.Repositories, repo.head)
-	}
-	if steps := out.Repositories[0].Steps; len(steps) != 2 || steps[0].Step != reconcile.StepCreate || steps[0].Verdict != reconcile.VerdictRepaired ||
-		steps[1].Step != reconcile.StepScaffold || steps[1].Verdict != reconcile.VerdictRepaired {
-		t.Errorf("steps: %+v", steps)
-	}
+	assertNoRepositoryWrites(t, st)
 	prs := st.ghs.files.pullRequests()
 	if len(prs) != 1 || out.PullRequest == nil || out.PullRequest.Number != prs[0].Number || prs[0].Author != alice || out.PullRequest.Author != alice || out.PullRequest.Existing {
 		t.Fatalf("pull request as alice: %+v %+v", out.PullRequest, prs)
 	}
+	if len(out.Repositories) != 1 || out.Repositories[0].Repository != "https://github.com/"+org+"/shiny-service" || out.FirstRelease != tools.FirstRelease {
+		t.Errorf("result: %+v", out.Repositories)
+	}
 	pr := prs[0]
 	file := string(pr.Files["repositories/"+team+".yaml"])
-	if !strings.Contains(pr.Title, "declare shiny-service for "+team) || !strings.Contains(file, "- name: shiny-service") || !strings.Contains(file, "- name: "+repoPresent) ||
-		!strings.Contains(pr.Body, "the shiny thing") || !strings.Contains(pr.Body, "team="+team) || !strings.Contains(pr.Body, "created and scaffolded as @"+alice) || !strings.Contains(pr.Body, "never creates") {
+	// The declared entry carries the opt-in and the private default, in the
+	// team files' key order.
+	if !strings.Contains(file, "- name: "+shinyService+"\n  componentType: "+kService+"\n  visibility: private\n  align: true\n  gen:\n") {
+		t.Errorf("the creation pull request's entry should be opted in:\n%s", file)
+	}
+	if !strings.Contains(pr.Title, "declare shiny-service for "+team) || !strings.Contains(file, "- name: "+repoPresent) ||
+		!strings.Contains(pr.Body, "the shiny thing") || !strings.Contains(pr.Body, "team="+team) || !strings.Contains(pr.Body, "the reconciler creates the repositories as its App") {
 		t.Errorf("pull request: %q\n%s\n%s", pr.Title, pr.Body, file)
 	}
-	w := st.ghs.written()
-	if c, s, p := index(w, writeCreate), index(w, writeScaffold), index(w, writePull); c < 0 || s < c || p < s {
-		t.Errorf("order create → scaffold → pull request: %v", w)
+
+	// A second commit reports the open pull request and opens no other.
+	var again tools.Created
+	st.callJSON(t, st.as(t, aliceToken), tools.ToolCreateRepository, map[string]any{argMode: modeCommit, argTeam: team, argEntry: newEntry}, &again)
+	if again.PullRequest == nil || !again.PullRequest.Existing || again.PullRequest.Number != pr.Number || len(st.ghs.files.pullRequests()) != 1 {
+		t.Errorf("second run: %+v", again.PullRequest)
 	}
+	assertNoRepositoryWrites(t, st)
 }
 
-// TestCreateDryRunPlansTheThreeWrites: the dry run names the create and
-// scaffold steps the engine would run as alice (a Go service with the app
-// flavour scaffolds with template-app's chart at helm/<name>) and the pull
-// request with the reason in its body, and writes nothing; validate_repository takes the
-// same arguments and carries the same plan, without a reason as before.
-func TestCreateDryRunPlansTheThreeWrites(t *testing.T) {
+// TestCreateDryRunPlansThePullRequest: the dry run plans the declaration pull
+// request with the reason in its body and writes nothing; validate_repository
+// takes the same arguments and carries the same plan, without a reason as
+// before.
+func TestCreateDryRunPlansThePullRequest(t *testing.T) {
 	st := newStack(t)
 	c := st.as(t, aliceToken)
 	for _, tool := range []string{tools.ToolCreateRepository, tools.ToolValidateRepository} {
@@ -190,45 +179,33 @@ func TestCreateDryRunPlansTheThreeWrites(t *testing.T) {
 		}
 		var v tools.Validation
 		st.callJSON(t, c, tool, map[string]any{argDryRun: true, argTeam: team, argEntry: newEntry, argReason: "the shiny thing"}, &v)
-		if !v.Accepted || v.Creation == nil || v.Creation.Refusal != "" || len(v.Creation.Repositories) != 1 || v.Creation.PullRequest == nil {
+		if !v.Accepted || v.Creation == nil || v.Creation.Refusal != "" || v.Creation.PullRequest == nil {
 			t.Fatalf("%s: creation plan: %+v", tool, v.Creation)
-		}
-		steps := v.Creation.Repositories[0].Steps
-		if len(steps) != 2 || steps[0].Step != reconcile.StepCreate || steps[0].Verdict != reconcile.VerdictDrift || len(steps[0].Changes) != 1 || !strings.Contains(steps[0].Changes[0], "create "+org+"/shiny-service") ||
-			steps[1].Step != reconcile.StepScaffold || steps[1].Verdict != reconcile.VerdictDrift || len(steps[1].Changes) != 1 || !strings.Contains(steps[1].Changes[0], "push it as the first commit") ||
-			!strings.Contains(steps[1].Changes[0], "with the chart of "+string(reposetup.TemplateChart)+" at helm/"+shinyService) {
-			t.Errorf("%s: steps: %+v", tool, steps)
 		}
 		if pr := v.Creation.PullRequest; pr.Repository != org+"/github" || pr.Branch != "reposetup/create-shiny-service" || pr.As != alice || len(pr.Files) != 1 || !strings.Contains(pr.Body, "\n\nReason: the shiny thing\n\n") {
 			t.Errorf("%s: pull request plan: %+v", tool, pr)
 		}
 	}
-	assertNoCreationWrites(t, st)
-	if st.ghs.repos.get(shinyService) != nil || len(st.ghs.files.pullRequests()) != 0 {
-		t.Error("the dry run wrote")
+	assertNoRepositoryWrites(t, st)
+	if len(st.ghs.files.pullRequests()) != 0 {
+		t.Error("the dry run opened a pull request")
 	}
 }
 
-// TestCreateRefusesANonOwnerBeforeAnyWrite: dave is a member, not an owner,
-// of the org; the dry run says so with the engine's text, the commit is
-// refused with the same text and nothing is written.
-func TestCreateRefusesANonOwnerBeforeAnyWrite(t *testing.T) {
+// TestCreateNeedsNoOwnerRole: dave is a member, not an owner, of the org; his
+// declaration pull request is opened all the same, since the reconciler
+// creates the repository.
+func TestCreateNeedsNoOwnerRole(t *testing.T) {
 	st := newStack(t)
-	c := st.as(t, daveToken)
-	want := reconcile.NotOwnerRefusal(org)
-	var v tools.Validation
-	st.callJSON(t, c, tools.ToolValidateRepository, map[string]any{argTeam: team, argEntry: newEntry}, &v)
-	if v.Creation == nil || v.Creation.Refusal != want || len(v.Creation.Repositories) != 0 {
-		t.Errorf("dry run for a non-owner: %+v", v.Creation)
+	var out tools.Created
+	st.callJSON(t, st.as(t, daveToken), tools.ToolCreateRepository, map[string]any{argMode: modeCommit, argTeam: team, argEntry: newEntry}, &out)
+	if prs := st.ghs.files.pullRequests(); len(prs) != 1 || prs[0].Author != dave || out.PullRequest == nil {
+		t.Errorf("pull request as dave: %+v %+v", out.PullRequest, prs)
 	}
-	text, isErr := call(t, c, tools.ToolCreateRepository, map[string]any{argMode: modeCommit, argTeam: team, argEntry: newEntry})
-	if !isErr || !strings.Contains(text, want) {
-		t.Errorf("commit for a non-owner: isError=%v %s", isErr, text)
+	if w := st.ghs.written(); index(w, writePull) < 0 {
+		t.Errorf("no pull request written: %v", w)
 	}
-	assertNoCreationWrites(t, st)
-	if st.ghs.repos.get(shinyService) != nil || len(st.ghs.files.pullRequests()) != 0 {
-		t.Error("a non-owner's creation wrote")
-	}
+	assertNoRepositoryWrites(t, st)
 }
 
 // TestCreateRefusesATakenNameBeforeAnyWrite: shiny-service exists and is
@@ -237,62 +214,11 @@ func TestCreateRefusesATakenNameBeforeAnyWrite(t *testing.T) {
 	st := newStack(t)
 	st.ghs.repos.add(shinyService, "mallory")
 	text, isErr := call(t, st.as(t, aliceToken), tools.ToolCreateRepository, map[string]any{argMode: modeCommit, argTeam: team, argEntry: newEntry})
-	if !isErr || !strings.Contains(text, "the engine refuses the declaration") || !strings.Contains(text, "shiny-service: name:") || !strings.Contains(text, "nothing was created") {
+	if !isErr || !strings.Contains(text, "the engine refuses the declaration") || !strings.Contains(text, "shiny-service: name:") || !strings.Contains(text, "no pull request was opened") {
 		t.Errorf("taken name: isError=%v %s", isErr, text)
 	}
-	assertNoCreationWrites(t, st)
 	if len(st.ghs.files.pullRequests()) != 0 {
 		t.Error("a refused creation opened a pull request")
-	}
-}
-
-// TestCreateResumesAfterAPartialFailure: shiny-service exists, alice
-// administers it and only the README of its creation is on main — a creation
-// that stopped after the create step. The dry run resumes it (validated for
-// an existing repository); the commit skips the create step, pushes the
-// scaffold and opens the pull request; a second commit reports the open pull
-// request and writes nothing.
-func TestCreateResumesAfterAPartialFailure(t *testing.T) {
-	st := newStack(t)
-	st.ghs.repos.add(shinyService, alice)
-	c := st.as(t, aliceToken)
-
-	var v tools.Validation
-	st.callJSON(t, c, tools.ToolCreateRepository, map[string]any{argDryRun: true, argTeam: team, argEntry: newEntry}, &v)
-	if !v.Accepted || v.Creation == nil || len(v.Creation.Resumed) != 1 || v.Creation.Resumed[0] != shinyService || v.Creation.Repositories[0].Repository == "" {
-		t.Fatalf("resumed dry run: accepted=%v %+v", v.Accepted, v.Creation)
-	}
-	if steps := v.Creation.Repositories[0].Steps; steps[0].Summary != "exists" || steps[1].Verdict != reconcile.VerdictDrift {
-		t.Errorf("resumed plan: %+v", steps)
-	}
-
-	var out tools.Created
-	st.callJSON(t, c, tools.ToolCreateRepository, map[string]any{argMode: modeCommit, argTeam: team, argEntry: newEntry}, &out)
-	repo := st.ghs.repos.get(shinyService)
-	if len(out.Repositories) != 1 || out.Repositories[0].Created || out.Repositories[0].ScaffoldCommit != repo.head || out.Repositories[0].Steps[0].Summary != "exists" ||
-		out.Repositories[0].Steps[1].Verdict != reconcile.VerdictRepaired {
-		t.Errorf("resumed commit: %+v (head %s)", out.Repositories, repo.head)
-	}
-	if _, ok := repo.files["CODEOWNERS"]; !ok {
-		t.Errorf("the scaffold was pushed: %v", repo.files)
-	}
-	if w := st.ghs.written(); index(w, writeCreate) >= 0 || index(w, writeScaffold) < 0 || index(w, writePull) < index(w, writeScaffold) {
-		t.Errorf("resume: no create, scaffold then pull request: %v", w)
-	}
-	prs := st.ghs.files.pullRequests()
-	if len(prs) != 1 || out.PullRequest == nil || out.PullRequest.Existing {
-		t.Fatalf("pull request: %+v %+v", out.PullRequest, prs)
-	}
-
-	before := len(st.ghs.written())
-	var again tools.Created
-	st.callJSON(t, c, tools.ToolCreateRepository, map[string]any{argMode: modeCommit, argTeam: team, argEntry: newEntry}, &again)
-	if again.Repositories[0].Created || again.Repositories[0].Steps[1].Summary != "present" || again.Repositories[0].ScaffoldCommit != repo.head ||
-		again.PullRequest == nil || !again.PullRequest.Existing || again.PullRequest.Number != prs[0].Number || again.PullRequest.Author != alice {
-		t.Errorf("second run: %+v %+v", again.Repositories, again.PullRequest)
-	}
-	if len(st.ghs.files.pullRequests()) != 1 || len(st.ghs.written()) != before {
-		t.Errorf("second run wrote: %v", st.ghs.written()[before:])
 	}
 }
 

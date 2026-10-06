@@ -279,8 +279,8 @@ func (c *Collector) Sweep(ctx context.Context) (*inventory.SweepSummary, error) 
 			want[key(n)] = true
 		}
 		var stale []string
-		for k := range old {
-			if !want[k] {
+		for k, r := range old {
+			if !want[k] && !r.AwaitsCreation() {
 				stale = append(stale, k)
 			}
 		}
@@ -477,6 +477,9 @@ func (c *Collector) Refresh(ctx context.Context, repository string, run *invento
 		return nil, err
 	}
 	if node == nil && src.declarations[name] == nil {
+		if old != nil && old.AwaitsCreation() {
+			return old, nil
+		}
 		if old != nil {
 			_ = c.store.Delete(ctx, key)
 		}

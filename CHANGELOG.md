@@ -9,6 +9,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- `repo status`'s `circleci` line (`setup.checks`) is the reconciler run's own summary when its step left one — the
+  settings, the repository's deploy keys on GitHub as the run read them (`deploy keys on GitHub: CircleCI (read-only)`,
+  devctl 8.116.0) and the webhook — instead of fixed words that dropped the keys; a repaired step, which leaves no
+  summary, keeps the composed words. The webhook is read as present from a summary that ends on it whatever else the
+  step could not read (an `unchecked` finding on the deploy keys no longer hides a verified webhook).
+
 ### Added
 
 - Every planned message (`ask`, `notice`) and every delivery reports `channelName`, the name of the team's channel,

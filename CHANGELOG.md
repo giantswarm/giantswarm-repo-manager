@@ -55,6 +55,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- A release step the engine skipped for another reason than a missing CircleCI client (no CircleCI pipeline, an
+  archived repository, a tag not vX.Y.Z) stays skipped when the release watch settles: a repository built by GitHub
+  Actions alone had read `unchecked` after a new release and `missed-tag-build` from the next read on.
 - The engine check compares CODEOWNERS with the repository's align-files override
   (`repositories/override/<repository>/CODEOWNERS` in giantswarm/github) when it has one: a repository whose CODEOWNERS
   is exactly its override had read *not in sync* against the generated single-team file. A sweep and a refresh list the

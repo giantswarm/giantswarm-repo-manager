@@ -55,6 +55,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- A reconciler run that read the tag's own pipeline built decides the release step ahead of the tag commit's
+  statuses: a private repository whose tag built, with a branch pipeline at the same commit failing a job the tag
+  runs too, had read `unchecked`, so *not in sync*, until its next release.
 - A release step the engine skipped for another reason than a missing CircleCI client (no CircleCI pipeline, an
   archived repository, a tag not vX.Y.Z) stays skipped when the release watch settles: a repository built by GitHub
   Actions alone had read `unchecked` after a new release and `missed-tag-build` from the next read on.

@@ -232,14 +232,15 @@ func jobs(s *inventory.HeadStatus) string {
 // CircleCI, which the commit's statuses cannot tell from a branch
 // pipeline's at the same commit. Else the tag commit's `ci/circleci:`
 // statuses say whether CircleCI built the release, read against the
-// declaration (statusesReleaseStep) — except while none of the jobs only
-// the tag pipeline runs has reported there (inventory.CI.TagOnly): a
-// release cut on the default branch head carries that branch's pipeline's
-// statuses too, and the reconciler run that named the tag unbuilt or red,
-// having read the tag's own pipeline with its token, decides then. The run
-// also stands in while the commit carries no status; a commit without any
-// CircleCI status is the missed tag build the engine reports (finding
-// missed-tag-build).
+// declaration (statusesReleaseStep) — except where the reconciler run read
+// the tag's own pipeline with its token: a run that read it built decides,
+// since a branch pipeline at the same commit leaves statuses no one can
+// attribute; a run that named the tag unbuilt or red decides while none of
+// the jobs only the tag pipeline runs has reported on the commit
+// (inventory.CI.TagOnly), since a release cut on the default branch head
+// carries that branch's pipeline's statuses too. The run also stands in
+// while the commit carries no status; a commit without any CircleCI status
+// is the missed tag build the engine reports (finding missed-tag-build).
 func releaseStep(slug, tag, branch string, rel *inventory.Release, ci *inventory.CI, last *inventory.LastRun, w *inventory.ReleaseWatch) reconcile.StepResult {
 	sr := reconcile.StepResult{Step: reconcile.StepRelease}
 	if w != nil && w.Tag == tag {
@@ -253,7 +254,7 @@ func releaseStep(slug, tag, branch string, rel *inventory.Release, ci *inventory
 	}
 	if rel != nil && rel.Tag == tag && rel.Build != nil {
 		tagOnly := ci.TagOnly(tag, branch)
-		if run != nil && unbuilt(run) && !inventory.Reported(rel.Build.Contexts, tagOnly) {
+		if run != nil && (built(run, tag) || unbuilt(run) && !inventory.Reported(rel.Build.Contexts, tagOnly)) {
 			return runReleaseStep(run, last, tag)
 		}
 		return statusesReleaseStep(slug, tag, rel.Build, ci, tagOnly)
@@ -300,6 +301,14 @@ func runReleaseStep(run *reconcile.StepResult, last *inventory.LastRun, tag stri
 		sr.Summary = run.Summary + from
 	}
 	return sr
+}
+
+// built says whether the run's release step read the tag's own pipeline
+// green: the engine's summary `release <tag> built: pipeline <n>, …`
+// without a finding. A pipeline it read running is no verdict.
+func built(run *reconcile.StepResult, tag string) bool {
+	return run.Verdict == reconcile.VerdictOK && len(run.Findings) == 0 &&
+		strings.HasPrefix(run.Summary, "release "+tag+" built: pipeline ")
 }
 
 // unbuilt says whether the run's release step found the tag not built: the

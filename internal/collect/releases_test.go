@@ -268,7 +268,7 @@ func TestReleaseStepFromTheWatch(t *testing.T) {
 
 	// rewriteReleaseStep writes the stored checks' release step from the
 	// watch and recomputes the record's findings and convergence.
-	rec := &inventory.Record{Repository: slug, Name: "x", Declaration: &inventory.Declaration{Team: "team-bumblebee"}, Reality: &inventory.Reality{LatestRelease: statuses},
+	rec := &inventory.Record{Repository: slug, Name: "x", Declaration: &inventory.Declaration{Team: teamBumblebee}, Reality: &inventory.Reality{LatestRelease: statuses},
 		Setup: inventory.Setup{Release: watch(inventory.ReleaseBuilt), Checks: &reconcile.Result{Converged: false, Steps: []reconcile.StepResult{
 			{Step: reconcile.StepSettings, Verdict: reconcile.VerdictOK},
 			{Step: reconcile.StepRelease, Verdict: reconcile.VerdictReported, Summary: "release v1.2.0: CircleCI failure", Findings: []reconcile.Finding{{Kind: reconcile.FindingRedRelease}}},
@@ -283,6 +283,8 @@ func TestReleaseStepFromTheWatch(t *testing.T) {
 		t.Errorf("after: step=%+v findings=%+v converged=%v", sr, rec.Findings, rec.Setup.Checks.Converged)
 	}
 }
+
+const teamBumblebee = "team-bumblebee"
 
 // TestReleaseStepWithoutPipeline: on a repository without a CircleCI
 // pipeline (GitHub Actions only) the engine skips the release step, and it
@@ -312,7 +314,7 @@ func TestReleaseStepWithoutPipeline(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			rec := &inventory.Record{Repository: slug, Name: "x", Declaration: &inventory.Declaration{Team: "team-bumblebee"},
+			rec := &inventory.Record{Repository: slug, Name: "x", Declaration: &inventory.Declaration{Team: teamBumblebee},
 				Reality: &inventory.Reality{DefaultBranch: mainBranch, LatestRelease: tc.latest}}
 			res := checks(tc.engine)
 			fillClientlessSteps(res, rec)

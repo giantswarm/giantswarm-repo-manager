@@ -23,7 +23,7 @@ func TestRenovateStateReadsOnlyTheTopLevelEnabled(t *testing.T) {
 
 func TestCodeownersTeamsAndBots(t *testing.T) {
 	got := codeownersTeams("giantswarm", "* @giantswarm/team-bumblebee @giantswarm/Team-Rocket\n", "/docs @other-org/docs\n")
-	if want := []string{"team-bumblebee", "team-rocket"}; !reflect.DeepEqual(got, want) {
+	if want := []string{teamBumblebee, "team-rocket"}; !reflect.DeepEqual(got, want) {
 		t.Errorf("codeowners: %v", got)
 	}
 	for _, tc := range []struct {

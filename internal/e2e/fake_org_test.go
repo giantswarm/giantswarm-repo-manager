@@ -26,6 +26,7 @@ const (
 	kAuthor          = "author"
 	kCommittedDate   = "committedDate"
 	kCreatedAt       = "createdAt"
+	kPublishedAt     = "publishedAt"
 	kNodes           = "nodes"
 	kNumber          = "number"
 	kRepository      = "repository"
@@ -158,11 +159,18 @@ func (o *fakeOrg) releasePage() []map[string]any {
 			if rel.pr != 0 {
 				prs = append(prs, map[string]any{kNumber: rel.pr, kURL: fmt.Sprintf("https://github.com/%s/%s/pull/%d", org, name, rel.pr)})
 			}
-			n["latestRelease"] = map[string]any{kTagName: rel.tag, kCreatedAt: rel.createdAt.UTC().Format(time.RFC3339),
-				kTagCommit: map[string]any{kOID: "a80db8ff", "associatedPullRequests": map[string]any{kNodes: prs}}}
+			// The tag commit's statuses as the repository's read has them:
+			// the private repository's two pipelines, none on the others.
+			var rollup map[string]any
+			if name == repoLegacy && o.private[repoLegacy] {
+				rollup = o.mixedRollup()
+			}
+			n["latestRelease"] = map[string]any{kTagName: rel.tag, kCreatedAt: rel.createdAt.UTC().Format(time.RFC3339), kPublishedAt: rel.createdAt.UTC().Format(time.RFC3339),
+				kTagCommit: map[string]any{kOID: "a80db8ff", "associatedPullRequests": map[string]any{kNodes: prs}, kStatusRollup: rollup}}
 		case name == repoPresent:
-			n["latestRelease"] = map[string]any{kTagName: presentTag, kCreatedAt: o.now.AddDate(0, -1, 0).Format(time.RFC3339),
-				kTagCommit: map[string]any{kOID: "0ld", "associatedPullRequests": map[string]any{kNodes: []any{}}}}
+			published := o.now.AddDate(0, -1, 0).Format(time.RFC3339)
+			n["latestRelease"] = map[string]any{kTagName: presentTag, kCreatedAt: published, kPublishedAt: published,
+				kTagCommit: map[string]any{kOID: "0ld", "associatedPullRequests": map[string]any{kNodes: []any{}}, kStatusRollup: o.releaseRollup()}}
 		default:
 			n["latestRelease"] = nil
 		}
@@ -267,7 +275,7 @@ func (o *fakeOrg) node(name string) map[string]any {
 	switch name {
 	case repoPresent:
 		n := base(false)
-		n["latestRelease"] = map[string]any{kTagName: presentTag, "publishedAt": o.now.AddDate(0, -1, 0).Format(time.RFC3339), kTagCommit: map[string]any{kStatusRollup: o.releaseRollup()}}
+		n["latestRelease"] = map[string]any{kTagName: presentTag, kPublishedAt: o.now.AddDate(0, -1, 0).Format(time.RFC3339), kTagCommit: map[string]any{kStatusRollup: o.releaseRollup()}}
 		n["oldestIssues"] = map[string]any{kNodes: []map[string]any{{kNumber: 3, kTitle: "Dependency Dashboard"}}}
 		n["openPRs"] = map[string]any{kTotalCount: 2, kNodes: []map[string]any{
 			{kNumber: 10, kTitle: "fix(deps): update module x", kCreatedAt: o.now.AddDate(0, 0, -2).Format(time.RFC3339), kHeadRefName: "renovate/x", kAuthor: map[string]any{kLogin: renovateLogin}},
@@ -298,7 +306,7 @@ func (o *fakeOrg) node(name string) map[string]any {
 			// which two pipelines posted, against the generated pipeline.
 			n["visibility"] = "PRIVATE"
 			n["ciWorkflows"] = map[string]any{kText: fakeCIWorkflowsFiltered}
-			n["latestRelease"] = map[string]any{kTagName: legacyTag, "publishedAt": o.now.Add(-time.Minute).Format(time.RFC3339), kTagCommit: map[string]any{kStatusRollup: o.mixedRollup()}}
+			n["latestRelease"] = map[string]any{kTagName: legacyTag, kPublishedAt: o.now.Add(-time.Minute).Format(time.RFC3339), kTagCommit: map[string]any{kStatusRollup: o.mixedRollup()}}
 		}
 		return n
 	case repoArchived:

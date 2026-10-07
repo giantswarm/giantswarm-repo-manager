@@ -54,7 +54,11 @@ fire — posts a fresh ask to the deciding team's channel, once, whose Approve r
 **Existing entries are held to the schema, not the creation rules.** `gen.flavours`, `gen.language` and
 `gen.ci.generate` are mandatory for an entry the reconciler *creates*; for a declared repository the
 inventory validates the entry against the schema alone (the engine's checks then run for it), and the
-creation rules appear only in `validate_repository`'s dry run for an added entry.
+creation rules appear only in `validate_repository`'s dry run for an added entry. The schema is the one
+the team file declares — `.github/repositories.schema.json` beside the team files, read at the same
+commit — not the copy embedded in the manager's devctl: an entry using a field of a newer devctl release
+converges, with the advisory finding `entry-field-unknown` naming the fields the engine's checks do not
+cover; a malformed entry stays `entry-refused`.
 
 **Asks and messages go through Swarmgeist.** Lifecycle and transfer asks — naming the asking person — are
 posted to klaus-gateway's team-review endpoint (`POST /reviews`, an Approve button calling `approve_change`

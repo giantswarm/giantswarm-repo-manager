@@ -126,9 +126,11 @@ func run(ctx context.Context, o *options, log *slog.Logger) error {
 	if err != nil {
 		return err
 	}
-	// The one repositories schema of the process: the copy embedded in the
-	// engine's devctl version, validated against by the tools and the
-	// collector alike and reported by get_info.
+	// The engine's own repositories schema, the copy embedded in its devctl
+	// version: the tools validate against it and get_info reports it; the
+	// collector validates a declaration with the schema its team file
+	// declares, read beside the team files, and holds the engine's copy to
+	// name the fields of an entry the engine does not know.
 	schema, err := reposetup.EmbeddedSchema()
 	if err != nil {
 		return fmt.Errorf("repositories schema: %w", err)

@@ -234,7 +234,7 @@ Read-only. The inventory of the org's repositories from the store: one row per r
       "type": "string"
     },
     "finding": {
-      "description": "Only repositories with a finding of this kind (declared-but-gone, undeclared-on-github, entry-refused, gen-circleci-refused, default-icon, …).",
+      "description": "Only repositories with a finding of this kind (declared-but-gone, undeclared-on-github, entry-refused, gen-circleci-refused, entry-field-unknown, default-icon, …).",
       "type": "string"
     },
     "fork": {

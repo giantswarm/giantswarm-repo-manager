@@ -149,7 +149,7 @@ func TestInventoryToolsAndReconcilerRefresh(t *testing.T) {
 		t.Errorf("a row carries orphan or decision: %v", raw["repositories"])
 	}
 	var gone tools.Listing
-	st.callJSON(t, c, tools.ToolListRepositories, map[string]any{"finding": inventory.FindingDeclaredButGone}, &gone)
+	st.callJSON(t, c, tools.ToolListRepositories, map[string]any{argFinding: inventory.FindingDeclaredButGone}, &gone)
 	if gone.Matched != 1 || gone.Repositories[0].Repository != org+"/"+repoGone || !gone.Repositories[0].Gone {
 		t.Errorf("list gone: %+v", gone.Repositories)
 	}
@@ -286,7 +286,7 @@ func TestADeletedEntryIsTheRecord(t *testing.T) {
 	}
 	c := st.as(t, aliceToken)
 	var rows tools.Listing
-	st.callJSON(t, c, tools.ToolListRepositories, map[string]any{"finding": inventory.FindingDeclaredButGone}, &rows)
+	st.callJSON(t, c, tools.ToolListRepositories, map[string]any{argFinding: inventory.FindingDeclaredButGone}, &rows)
 	if rows.Matched != 1 || rows.Repositories[0].Repository != org+"/"+repoGone {
 		t.Errorf("finding declared-but-gone: %+v", rows.Repositories)
 	}

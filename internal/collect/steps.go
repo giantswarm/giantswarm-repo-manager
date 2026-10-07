@@ -69,8 +69,25 @@ func rewriteReleaseStep(rec *inventory.Record) {
 	if sr == nil || (sr.Verdict == reconcile.VerdictSkipped && !clientless(sr)) {
 		return
 	}
-	*sr = releaseStep(rec.Repository, w.Tag, rec.Reality.DefaultBranch, rec.Reality.LatestRelease, rec.CI, rec.Setup.LastRun, w)
+	*sr = releaseStep(rec.Repository, latestTag(rec.Reality.LatestRelease, w), rec.Reality.DefaultBranch, rec.Reality.LatestRelease, rec.CI, rec.Setup.LastRun, w)
 	converge(rec.Setup.Checks)
+}
+
+// latestTag is the newer of the watch's tag and the one the record read: a
+// read after the watch's release — the watch's lookback passed it by — names
+// the release the step is about.
+func latestTag(rel *inventory.Release, w *inventory.ReleaseWatch) string {
+	if rel != nil && rel.Tag != w.Tag && rel.PublishedAt.After(w.CreatedAt) {
+		return rel.Tag
+	}
+	return w.Tag
+}
+
+// pendingRead says whether tag is a release the watch followed and the
+// record has not read yet: no latest release, or one published before the
+// tag was created. The watch re-reads the release within its pass.
+func pendingRead(tag string, rel *inventory.Release, w *inventory.ReleaseWatch) bool {
+	return w != nil && w.Tag == tag && (rel == nil || rel.Tag != tag && rel.PublishedAt.Before(w.CreatedAt))
 }
 
 // finding is a finding of kind with its message and fix, advisory as the
@@ -254,7 +271,10 @@ func jobs(s *inventory.HeadStatus) string {
 // (inventory.CI.TagOnly), since a release cut on the default branch head
 // carries that branch's pipeline's statuses too. The run also stands in
 // while the commit carries no status; a commit without any CircleCI status
-// is the missed tag build the engine reports (finding missed-tag-build).
+// is the missed tag build the engine reports (finding missed-tag-build). A
+// tag the watch followed that the record has not read yet is pending —
+// converged as before — until the watch's re-read of the release lands, and
+// so is a tag without a status the watch still waits on within its grace.
 func releaseStep(slug, tag, branch string, rel *inventory.Release, ci *inventory.CI, last *inventory.LastRun, w *inventory.ReleaseWatch) reconcile.StepResult {
 	sr := reconcile.StepResult{Step: reconcile.StepRelease}
 	if w != nil && w.Tag == tag {
@@ -277,6 +297,10 @@ func releaseStep(slug, tag, branch string, rel *inventory.Release, ci *inventory
 		return runReleaseStep(run, last, tag)
 	}
 	switch {
+	case pendingRead(tag, rel, w):
+		// A release newer than the record: a pending state, not a finding.
+		sr.Verdict = reconcile.VerdictOK
+		sr.Summary = fmt.Sprintf("release %s: waiting for the inventory's read", tag)
 	case rel == nil || rel.Tag != tag:
 		latest := "none"
 		if rel != nil {
@@ -293,6 +317,11 @@ func releaseStep(slug, tag, branch string, rel *inventory.Release, ci *inventory
 		sr.Findings = []reconcile.Finding{finding(reconcile.FindingUnchecked,
 			fmt.Sprintf("whether CircleCI built the tag %s of %s is out of the inventory's reach: the commit's status contexts were truncated before a CircleCI one", tag, slug),
 			alignFix)}
+	case w != nil && w.Tag == tag && w.State == inventory.ReleaseWatching:
+		// The watch waits for the tag's pipeline within its grace period:
+		// no status yet is no missed build yet.
+		sr.Verdict = reconcile.VerdictOK
+		sr.Summary = fmt.Sprintf("release %s: waiting for the tag's pipeline", tag)
 	default:
 		sr.Verdict = reconcile.VerdictReported
 		sr.Summary = fmt.Sprintf("no CircleCI status on %s's commit: the tag was not built", tag)

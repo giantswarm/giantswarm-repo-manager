@@ -286,6 +286,90 @@ func TestReleaseStepFromTheWatch(t *testing.T) {
 
 const teamBumblebee = "team-bumblebee"
 
+// TestReleaseNewerThanTheRecord: a release the watch followed that the
+// record's last read predates is a pending state — converged stays as it
+// was — and the watch's page re-reads it into the record, so the release
+// step decides from the tag commit's statuses within the pass. A record that
+// read a newer release than the watch's names the step's tag; a tag the
+// watch waits on without any status within its grace is pending too.
+func TestReleaseNewerThanTheRecord(t *testing.T) {
+	const slug, tag = "giantswarm/x", "v1.2.0"
+	created := time.Date(2026, 10, 6, 21, 0, 0, 0, time.UTC)
+	older := &inventory.Release{Tag: "v1.1.0", PublishedAt: created.Add(-24 * time.Hour), Build: &inventory.HeadStatus{State: stateSuccess, Contexts: []string{releaseJob}, At: created.Add(-24 * time.Hour)}}
+	watch := func(state string) *inventory.ReleaseWatch {
+		return &inventory.ReleaseWatch{Tag: tag, CreatedAt: created, State: state, CheckedAt: created.Add(time.Minute)}
+	}
+	cases := []struct {
+		name    string
+		rel     *inventory.Release
+		w       *inventory.ReleaseWatch
+		summary string
+		finding reconcile.FindingKind
+	}{
+		{"an older release read, the watch without a pipeline yet", older, watch(inventory.ReleaseWatching), "release v1.2.0: waiting for the inventory's read", ""},
+		{"an older release read, a tag outside the watch's reach", older, watch(inventory.ReleaseUnchecked), "release v1.2.0: waiting for the inventory's read", ""},
+		{"no release read", nil, watch(inventory.ReleaseWatching), "release v1.2.0: waiting for the inventory's read", ""},
+		{"the tag read without a status, the watch within its grace", &inventory.Release{Tag: tag, PublishedAt: created}, watch(inventory.ReleaseWatching), "release v1.2.0: waiting for the tag's pipeline", ""},
+		{"the tag read without a status, the watch settled it unchecked", &inventory.Release{Tag: tag, PublishedAt: created}, watch(inventory.ReleaseUnchecked), "the tag was not built", reconcile.FindingMissedTagBuild},
+		{"a newer release read than the step's tag", &inventory.Release{Tag: "v1.3.0", PublishedAt: created.Add(time.Hour)}, watch(inventory.ReleaseWatching), "not the latest release the inventory read (v1.3.0)", reconcile.FindingUnchecked},
+		{"no watch: the record's read decides", older, nil, "not the latest release the inventory read (v1.1.0)", reconcile.FindingUnchecked},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			sr := releaseStep(slug, tag, mainBranch, tc.rel, nil, nil, tc.w)
+			if !strings.Contains(sr.Summary, tc.summary) {
+				t.Errorf("summary=%q, want it containing %q", sr.Summary, tc.summary)
+			}
+			switch {
+			case tc.finding == "" && (sr.Verdict != reconcile.VerdictOK || len(sr.Findings) != 0 || !sr.Converges()):
+				t.Errorf("verdict=%s findings=%+v, want ok without a finding", sr.Verdict, sr.Findings)
+			case tc.finding != "" && (len(sr.Findings) != 1 || sr.Findings[0].Kind != tc.finding):
+				t.Errorf("findings=%+v, want one %s", sr.Findings, tc.finding)
+			}
+		})
+	}
+
+	// The record of a converged repository whose release was cut after its
+	// last read: pending and converged, then the watch's page carries the
+	// tag with its commit's statuses and the step decides from them.
+	rec := &inventory.Record{Repository: slug, Name: "x", Declaration: &inventory.Declaration{Team: teamBumblebee},
+		Reality: &inventory.Reality{DefaultBranch: mainBranch, LatestRelease: older},
+		Setup: inventory.Setup{Release: watch(inventory.ReleaseUnchecked), Checks: &reconcile.Result{Converged: true, Steps: []reconcile.StepResult{
+			{Step: reconcile.StepSettings, Verdict: reconcile.VerdictOK},
+			{Step: reconcile.StepRelease, Verdict: reconcile.VerdictOK, Summary: "release v1.1.0 built: CircleCI success"},
+		}}}}
+	rewriteReleaseStep(rec)
+	rec.Finalize()
+	if sr := rec.Setup.Checks.Step(reconcile.StepRelease); !strings.Contains(sr.Summary, "waiting for the inventory's read") || !rec.Setup.Checks.Converged || len(rec.Findings) != 0 {
+		t.Errorf("pending: step=%+v converged=%v findings=%+v", sr, rec.Setup.Checks.Converged, rec.Findings)
+	}
+	var node releaseNode
+	if err := json.Unmarshal([]byte(`{"name":"x","latestRelease":{"tagName":"v1.2.0","createdAt":"2026-10-06T21:00:00Z","publishedAt":"2026-10-06T21:00:00Z",
+		"tagCommit":{"oid":"a1","statusCheckRollup":{"state":"SUCCESS","contexts":{"pageInfo":{"hasNextPage":false},
+		"nodes":[{"context":"`+releaseJob+`","state":"SUCCESS","createdAt":"2026-10-06T21:09:00Z"}]}}}}}`), &node); err != nil {
+		t.Fatal(err)
+	}
+	if !readLatestRelease(rec, &node) {
+		t.Fatal("the page's newer release was not read into the record")
+	}
+	if readLatestRelease(rec, &node) {
+		t.Error("the same release read twice counts as a change")
+	}
+	rewriteReleaseStep(rec)
+	rec.Finalize()
+	if sr := rec.Setup.Checks.Step(reconcile.StepRelease); sr.Verdict != reconcile.VerdictOK || !strings.Contains(sr.Summary, "release v1.2.0 built: CircleCI success") || !rec.Setup.Checks.Converged {
+		t.Errorf("after the re-read: step=%+v converged=%v", sr, rec.Setup.Checks.Converged)
+	}
+
+	// A record that read a newer release than the watch followed: the step
+	// is about the newer tag, decided from its statuses.
+	rec.Setup.Release = &inventory.ReleaseWatch{Tag: "v1.1.0", CreatedAt: created.Add(-24 * time.Hour), State: inventory.ReleaseBuilt, CheckedAt: created}
+	rewriteReleaseStep(rec)
+	if sr := rec.Setup.Checks.Step(reconcile.StepRelease); !strings.Contains(sr.Summary, "release v1.2.0 built") {
+		t.Errorf("the record's newer release: %+v", sr)
+	}
+}
+
 // TestReleaseStepWithoutPipeline: on a repository without a CircleCI
 // pipeline (GitHub Actions only) the engine skips the release step, and it
 // stays skipped — no finding, converged — whether the release is newer than

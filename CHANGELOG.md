@@ -11,6 +11,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- A release cut after the inventory's last read of a repository no longer turns a converged repository *not in sync*:
+  the release step reads `release <tag>: waiting for the inventory's read` instead of the finding `unchecked`, and the
+  release watch writes the latest release with its tag commit's statuses into the record in the same pass, so the step
+  decides from current facts within one watch interval. A tag the watch waits on without a status within its grace
+  period is pending too, not a missed build.
+
 - `repo status`'s `circleci` line (`setup.checks`) is the reconciler run's own summary when its step left one — the
   settings, the repository's deploy keys on GitHub as the run read them (`deploy keys on GitHub: CircleCI (read-only)`,
   devctl 8.116.0) and the webhook — instead of fixed words that dropped the keys; a repaired step, which leaves no

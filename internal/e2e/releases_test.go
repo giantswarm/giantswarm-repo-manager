@@ -132,6 +132,12 @@ func TestReleaseWatchTellsTheTeamOnce(t *testing.T) {
 	if p := st.watchReleases(t); p.Started != 1 || p.Settled != 0 || p.Watching != 1 || p.Told != 0 {
 		t.Errorf("no pipeline yet: %+v", p)
 	}
+	// The record read the new tag in the pass: within the grace period its
+	// release step waits, no finding.
+	rec = record()
+	if sr := rec.Setup.Checks.Step(reconcile.StepRelease); rec.Reality.LatestRelease.Tag != "v1.3.0" || sr == nil || sr.Verdict != reconcile.VerdictOK || !strings.Contains(sr.Summary, "release v1.3.0: waiting for the tag's pipeline") || len(rec.Findings) != 1 {
+		t.Errorf("a release within its grace: latest=%+v step=%+v findings=%+v", rec.Reality.LatestRelease, sr, rec.Findings)
+	}
 	st.advance(10 * time.Minute)
 	if p := st.watchReleases(t); p.Settled != 1 || p.Told != 1 || p.Watching != 0 {
 		t.Errorf("missed build: %+v", p)

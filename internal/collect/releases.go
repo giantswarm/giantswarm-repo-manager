@@ -2,6 +2,7 @@ package collect
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"regexp"
@@ -66,16 +67,22 @@ type ReleasePoll struct {
 }
 
 // releasesQuery is the pass's one GraphQL query: the most recently pushed
-// repositories with their latest release, its tag commit and the pull
-// request behind it. Ordered by push because a tag is cut minutes after
-// its commit was pushed; archived repositories are left out at the source.
+// repositories with their latest release, its tag commit — its statuses, as
+// the inventory's read of the repository has them — and the pull request
+// behind it. Ordered by push because a tag is cut minutes after its commit
+// was pushed; archived repositories are left out at the source.
 const releasesQuery = `
 query($org: String!, $first: Int!) {
   organization(login: $org) {
     repositories(first: $first, isArchived: false, orderBy: {field: PUSHED_AT, direction: DESC}) {
       nodes {
         name visibility pushedAt
-        latestRelease { tagName createdAt tagCommit { oid associatedPullRequests(first: 1) { nodes { number url } } } }
+        latestRelease { tagName createdAt publishedAt tagCommit {
+          oid associatedPullRequests(first: 1) { nodes { number url } }
+          statusCheckRollup { state contexts(first: 40) {
+            pageInfo { hasNextPage } nodes { ... on StatusContext { context state createdAt } }
+          } }
+        } }
       }
     }
   }
@@ -88,9 +95,11 @@ type releaseNode struct {
 	Visibility    string    `json:"visibility"`
 	PushedAt      time.Time `json:"pushedAt"`
 	LatestRelease *struct {
-		TagName   string    `json:"tagName"`
-		CreatedAt time.Time `json:"createdAt"`
-		TagCommit *struct {
+		TagName     string    `json:"tagName"`
+		CreatedAt   time.Time `json:"createdAt"`
+		PublishedAt time.Time `json:"publishedAt"`
+		TagCommit   *struct {
+			tagCommitNode
 			OID                    string `json:"oid"`
 			AssociatedPullRequests struct {
 				Nodes []struct {
@@ -100,6 +109,41 @@ type releaseNode struct {
 			} `json:"associatedPullRequests"`
 		} `json:"tagCommit"`
 	} `json:"latestRelease"`
+}
+
+// release is the page's latest release as the inventory's read of the
+// repository records it (collect.reality): the tag, when it was published
+// and its tag commit's statuses; nil without a release.
+func (n *releaseNode) release() *inventory.Release {
+	if n == nil || n.LatestRelease == nil {
+		return nil
+	}
+	r := &inventory.Release{Tag: n.LatestRelease.TagName, PublishedAt: n.LatestRelease.PublishedAt}
+	if tc := n.LatestRelease.TagCommit; tc != nil {
+		r.Build, r.BuildTruncated = releaseBuild(&tc.tagCommitNode)
+	}
+	return r
+}
+
+// readLatestRelease writes the page's latest release into the record when
+// it differs from the one the record read, and says whether it did: a
+// release cut after the inventory's last read of the repository, or its tag
+// commit's statuses moved on since, reach the release step within the pass
+// instead of at the next read.
+func readLatestRelease(rec *inventory.Record, node *releaseNode) bool {
+	rel := node.release()
+	if rel == nil || sameRelease(rel, rec.Reality.LatestRelease) {
+		return false
+	}
+	rec.Reality.LatestRelease = rel
+	return true
+}
+
+// sameRelease says whether two reads of a release carry the same facts.
+func sameRelease(a, b *inventory.Release) bool {
+	ja, _ := json.Marshal(a)
+	jb, _ := json.Marshal(b)
+	return string(ja) == string(jb)
 }
 
 // pullRequest is the pull request behind the release's commit, nil without one.
@@ -231,6 +275,9 @@ func (c *Collector) watchRelease(ctx context.Context, name string, node *release
 		return watched{}
 	}
 	w := rec.Setup.Release
+	// The page read the release with its tag commit's statuses: the record
+	// takes them, so its release step decides from current facts.
+	read := readLatestRelease(rec, node)
 	var out watched
 	switch {
 	case node != nil && node.LatestRelease != nil && (w == nil || w.Tag != node.LatestRelease.TagName):
@@ -243,7 +290,9 @@ func (c *Collector) watchRelease(ctx context.Context, name string, node *release
 		out.started = true
 	case !w.Following():
 		c.follow(name, false)
-		return watched{}
+		if !read {
+			return watched{}
+		}
 	}
 	before := w.State
 	if w.Following() {

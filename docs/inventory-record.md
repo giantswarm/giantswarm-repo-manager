@@ -12,7 +12,7 @@ is what `get_repository` and `refresh_repository` return.
 | Schedule (`inventory.sweep.interval`, default `24h`) | Full sweep: every repository of the org, each record written as soon as it is built and checked; after a complete pass the records of repositories that are neither on GitHub nor declared are removed and the summary is stored | `sweep` |
 | Reconciler poll (`inventory.reconciler.pollInterval`, default `5m`; every 30 s while an Align now is pending) | One repository per `reconcile-<name>` artifact of a completed reconciler run, read from GitHub as the inventory App; the run is stored as `setup.lastRun` | `reconciler` |
 | Tool `refresh_repository` | One repository on demand | `refresh` |
-| Release watch (`inventory.releases.interval`, default `5m`) | The latest release of a declared repository, from its tag to the end of the tag's own CircleCI pipeline: `setup.release` and the record's `release` step and findings are written; the rest of the record is untouched | the record's `source` is unchanged |
+| Release watch (`inventory.releases.interval`, default `5m`) | The latest release of a declared repository, from its tag to the end of the tag's own CircleCI pipeline: `setup.release`, `reality.latestRelease` (the tag and its commit's statuses) and the record's `release` step and findings are written; the rest of the record is untouched | the record's `source` is unchanged |
 
 Every read fills `age` (now minus `refreshedAt`). A refresh rebuilds the whole record except `setup.lastRun`, which
 survives; a sweep with `engineChecks: false` also keeps the previous `setup.checks`. A record stored by an earlier
@@ -192,6 +192,11 @@ tag's own pipeline once it has followed the tag (`setup.release`), else from the
 ignored, a failed job that runs on the tag alone is the tag pipeline's failure, and a failed job that runs on branches
 too beside a branch pipeline's statuses cannot be attributed — the release reads `unchecked`, the CircleCI token
 (`circleci.existingSecret`) being the fix.
+A release cut after the record's last read of the repository is pending, not a finding: the release step reads
+`release <tag>: waiting for the inventory's read` and `converged` stays as it was. The release watch's page carries the
+latest release with its tag commit's statuses, and the watch writes them into `reality.latestRelease` in the same pass,
+so the step decides from current facts within one watch interval; a tag the watch still waits on without a status
+within its grace period reads `release <tag>: waiting for the tag's pipeline`.
 
 ### Renovate state
 

@@ -126,9 +126,10 @@ type fakeOrg struct {
 // fakeLatestRelease is a repository's latest release as the release watch reads
 // it: the tag, its creation and the pull request behind the tag's commit.
 type fakeLatestRelease struct {
-	tag       string
-	createdAt time.Time
-	pr        int
+	tag         string
+	createdAt   time.Time
+	publishedAt time.Time
+	pr          int
 }
 
 // release sets a repository's latest release for the release watch's page.
@@ -138,7 +139,18 @@ func (o *fakeOrg) release(name, tag string, createdAt time.Time, pr int) {
 	if o.releases == nil {
 		o.releases = map[string]fakeLatestRelease{}
 	}
-	o.releases[name] = fakeLatestRelease{tag: tag, createdAt: createdAt, pr: pr}
+	o.releases[name] = fakeLatestRelease{tag: tag, createdAt: createdAt, publishedAt: createdAt, pr: pr}
+}
+
+// promote sets a repository's latest release to a candidate promoted at
+// publishedAt: GitHub's createdAt is the candidate's tag commit's date.
+func (o *fakeOrg) promote(name, tag string, createdAt, publishedAt time.Time, pr int) {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	if o.releases == nil {
+		o.releases = map[string]fakeLatestRelease{}
+	}
+	o.releases[name] = fakeLatestRelease{tag: tag, createdAt: createdAt, publishedAt: publishedAt, pr: pr}
 }
 
 // releasePage is the release watch's page: the unarchived repositories,
@@ -165,7 +177,7 @@ func (o *fakeOrg) releasePage() []map[string]any {
 			if name == repoLegacy && o.private[repoLegacy] {
 				rollup = o.mixedRollup()
 			}
-			n["latestRelease"] = map[string]any{kTagName: rel.tag, kCreatedAt: rel.createdAt.UTC().Format(time.RFC3339), kPublishedAt: rel.createdAt.UTC().Format(time.RFC3339),
+			n["latestRelease"] = map[string]any{kTagName: rel.tag, kCreatedAt: rel.createdAt.UTC().Format(time.RFC3339), kPublishedAt: rel.publishedAt.UTC().Format(time.RFC3339),
 				kTagCommit: map[string]any{kOID: "a80db8ff", "associatedPullRequests": map[string]any{kNodes: prs}, kStatusRollup: rollup}}
 		case name == repoPresent:
 			published := o.now.AddDate(0, -1, 0).Format(time.RFC3339)

@@ -111,6 +111,18 @@ type releaseNode struct {
 	} `json:"latestRelease"`
 }
 
+// publishedAt is when the latest release was published, the moment its tag
+// was cut for the watch: GitHub's createdAt of a release is its tag commit's
+// date, which for a candidate promoted to a stable release is the
+// candidate's, hours or days before. createdAt stands in for a release
+// without a publication date.
+func (n *releaseNode) publishedAt() time.Time {
+	if n.LatestRelease.PublishedAt.IsZero() {
+		return n.LatestRelease.CreatedAt
+	}
+	return n.LatestRelease.PublishedAt
+}
+
 // release is the page's latest release as the inventory's read of the
 // repository records it (collect.reality): the tag, when it was published
 // and its tag commit's statuses; nil without a release.
@@ -215,7 +227,7 @@ func (c *Collector) WatchReleases(ctx context.Context) (*ReleasePoll, error) {
 	cand := map[string]*releaseNode{}
 	for i := range nodes {
 		n := &nodes[i]
-		if n.LatestRelease == nil || now.Sub(n.LatestRelease.CreatedAt) > releaseLookback {
+		if n.LatestRelease == nil || now.Sub(n.publishedAt()) > releaseLookback {
 			continue
 		}
 		cand[n.Name] = n
@@ -282,7 +294,7 @@ func (c *Collector) watchRelease(ctx context.Context, name string, node *release
 	switch {
 	case node != nil && node.LatestRelease != nil && (w == nil || w.Tag != node.LatestRelease.TagName):
 		// A new release: the watch starts from its tag.
-		w = &inventory.ReleaseWatch{Tag: node.LatestRelease.TagName, CreatedAt: node.LatestRelease.CreatedAt, PullRequest: node.pullRequest(), State: inventory.ReleaseWatching, CheckedAt: now}
+		w = &inventory.ReleaseWatch{Tag: node.LatestRelease.TagName, CreatedAt: node.publishedAt(), PullRequest: node.pullRequest(), State: inventory.ReleaseWatching, CheckedAt: now}
 		if reason := outsideReason(w.Tag, rec); reason != "" {
 			w.Settle(now, inventory.ReleaseUnchecked)
 			w.Reason = reason

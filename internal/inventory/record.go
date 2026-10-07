@@ -293,7 +293,8 @@ type Setup struct {
 // know, a tag outside the vX.Y.Z flow, a repository without a pipeline).
 type ReleaseWatch struct {
 	Tag string `json:"tag"`
-	// CreatedAt is when the release, and with it the tag, was created.
+	// CreatedAt is when the release, and with it the tag, was published:
+	// for a promoted candidate, the promotion, not the candidate's commit.
 	CreatedAt time.Time `json:"createdAt"`
 	// PullRequest is the merged pull request behind the tag's commit; nil
 	// when GitHub associates none.

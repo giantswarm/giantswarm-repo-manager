@@ -75,7 +75,9 @@ type fakeRESTBudget struct {
 
 func newFakeGitHub(t *testing.T, logins map[string]string) *fakeGitHub {
 	t.Helper()
-	g := &fakeGitHub{logins: logins, teams: map[string][]string{}, org: &fakeOrg{remaining: 5000, now: time.Now(), teamFile: teamFile}, files: newFakeTeamFiles(), actions: &fakeActions{}, repos: newFakeRepos(), roles: map[string]string{}}
+	// The schema beside the team files at main is the engine's own copy
+	// until a test merges a newer one.
+	g := &fakeGitHub{logins: logins, teams: map[string][]string{}, org: &fakeOrg{remaining: 5000, now: time.Now(), teamFile: teamFile, schema: string(embeddedSchemaDocument(t))}, files: newFakeTeamFiles(), actions: &fakeActions{}, repos: newFakeRepos(), roles: map[string]string{}}
 	// The org's GraphQL knows the repositories the REST surface creates.
 	g.org.repos = g.repos
 	// The org's GraphQL reads the team files at the team-files fake's main.

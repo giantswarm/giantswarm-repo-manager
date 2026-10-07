@@ -8,6 +8,7 @@ import (
 	"io"
 	"path"
 	"regexp"
+	"slices"
 	"sort"
 	"strings"
 
@@ -39,20 +40,22 @@ type sources struct {
 	problems  []string
 }
 
-// declared is one team-file entry with the engine's verdict.
+// declared is one team-file entry with the verdict of the schema the team
+// file declares.
 type declared struct {
 	inventory.Declaration
 	entry reposetup.Entry
 }
 
 const sourcesQuery = `
-query($org: String!, $ghRepo: String!, $teamFilesDir: String!, $catalogPath: String!, $mcbRepo: String!, $mappingPath: String!, $teamsAfter: String) {
+query($org: String!, $ghRepo: String!, $teamFilesDir: String!, $schemaPath: String!, $catalogPath: String!, $mcbRepo: String!, $mappingPath: String!, $teamsAfter: String) {
   organization(login: $org) {
     teams(first: 100, after: $teamsAfter) { pageInfo { hasNextPage endCursor } nodes { slug } }
   }
   github: repository(owner: $org, name: $ghRepo) {
     head: object(expression: "HEAD") { oid }
     teamFiles: object(expression: $teamFilesDir) { ... on Tree { entries { name type object { ... on Blob { text } } } } }
+    schema: object(expression: $schemaPath) { ... on Blob { text } }
     catalog: object(expression: $catalogPath) { ... on Blob { text } }
   }
   mcb: repository(owner: $org, name: $mcbRepo) {
@@ -85,6 +88,7 @@ type sourcesData struct {
 				Object *blob  `json:"object"`
 			} `json:"entries"`
 		} `json:"teamFiles"`
+		Schema  *blob `json:"schema"`
 		Catalog *blob `json:"catalog"`
 	} `json:"github"`
 	MCB *struct {
@@ -101,7 +105,7 @@ type pageInfo struct {
 func (c *Collector) fetchSources(ctx context.Context) (*sources, error) {
 	base := reconcile.DefaultBaseline()
 	vars := map[string]any{
-		varOrg: c.opts.Org, "ghRepo": TeamFilesRepository, "teamFilesDir": "HEAD:" + TeamFilesDir,
+		varOrg: c.opts.Org, "ghRepo": TeamFilesRepository, "teamFilesDir": "HEAD:" + TeamFilesDir, "schemaPath": "HEAD:" + reposetup.SchemaPath,
 		"catalogPath": "HEAD:" + base.CatalogPath, "mcbRepo": path.Base(base.MappingRepository), "mappingPath": "HEAD:" + base.MappingPath,
 	}
 	src := &sources{teams: map[string]bool{}, declarations: map[string]*declared{}, catalog: map[string]bool{}, mapping: map[string]string{}}
@@ -146,7 +150,14 @@ func (c *Collector) parseSources(ctx context.Context, data *sourcesData, src *so
 	if c.opts.Schema == nil {
 		return errors.New("sources: no repositories schema configured")
 	}
-	validator := reposetup.Validator{Schema: c.opts.Schema, Owner: c.opts.Org}
+	if data.GitHub.Schema == nil {
+		return fmt.Errorf("sources: %s/%s has no %s at HEAD", c.opts.Org, TeamFilesRepository, reposetup.SchemaPath)
+	}
+	schema, err := c.declaredSchema(data.GitHub.Schema.Text, src.ref)
+	if err != nil {
+		return fmt.Errorf("sources: %s at %s: %w", reposetup.SchemaPath, src.ref, err)
+	}
+	validator := reposetup.Validator{Schema: schema, Owner: c.opts.Org}
 	for _, e := range data.GitHub.TeamFiles.Entries {
 		if e.Type != "blob" || !strings.HasSuffix(e.Name, ".yaml") || e.Object == nil {
 			continue
@@ -177,6 +188,9 @@ func (c *Collector) parseSources(ctx context.Context, data *sourcesData, src *so
 			for _, p := range decl.entry.Problems {
 				decl.Problems = append(decl.Problems, p.Field+": "+p.Message)
 			}
+			if decl.Accepted {
+				decl.UnknownFields = unknownFields(c.opts.Schema, d)
+			}
 			fillDeclaration(&decl.Declaration, d)
 			if prev, dup := src.declarations[d.Name]; dup {
 				src.problems = append(src.problems, fmt.Sprintf("%s is declared twice: %s and %s", d.Name, prev.File, file))
@@ -197,7 +211,45 @@ func (c *Collector) parseSources(ctx context.Context, data *sourcesData, src *so
 	return nil
 }
 
-// fillDeclaration copies the fields the record shows from the entry.
+// declaredSchema is the repositories schema the team files declare — the
+// one beside them in their repository, read at the same commit — compiled
+// once per document: the sweep after a commit that left the schema as it was
+// validates with the compiled schema it has.
+func (c *Collector) declaredSchema(doc, ref string) (*reposetup.Schema, error) {
+	c.schemaMu.Lock()
+	defer c.schemaMu.Unlock()
+	if c.schema != nil && c.schemaDoc == doc {
+		return c.schema, nil
+	}
+	schema, err := reposetup.CompileSchema([]byte(doc), reposetup.SchemaOriginGitHub)
+	if err != nil {
+		return nil, err
+	}
+	c.log.Info("repositories schema compiled", "ref", ref)
+	c.schema, c.schemaDoc = schema, doc
+	return schema, nil
+}
+
+// unknownFields names the fields of an entry the declared schema accepted
+// that the engine's own schema refuses: the fields, and the values of its
+// enumerations, of a devctl release newer than the engine's. The engine's
+// steps read past a field they do not know, so the entry converges and the
+// record names what the checks do not cover. Each field once, in the order
+// the engine names them.
+func unknownFields(engine *reposetup.Schema, d reposetup.Declaration) []string {
+	instance, err := d.Instance()
+	if err != nil {
+		return nil
+	}
+	var fields []string
+	for _, p := range engine.Problems(instance) {
+		if !slices.Contains(fields, p.Field) {
+			fields = append(fields, p.Field)
+		}
+	}
+	return fields
+}
+
 // listOverrides lists the align-files overrides of the team files'
 // repository at ref: one request, and one more per repository that has an
 // override when a check reads its CODEOWNERS.
@@ -209,6 +261,7 @@ func (c *Collector) listOverrides(ctx context.Context, ref string) (*reposetup.O
 	return o, nil
 }
 
+// fillDeclaration copies the fields the record shows from the entry.
 func fillDeclaration(d *inventory.Declaration, decl reposetup.Declaration) {
 	inst, err := decl.Instance()
 	if err != nil {

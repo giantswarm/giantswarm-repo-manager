@@ -2,6 +2,7 @@ package inventory
 
 import (
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/giantswarm/devctl/v8/pkg/reposetup/reconcile"
@@ -58,9 +59,16 @@ type Declaration struct {
 	Flavours      []string `json:"flavours,omitempty"`
 	// Entry is the declaration as the team file carries it (one-item YAML list).
 	Entry string `json:"entry"`
-	// Accepted is the engine's validation verdict; Problems the refusals.
+	// Accepted is the verdict of the repositories schema the team file
+	// declares — the one beside the team files in their repository, read at
+	// the same commit; Problems the refusals, each naming the field.
 	Accepted bool     `json:"accepted"`
 	Problems []string `json:"problems,omitempty"`
+	// UnknownFields names the fields of an accepted entry the engine's own
+	// schema (the devctl the manager builds with) does not know: fields, or
+	// values, of a newer devctl release. The engine's checks read past them,
+	// so the entry converges; the finding entry-field-unknown names them.
+	UnknownFields []string `json:"unknownFields,omitempty"`
 }
 
 // Reality is what GitHub says (GraphQL, the App's budget).
@@ -520,9 +528,9 @@ type Finding struct {
 	Fix     string `json:"fix,omitempty"`
 	// Source is inventory or engine.
 	Source string `json:"source"`
-	// Advisory is the engine's weight of the finding: for a person only,
-	// the repository counts as in sync with it. The inventory's own
-	// findings are never advisory.
+	// Advisory is the weight of the finding: for a person only, the
+	// repository counts as in sync with it — the engine's advisory kinds,
+	// and the inventory's entry-field-unknown; its other findings never are.
 	Advisory bool `json:"advisory,omitempty"`
 }
 
@@ -531,8 +539,14 @@ const (
 	FindingDeclaredButGone     = "declared-but-gone"
 	FindingUndeclaredOnGitHub  = "undeclared-on-github"
 	FindingReconcileRunMissing = "reconcile-run-missing"
-	FindingSourceInventory     = "inventory"
-	FindingSourceEngine        = "engine"
+	// FindingEntryFieldUnknown: an accepted entry uses fields the engine's
+	// own schema does not know (Declaration.UnknownFields) — a devctl
+	// release newer than the engine's. Advisory: the repositories schema
+	// the team file declares accepts the entry, the engine's checks read
+	// past the fields, and nothing in the entry is to fix.
+	FindingEntryFieldUnknown = "entry-field-unknown"
+	FindingSourceInventory   = "inventory"
+	FindingSourceEngine      = "engine"
 )
 
 // SweepSummary is the outcome of the last full sweep.
@@ -595,12 +609,33 @@ func (r *Record) findings() []Finding {
 	if f := r.MissingRunFinding(); f != nil {
 		out = append(out, *f)
 	}
+	if f := r.unknownFieldsFinding(); f != nil {
+		out = append(out, *f)
+	}
 	if r.Setup.Checks != nil {
 		for _, f := range r.Setup.Checks.Findings() {
 			out = append(out, Finding{Kind: string(f.Kind), Message: f.Message, Fix: f.Fix, Source: FindingSourceEngine, Advisory: f.Advisory})
 		}
 	}
 	return out
+}
+
+// unknownFieldsFinding is the finding of an accepted declaration whose entry
+// uses fields the engine's own schema does not know, naming them; nil for
+// an entry the engine knows whole, and for a refused one, whose problems
+// are the news.
+func (r *Record) unknownFieldsFinding() *Finding {
+	d := r.Declaration
+	if d == nil || !d.Accepted || len(d.UnknownFields) == 0 {
+		return nil
+	}
+	fields, is, them := "field "+d.UnknownFields[0], "is", "it"
+	if len(d.UnknownFields) > 1 {
+		fields, is, them = "fields "+strings.Join(d.UnknownFields, ", "), "are", "them"
+	}
+	return &Finding{Kind: FindingEntryFieldUnknown, Source: FindingSourceInventory, Advisory: true,
+		Message: fmt.Sprintf("the entry's %s %s newer than the manager's engine: the repositories schema %s declares accepts %s, the engine's checks do not cover %s", fields, is, d.File, them, them),
+		Fix:     fmt.Sprintf("nothing to edit: the checks cover the %s once the manager runs a devctl that knows %s", fields, them)}
 }
 
 // declaredButGone is the finding of a declaration whose repository does not

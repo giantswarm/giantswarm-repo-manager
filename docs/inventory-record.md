@@ -96,8 +96,9 @@ the message to the team's standup channel is rendered from (README, "Asks and me
     "language": "go",
     "flavours": ["app"],
     "entry": "- name: present-service\n  ...",   // the entry as the team file carries it
-    "accepted": true,                   // the engine's validation; problems[] names the refusals
-    "problems": []
+    "accepted": true,                   // the verdict of the schema the team file declares (giantswarm/github's own, at the commit read); problems[] names the refusals
+    "problems": [],
+    "unknownFields": ["pruneRulesets"]  // of an accepted entry: fields the engine's own devctl does not know (its checks read past them)
   },
   "reality": {                          // null: gone from GitHub
     "url": "https://github.com/giantswarm/present-service",
@@ -181,7 +182,10 @@ The inventory's own kinds (`source: inventory`): `declared-but-gone` (declaratio
 declared `lifecycle: deleted`, the record of the deletion; an archived entry's fix records the deletion or removes the
 entry, any other entry's creates the repository or records its deletion), `undeclared-on-github`
 (repository, no declaration — archived ones included), `reconcile-run-missing` (an expected run that completed without a
-report — the fix names the run — or did not report within 15 minutes — the fix names the workflow's Actions page). The
+report — the fix names the run — or did not report within 15 minutes — the fix names the workflow's Actions page),
+`entry-field-unknown` (advisory: an accepted entry uses fields the engine's own devctl does not know —
+`declaration.unknownFields`, a newer devctl release's; the schema the team file declares accepts them, the engine's
+checks read past them, nothing in the entry is to fix). The
 engine's kinds pass through with `source: engine`:
 `entry-refused` and `gen-circleci-refused` (the engine refuses the entry — `setup.checks` is its `Refused` result, the
 `entry` step reported and no step run, one finding per problem naming the field to fix), `repository-missing`, `renamed`,

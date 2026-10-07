@@ -111,6 +111,9 @@ type fakeOrg struct {
 	// teamFile is the team file at main; declare appends an entry, as a
 	// merged pull request does.
 	teamFile string
+	// schema is the repositories schema document beside the team files at
+	// main, the one they declare; empty leaves the file out of the tree.
+	schema string
 	// repos are the repositories created through the REST surface: the
 	// node of one of them is a plain repository as GraphQL would answer.
 	repos *fakeRepos
@@ -191,6 +194,14 @@ func (o *fakeOrg) declare(entry string) {
 	o.teamFile += entry
 }
 
+// setSchema replaces the repositories schema at main: a devctl release
+// merged its schema, or the file is gone for "".
+func (o *fakeOrg) setSchema(doc string) {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	o.schema = doc
+}
+
 func (o *fakeOrg) handle(w http.ResponseWriter, r *http.Request) {
 	o.queries.Add(1)
 	body, _ := io.ReadAll(r.Body)
@@ -202,7 +213,7 @@ func (o *fakeOrg) handle(w http.ResponseWriter, r *http.Request) {
 	o.mu.Lock()
 	rl := map[string]any{"cost": fakeGraphQLCost, "remaining": o.remaining, "limit": 5000, "resetAt": o.now.Add(time.Hour).Format(time.RFC3339)}
 	o.remaining -= fakeGraphQLCost
-	teamFileText := o.teamFile
+	teamFileText, schemaText := o.teamFile, o.schema
 	o.mu.Unlock()
 
 	data := map[string]any{"rateLimit": rl}
@@ -210,9 +221,14 @@ func (o *fakeOrg) handle(w http.ResponseWriter, r *http.Request) {
 	switch {
 	case contains(req.Query, "teamFiles:"):
 		data["organization"] = map[string]any{"teams": map[string]any{kPageInfo: map[string]any{kHasNextPage: false}, kNodes: []map[string]any{{kSlug: team}, {kSlug: teamPlaneteers}}}}
+		var schema map[string]any
+		if schemaText != "" {
+			schema = map[string]any{kText: schemaText}
+		}
 		data[kGitHub] = map[string]any{
 			"head":      map[string]any{kOID: o.head()},
 			"teamFiles": map[string]any{"entries": []map[string]any{{kName: "team-bumblebee.yaml", kType: "blob", kObject: map[string]any{kText: teamFileText}}}},
+			"schema":    schema,
 			"catalog":   map[string]any{kText: catalogFile},
 		}
 		data["mcb"] = map[string]any{"mapping": map[string]any{kText: mappingFile}}

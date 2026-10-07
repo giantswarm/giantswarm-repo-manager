@@ -56,9 +56,13 @@ type Options struct {
 	// Releases tunes the release watch: the latest release of every declared
 	// repository followed on CircleCI by its tag's own pipeline.
 	Releases ReleaseOptions
-	// Schema is the repositories schema every declaration is validated
-	// against: the process's one instance, the tools' validator and get_info
-	// read the same. nil fails the sweep's team-file read: nothing stands in.
+	// Schema is the engine's own repositories schema — the copy embedded in
+	// the devctl the manager builds with, the process's one instance the
+	// tools' validator and get_info read too. A declaration is validated
+	// with the schema its team file declares, read beside the team files at
+	// the same commit; the engine's schema says which of an accepted entry's
+	// fields the engine's checks know (Declaration.UnknownFields names the
+	// rest). nil fails the sweep's team-file read: nothing stands in.
 	Schema *reposetup.Schema
 	// Now is the clock; nil is time.Now.
 	Now func() time.Time
@@ -155,6 +159,12 @@ type Collector struct {
 	srcMu    sync.Mutex
 	srcCache *sources
 	srcAt    time.Time
+
+	// schema is the repositories schema the team files declare, compiled
+	// from schemaDoc, the document last read beside them (declaredSchema).
+	schemaMu  sync.Mutex
+	schema    *reposetup.Schema
+	schemaDoc string
 
 	// watching are the repositories whose release the watch follows between
 	// passes; nil until the first pass seeds it from the store.

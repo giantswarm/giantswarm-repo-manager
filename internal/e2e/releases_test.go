@@ -177,6 +177,20 @@ func TestReleaseWatchTellsTheTeamOnce(t *testing.T) {
 	st.ghs.files.files[policyPath] = policy
 	st.ghs.files.mu.Unlock()
 
+	// A candidate cut 20 hours ago and promoted a minute ago: GitHub's
+	// createdAt is the candidate's commit, the publication is the release's
+	// moment. The watch follows it, reads the stable tag's pipeline built and
+	// the record carries the tag.
+	o.promote(repoPresent, "v1.5.0", st.now().Add(-20*time.Hour), st.now().Add(-time.Minute), 45)
+	st.cc.pipeline(repoPresent, tag("v1.5.0"), st.now().Add(-30*time.Second), conclusionSuccess, circleciclient.Job{Name: jobPushRelease, Status: conclusionSuccess})
+	if p := st.watchReleases(t); p.Started != 1 || p.Settled != 1 || p.Told != 0 {
+		t.Errorf("promoted candidate: %+v", p)
+	}
+	rec = record()
+	if w := rec.Setup.Release; w == nil || w.Tag != "v1.5.0" || w.State != inventory.ReleaseBuilt || rec.Reality.LatestRelease.Tag != "v1.5.0" {
+		t.Errorf("promoted candidate: watch=%+v latest=%+v", rec.Setup.Release, rec.Reality.LatestRelease)
+	}
+
 	// A private repository read without a token: CircleCI answers 404, the
 	// release is unchecked, nothing is told.
 	o.private = map[string]bool{repoLegacy: true}

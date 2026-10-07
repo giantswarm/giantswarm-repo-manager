@@ -9,6 +9,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- devctl v8.120.0: an entry's `lineGate` gates a fork line's land push. The sync's App bypasses `devctl: default
+  branch` and the engine keeps `devctl: line gate`, the line's required checks for every push with no bypass actor.
+
 ### Fixed
 
 - A declaration is validated with the repositories schema its team file declares — `.github/repositories.schema.json`
@@ -18,6 +23,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   finding `entry-field-unknown` naming the fields the engine does not know (`declaration.unknownFields`); a
   malformed entry — a wrong type, a field no schema knows — stays `entry-refused`. A commit without the schema file
   fails the sweep's team-file read, as a missing team-files directory does: nothing stands in for the declared schema.
+
+- The release watch follows a promoted release candidate: it times a release from its publication instead of GitHub's
+  `createdAt`, which for a promoted candidate is the candidate's tag commit, hours or days before. A candidate
+  promoted more than six hours after it was cut was never followed, and one promoted after the grace period could read
+  unbuilt before its tag pipeline started.
 
 - A release cut after the inventory's last read of a repository no longer turns a converged repository *not in sync*:
   the release step reads `release <tag>: waiting for the inventory's read` instead of the finding `unchecked`, and the

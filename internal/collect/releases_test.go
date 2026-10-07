@@ -294,6 +294,7 @@ const teamBumblebee = "team-bumblebee"
 // watch waits on without any status within its grace is pending too.
 func TestReleaseNewerThanTheRecord(t *testing.T) {
 	const slug, tag = "giantswarm/x", "v1.2.0"
+	const pending = "release v1.2.0: waiting for the inventory's read"
 	created := time.Date(2026, 10, 6, 21, 0, 0, 0, time.UTC)
 	older := &inventory.Release{Tag: "v1.1.0", PublishedAt: created.Add(-24 * time.Hour), Build: &inventory.HeadStatus{State: stateSuccess, Contexts: []string{releaseJob}, At: created.Add(-24 * time.Hour)}}
 	watch := func(state string) *inventory.ReleaseWatch {
@@ -306,9 +307,9 @@ func TestReleaseNewerThanTheRecord(t *testing.T) {
 		summary string
 		finding reconcile.FindingKind
 	}{
-		{"an older release read, the watch without a pipeline yet", older, watch(inventory.ReleaseWatching), "release v1.2.0: waiting for the inventory's read", ""},
-		{"an older release read, a tag outside the watch's reach", older, watch(inventory.ReleaseUnchecked), "release v1.2.0: waiting for the inventory's read", ""},
-		{"no release read", nil, watch(inventory.ReleaseWatching), "release v1.2.0: waiting for the inventory's read", ""},
+		{"an older release read, the watch without a pipeline yet", older, watch(inventory.ReleaseWatching), pending, ""},
+		{"an older release read, a tag outside the watch's reach", older, watch(inventory.ReleaseUnchecked), pending, ""},
+		{"no release read", nil, watch(inventory.ReleaseWatching), pending, ""},
 		{"the tag read without a status, the watch within its grace", &inventory.Release{Tag: tag, PublishedAt: created}, watch(inventory.ReleaseWatching), "release v1.2.0: waiting for the tag's pipeline", ""},
 		{"the tag read without a status, the watch settled it unchecked", &inventory.Release{Tag: tag, PublishedAt: created}, watch(inventory.ReleaseUnchecked), "the tag was not built", reconcile.FindingMissedTagBuild},
 		{"a newer release read than the step's tag", &inventory.Release{Tag: "v1.3.0", PublishedAt: created.Add(time.Hour)}, watch(inventory.ReleaseWatching), "not the latest release the inventory read (v1.3.0)", reconcile.FindingUnchecked},

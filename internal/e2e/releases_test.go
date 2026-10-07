@@ -182,7 +182,7 @@ func TestReleaseWatchTellsTheTeamOnce(t *testing.T) {
 	// moment. The watch follows it, reads the stable tag's pipeline built and
 	// the record carries the tag.
 	o.promote(repoPresent, "v1.5.0", st.now().Add(-20*time.Hour), st.now().Add(-time.Minute), 45)
-	st.cc.pipeline(repoPresent, tag("v1.5.0"), st.now().Add(-30*time.Second), "success", circleciclient.Job{Name: jobPushRelease, Status: "success"})
+	st.cc.pipeline(repoPresent, tag("v1.5.0"), st.now().Add(-30*time.Second), conclusionSuccess, circleciclient.Job{Name: jobPushRelease, Status: conclusionSuccess})
 	if p := st.watchReleases(t); p.Started != 1 || p.Settled != 1 || p.Told != 0 {
 		t.Errorf("promoted candidate: %+v", p)
 	}

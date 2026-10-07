@@ -9,6 +9,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- devctl v8.120.0: an entry's `lineGate` gates a fork line's land push. The sync's App bypasses `devctl: default
+  branch` and the engine keeps `devctl: line gate`, the line's required checks for every push with no bypass actor.
+
 ### Fixed
 
 - A release cut after the inventory's last read of a repository no longer turns a converged repository *not in sync*:

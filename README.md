@@ -58,7 +58,11 @@ creation rules appear only in `validate_repository`'s dry run for an added entry
 the team file declares — `.github/repositories.schema.json` beside the team files, read at the same
 commit — not the copy embedded in the manager's devctl: an entry using a field of a newer devctl release
 converges, with the advisory finding `entry-field-unknown` naming the fields the engine's checks do not
-cover; a malformed entry stays `entry-refused`.
+cover; a malformed entry stays `entry-refused`. The write tools' dry runs (`validate_repository`,
+`update_repository`, `transfer_repository`, `adopt_repository`, `set_lifecycle`, `align_repository`'s
+opt-in) validate with the same
+declared schema, so a dry run accepts what the inventory converges; the embedded copy validates only
+while the team files declare none.
 
 **Asks and messages go through Swarmgeist.** Lifecycle and transfer asks — naming the asking person — are
 posted to klaus-gateway's team-review endpoint (`POST /reviews`, an Approve button calling `approve_change`

@@ -16,6 +16,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- The write tools' dry runs (`validate_repository`, `update_repository`, `transfer_repository`, `adopt_repository`,
+  and the entry rewrites of `set_lifecycle` and `align_repository`) validate with the repositories schema the team
+  files declare, the one the inventory holds the entry to once it merges, instead of the copy embedded in the
+  manager's devctl: an entry using a field of a newer devctl release passes the dry run. The embedded copy validates
+  only while the team files declare no schema, or when nothing can read them.
+
+- The inventory's `declaration.unknownFields` is sorted: the engine names the fields in no stable order.
+
 - A declaration is validated with the repositories schema its team file declares — `.github/repositories.schema.json`
   beside the team files, read at the same commit — instead of the copy embedded in the manager's devctl alone, so an
   entry using a field of a devctl release newer than the manager's (`pruneRulesets` was one) is no longer refused on

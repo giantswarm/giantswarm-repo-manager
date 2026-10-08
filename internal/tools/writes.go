@@ -176,10 +176,10 @@ func (t *tools) entryFor(ctx context.Context, repo teamfiles.Repo, name, hint st
 }
 
 // schemaProblems validates one existing entry the engine's way for a
-// repository that exists (reposetup.ModeExisting): the schema, not the
-// creation rules.
-func (t *tools) schemaProblems(ctx context.Context, team string, d reposetup.Declaration) ([]reposetup.Problem, error) {
-	e, err := t.existingVerdict(ctx, team, d)
+// repository that exists (reposetup.ModeExisting): the schema the team
+// files in repo declare, not the creation rules.
+func (t *tools) schemaProblems(ctx context.Context, repo teamfiles.Repo, team string, d reposetup.Declaration) ([]reposetup.Problem, error) {
+	e, err := t.existingVerdict(ctx, repo, team, d)
 	if err != nil {
 		return nil, err
 	}
@@ -432,7 +432,7 @@ func (t *tools) planUpdateAs(ctx context.Context, repo teamfiles.Repo, as string
 	if err != nil {
 		return nil, err
 	}
-	pl, err := t.replacePlan(ctx, tf, name, before, after)
+	pl, err := t.replacePlan(ctx, repo, tf, name, before, after)
 	if err != nil {
 		return nil, err
 	}
@@ -444,8 +444,8 @@ func (t *tools) planUpdateAs(ctx context.Context, repo teamfiles.Repo, as string
 }
 
 // replacePlan is the plan of rewriting one entry in its file.
-func (t *tools) replacePlan(ctx context.Context, tf *teamfiles.TeamFile, name string, before, after reposetup.Declaration) (*Plan, error) {
-	problems, err := t.schemaProblems(ctx, tf.Team, after)
+func (t *tools) replacePlan(ctx context.Context, repo teamfiles.Repo, tf *teamfiles.TeamFile, name string, before, after reposetup.Declaration) (*Plan, error) {
+	problems, err := t.schemaProblems(ctx, repo, tf.Team, after)
 	if err != nil {
 		return nil, err
 	}
@@ -524,7 +524,7 @@ func (t *tools) planTransfer(ctx context.Context, repo teamfiles.Repo, as string
 	if _, dup := dst.Entries.Entry(name); dup {
 		return nil, fmt.Errorf("%s declares %s already", dst.Path, name)
 	}
-	problems, err := t.schemaProblems(ctx, to, d)
+	problems, err := t.schemaProblems(ctx, repo, to, d)
 	if err != nil {
 		return nil, err
 	}
@@ -648,7 +648,7 @@ func (t *tools) planLifecycle(ctx context.Context, repo teamfiles.Repo, as strin
 		change += " and " + alignTrue
 		optsIn = " The change also opts the repository in to alignment (" + alignTrue + " in its entry), so the reconciler applies the lifecycle."
 	}
-	pl, err := t.replacePlan(ctx, tf, name, before, after)
+	pl, err := t.replacePlan(ctx, repo, tf, name, before, after)
 	if err != nil {
 		return nil, err
 	}
@@ -1091,7 +1091,7 @@ func (t *tools) planOptIn(ctx context.Context, repo teamfiles.Repo, as string, t
 	if err != nil {
 		return nil, err
 	}
-	pl, err := t.replacePlan(ctx, tf, name, before, after)
+	pl, err := t.replacePlan(ctx, repo, tf, name, before, after)
 	if err != nil {
 		return nil, err
 	}

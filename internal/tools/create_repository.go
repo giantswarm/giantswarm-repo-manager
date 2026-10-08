@@ -221,7 +221,7 @@ func (t *tools) dryRun(ctx context.Context, args map[string]any, p *person, perr
 			req.AuthorTeams = p.teams
 		}
 	}
-	res, err := t.runValidator(ctx, req)
+	res, err := t.runValidator(ctx, t.schemaReader(p), req)
 	if err != nil {
 		return nil, err
 	}
@@ -293,14 +293,15 @@ func optedIn(entry any) (any, error) {
 	return out, nil
 }
 
-// runValidator runs the engine's validator over the process's one
-// repositories schema (Deps.Schema, the one get_info reports), the App
-// answering the name checks from its own budget.
-func (t *tools) runValidator(ctx context.Context, req reposetup.Request) (*reposetup.Result, error) {
-	if t.d.Schema == nil {
-		return nil, ErrNoSchema
+// runValidator runs the engine's validator over the repositories schema the
+// team files in repo declare (validatorSchema), the App answering the name
+// checks from its own budget.
+func (t *tools) runValidator(ctx context.Context, repo *teamfiles.Repo, req reposetup.Request) (*reposetup.Result, error) {
+	schema, err := t.validatorSchema(ctx, repo)
+	if err != nil {
+		return nil, err
 	}
-	v := reposetup.Validator{Schema: t.d.Schema, Owner: t.org()}
+	v := reposetup.Validator{Schema: schema, Owner: t.org()}
 	if t.d.App != nil {
 		v.Names = reposetup.GitHubNameChecker{Repositories: repositoryGetter{t.d.App.Installation()}}
 	}

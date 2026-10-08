@@ -95,11 +95,12 @@ type Deps struct {
 	// TagPipelines is TagPipelinesToken — and from the commit statuses
 	// without it.
 	CircleCI *circleciclient.Client
-	// Schema is the repositories schema of the process: the one the
-	// validator checks every declaration against and the one get_info
-	// reports the enumerations of (the collector's validator is handed the
-	// same instance). nil leaves validation refused and get_info's schema
-	// an error: nothing stands in.
+	// Schema is the engine's own repositories schema, the copy embedded in
+	// its devctl version: get_info reports its enumerations, and a dry run
+	// validates with it only when the team files declare no schema of their
+	// own (reposetup.SchemaPath beside them) or nothing reads them. nil
+	// leaves such a validation refused and get_info's schema an error:
+	// nothing stands in.
 	Schema *reposetup.Schema
 	Log    *slog.Logger
 }
@@ -142,8 +143,9 @@ func (ts *Tools) MCPServer() *mcpserver.MCPServer {
 // tools is the tool set's state: the dependencies and the per-token cache of
 // the team-files probe (get_info's teamFiles.readable).
 type tools struct {
-	d      Deps
-	probes probes
+	d       Deps
+	probes  probes
+	schemas declaredSchemas
 }
 
 // tagPipelines is how the release watch reads CircleCI; off when unset.

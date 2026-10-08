@@ -159,7 +159,7 @@ func (t *tools) planAdopt(ctx context.Context, pn *planner, args map[string]any)
 	} else if by != nil {
 		return nil, fmt.Errorf("%s/%s is declared by %s in %s already: use update_repository, transfer_repository or set_lifecycle", t.org(), name, by.Team, by.Path)
 	}
-	verdict, err := t.existingVerdict(ctx, team, d)
+	verdict, err := t.existingVerdict(ctx, pn.repo, team, d)
 	if err != nil {
 		return nil, err
 	}
@@ -213,9 +213,10 @@ func (t *tools) declaredBy(ctx context.Context, repo teamfiles.Repo, name string
 }
 
 // existingVerdict validates one entry the engine's way for a repository
-// that exists (reposetup.ModeExisting): the schema, not the creation rules,
-// and the name check reported without refusing.
-func (t *tools) existingVerdict(ctx context.Context, team string, d reposetup.Declaration) (reposetup.Entry, error) {
+// that exists (reposetup.ModeExisting): the schema the team files in repo
+// declare, not the creation rules, and the name check reported without
+// refusing.
+func (t *tools) existingVerdict(ctx context.Context, repo teamfiles.Repo, team string, d reposetup.Declaration) (reposetup.Entry, error) {
 	y, err := d.YAML()
 	if err != nil {
 		return reposetup.Entry{}, err
@@ -224,7 +225,7 @@ func (t *tools) existingVerdict(ctx context.Context, team string, d reposetup.De
 	if err != nil {
 		return reposetup.Entry{}, err
 	}
-	res, err := t.runValidator(ctx, reposetup.Request{TeamFile: tf, Mode: reposetup.ModeExisting})
+	res, err := t.runValidator(ctx, &repo, reposetup.Request{TeamFile: tf, Mode: reposetup.ModeExisting})
 	if err != nil {
 		return reposetup.Entry{}, err
 	}

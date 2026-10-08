@@ -176,6 +176,13 @@ func (r Repo) TeamFile(ctx context.Context, team string) (*TeamFile, error) {
 	return &TeamFile{File: f, Team: team, Entries: tf}, nil
 }
 
+// Schema is the repositories schema document the team files declare
+// (reposetup.SchemaPath beside them, at Ref): nil, no error, when Ref has
+// none.
+func (r Repo) Schema(ctx context.Context) ([]byte, error) {
+	return r.readOptional(ctx, reposetup.SchemaPath)
+}
+
 // Teams lists the teams that have a team file.
 func (r Repo) Teams(ctx context.Context) ([]string, error) {
 	_, dir, resp, err := r.Client.Repositories.GetContents(ctx, r.Owner, r.Name, reposetup.TeamFilesDir, &github.RepositoryContentGetOptions{Ref: r.Ref})

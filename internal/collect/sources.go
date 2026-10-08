@@ -234,8 +234,9 @@ func (c *Collector) declaredSchema(doc, ref string) (*reposetup.Schema, error) {
 // that the engine's own schema refuses: the fields, and the values of its
 // enumerations, of a devctl release newer than the engine's. The engine's
 // steps read past a field they do not know, so the entry converges and the
-// record names what the checks do not cover. Each field once, in the order
-// the engine names them.
+// record names what the checks do not cover. Each field once, sorted: the
+// engine names them in no stable order, and the record is compared between
+// sweeps.
 func unknownFields(engine *reposetup.Schema, d reposetup.Declaration) []string {
 	instance, err := d.Instance()
 	if err != nil {
@@ -243,11 +244,10 @@ func unknownFields(engine *reposetup.Schema, d reposetup.Declaration) []string {
 	}
 	var fields []string
 	for _, p := range engine.Problems(instance) {
-		if !slices.Contains(fields, p.Field) {
-			fields = append(fields, p.Field)
-		}
+		fields = append(fields, p.Field)
 	}
-	return fields
+	slices.Sort(fields)
+	return slices.Compact(fields)
 }
 
 // listOverrides lists the align-files overrides of the team files'

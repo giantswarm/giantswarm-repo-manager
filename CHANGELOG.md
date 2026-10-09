@@ -22,6 +22,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   manager's devctl: an entry using a field of a newer devctl release passes the dry run. The embedded copy validates
   only while the team files declare no schema, or when nothing can read them.
 
+- `get_info`'s `schema` reports the repositories schema the write tools' dry runs validate with: the one the team files
+  declare, with its origin `team files (<owner>/<name>@<ref>)`, instead of always the copy embedded in the manager's
+  devctl. Without a declared schema, or when nothing can read the team files, it names the embedded copy as before.
+
 - The inventory's `declaration.unknownFields` is sorted: the engine names the fields in no stable order.
 
 - A declaration is validated with the repositories schema its team file declares — `.github/repositories.schema.json`

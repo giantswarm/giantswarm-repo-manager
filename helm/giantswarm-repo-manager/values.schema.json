@@ -456,6 +456,10 @@
                 }
             }
         },
+        "revisionHistoryLimit": {
+            "type": "integer",
+            "description": "How many old ReplicaSets a rollout keeps for `kubectl rollout undo`. Low, since every old ReplicaSet keeps its own policy report results: with the Deployment default of 10, a failure the chart has since fixed lingers in the namespace's PolicyReport until ten further rollouts."
+        },
         "securityContext": {
             "type": "object",
             "description": "Container security context.",

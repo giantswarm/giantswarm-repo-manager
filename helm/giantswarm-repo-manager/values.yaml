@@ -21,6 +21,12 @@ strategy:  # @schema skipProperties: true; additionalProperties: true
     maxSurge: 1
     maxUnavailable: 0
 
+# -- How many old ReplicaSets a rollout keeps for `kubectl rollout undo`.
+# Low, since every old ReplicaSet keeps its own policy report results: with
+# the Deployment default of 10, a failure the chart has since fixed lingers in
+# the namespace's PolicyReport until ten further rollouts.
+revisionHistoryLimit: 3
+
 # -- How long the server keeps serving after SIGTERM, `/readyz` answering 503,
 # before it closes its port (a Go duration): the time the cluster takes to
 # drop the stopping pod from the Service's endpoints, so a rollout's old pod

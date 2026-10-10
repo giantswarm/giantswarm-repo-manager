@@ -83,6 +83,10 @@ dep=$(yq 'select(.kind == "Deployment" and .metadata.labels["app.kubernetes.io/n
 [ "$(yq '.replicas' <<<"$dep")" = 1 ] || fail "Deployment: replicas $(yq '.replicas' <<<"$dep"), want 1"
 [ "$(yq '.strategy.type == "RollingUpdate" and .strategy.rollingUpdate.maxSurge == 1 and .strategy.rollingUpdate.maxUnavailable == 0' <<<"$dep")" = true ] ||
   fail "Deployment: strategy $(yq -o=json -I=0 '.strategy' <<<"$dep"), want RollingUpdate with maxSurge 1, maxUnavailable 0"
+# Old ReplicaSets go with the next rollouts: each keeps its own policy report
+# results, so a revision history above 3 keeps a fixed failure reported.
+[ "$(yq '.revisionHistoryLimit' <<<"$dep")" -le 3 ] 2>/dev/null ||
+  fail "Deployment: revisionHistoryLimit $(yq '.revisionHistoryLimit' <<<"$dep"), want at most 3"
 ctr=$(yq '.template.spec.containers[] | select(.name == "giantswarm-repo-manager")' <<<"$dep")
 [ "$(yq '.readinessProbe.httpGet.path == "/readyz" and .readinessProbe.httpGet.port == "http"' <<<"$ctr")" = true ] ||
   fail "Deployment: readinessProbe $(yq -o=json -I=0 '.readinessProbe' <<<"$ctr"), want GET /readyz on port http"

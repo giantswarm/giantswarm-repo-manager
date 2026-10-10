@@ -95,4 +95,20 @@ delay=$(yq '.env[] | select(.name == "SHUTDOWN_DELAY") | .value' <<<"$ctr")
 grace=$(yq '.template.spec.terminationGracePeriodSeconds // 30' <<<"$dep")
 ((BASH_REMATCH[1] + 15 < grace)) || fail "Deployment: SHUTDOWN_DELAY $delay plus the 15 s shutdown exceeds the ${grace}s termination grace period"
 
+# The store's network policy is the chart's, with default values: the server's
+# pods on the Valkey port, the metrics collectors on the exporter port, the
+# kubelet's probes from the host entity, and nothing wider. Cilium policies are
+# additive, so a broader peer (the cluster entity) could not be narrowed.
+cnp=$(yq 'select(.kind == "CiliumNetworkPolicy" and .metadata.labels["app.kubernetes.io/name"] == "valkey") | .spec' <<<"$render")
+[ -n "$cnp" ] || fail "the default render has no CiliumNetworkPolicy for the Valkey store"
+[ "$(yq '.ingress | length' <<<"$cnp")" = 3 ] ||
+  fail "Valkey policy: $(yq '.ingress | length' <<<"$cnp") ingress rules, want 3 (server, metrics collectors, kubelet probes)"
+peers() { yq -o=json -I=0 "[.ingress[] | select(.toPorts[0].ports[0].port == \"$1\") | .fromEndpoints[].matchLabels]" <<<"$cnp"; }
+want='[{"app.kubernetes.io/name":"giantswarm-repo-manager","io.kubernetes.pod.namespace":"default"}]'
+[ "$(peers 6379)" = "$want" ] || fail "Valkey policy: the Valkey port admits $(peers 6379), want $want (the server's pods alone)"
+want='[{"app.kubernetes.io/instance":"alloy-metrics","io.kubernetes.pod.namespace":"kube-system"}]'
+[ "$(peers 9121)" = "$want" ] || fail "Valkey policy: the exporter port admits $(peers 9121), want $want"
+[ "$(yq -o=json -I=0 '[.ingress[] | .fromEntities // [] | .[]]' <<<"$cnp")" = '["host"]' ] ||
+  fail "Valkey policy: entities $(yq -o=json -I=0 '[.ingress[] | .fromEntities // [] | .[]]' <<<"$cnp"), want [\"host\"] alone"
+
 echo "verify-chart: ok"

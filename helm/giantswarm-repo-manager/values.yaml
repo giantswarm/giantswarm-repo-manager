@@ -61,8 +61,21 @@ fullnameOverride: ""
 # `inventory.valkeyAddress` to use a Valkey outside the release.
 valkey:  # @schema skipProperties: true; additionalProperties: true
   enabled: true
+  # The store's CiliumNetworkPolicy, rendered by the valkey chart: ingress
+  # from the server's pods on the Valkey port, the metrics collectors
+  # (alloy-metrics, the chart's default) on the exporter port and the
+  # kubelet's probes; egress DNS alone.
   ciliumNetworkPolicy:
-    enabled: false
+    enabled: true
+    ingress:
+      clients:
+        - namespace: ""
+          matchLabels:
+            app.kubernetes.io/name: giantswarm-repo-manager
+      metricsScrapers:
+        - namespace: kube-system
+          matchLabels:
+            app.kubernetes.io/instance: alloy-metrics
   vpa:
     enabled: false
   valkey:

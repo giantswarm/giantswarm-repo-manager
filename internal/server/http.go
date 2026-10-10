@@ -13,6 +13,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"sync/atomic"
 	"time"
 
 	mcpserver "github.com/mark3labs/mcp-go/server"
@@ -28,13 +29,21 @@ type Config struct {
 	// Ready, when set, is what /readyz asks: an error makes the probe fail
 	// (503 with the reason) while the process stays up and keeps serving.
 	Ready func(context.Context) error
+	// ShutdownDelay is how long the server keeps serving after its context
+	// ends, /readyz answering 503 meanwhile, before it closes the listener:
+	// the time the cluster takes to drop the pod from the Service's
+	// endpoints, so a rollout's old pod refuses no connection the network
+	// still routes to it. 0 closes at once.
+	ShutdownDelay time.Duration
 }
 
 // Server is the assembled HTTP server.
 type Server struct {
-	http  *http.Server
-	guard *bearerGuard
-	log   *slog.Logger
+	http     *http.Server
+	guard    *bearerGuard
+	log      *slog.Logger
+	delay    time.Duration
+	draining atomic.Bool
 }
 
 // New builds the server around the MCP server.
@@ -51,9 +60,19 @@ func New(cfg Config, mcpSrv *mcpserver.MCPServer, log *slog.Logger) (*Server, er
 	// keeps the pod unready — the Deployment shows it — while the process
 	// stays up and answers the identity tools. GitHub is not tracked; its
 	// failures are read from get_info.
-	mux.HandleFunc("GET /readyz", readiness(cfg.Ready))
+	// A draining server is unready whatever the store says.
+	s := &Server{log: log, delay: cfg.ShutdownDelay}
+	ready := cfg.Ready
+	mux.HandleFunc("GET /readyz", readiness(func(ctx context.Context) error {
+		if s.draining.Load() {
+			return errShuttingDown
+		}
+		if ready == nil {
+			return nil
+		}
+		return ready(ctx)
+	}))
 
-	s := &Server{log: log}
 	if cfg.OAuth != nil {
 		g, err := newBearerGuard(*cfg.OAuth, cfg.MCPPath, log)
 		if err != nil {
@@ -80,14 +99,14 @@ func ok(w http.ResponseWriter, _ *http.Request) {
 	_, _ = w.Write([]byte("ok\n"))
 }
 
+// errShuttingDown is /readyz's answer while the server drains.
+var errShuttingDown = errors.New("shutting down")
+
 // readinessTimeout bounds one readiness check; the chart's probe allows 5 s.
 const readinessTimeout = 3 * time.Second
 
-// readiness answers /readyz from check; nil is always ready.
+// readiness answers /readyz from check.
 func readiness(check func(context.Context) error) http.HandlerFunc {
-	if check == nil {
-		return ok
-	}
 	return func(w http.ResponseWriter, r *http.Request) {
 		ctx, cancel := context.WithTimeout(r.Context(), readinessTimeout)
 		defer cancel()
@@ -110,8 +129,8 @@ func (s *Server) protect(next http.Handler) http.Handler {
 // Handler exposes the mux (tests).
 func (s *Server) Handler() http.Handler { return s.http.Handler }
 
-// Run serves until ctx is done, then shuts down gracefully. It returns early
-// when the listener cannot serve.
+// Run serves until ctx is done, drains for the shutdown delay, then shuts
+// down gracefully. It returns early when the listener cannot serve.
 func (s *Server) Run(ctx context.Context) error {
 	errCh := make(chan error, 1)
 	go func() {
@@ -125,6 +144,15 @@ func (s *Server) Run(ctx context.Context) error {
 	case err := <-errCh:
 		return err
 	case <-ctx.Done():
+	}
+	if s.delay > 0 {
+		s.draining.Store(true)
+		s.log.Info("draining", "delay", s.delay)
+		select {
+		case err := <-errCh:
+			return err
+		case <-time.After(s.delay):
+		}
 	}
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()

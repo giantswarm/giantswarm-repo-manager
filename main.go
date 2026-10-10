@@ -41,6 +41,7 @@ import (
 
 type options struct {
 	listen, mcpPath string
+	shutdownDelay   time.Duration
 
 	valkeyAddr, org, sweepTeams   string
 	sweepInterval, connectTimeout time.Duration
@@ -70,6 +71,7 @@ func parseFlags(args []string) (*options, error) {
 	f := flag.NewFlagSet("giantswarm-repo-manager", flag.ContinueOnError)
 	f.StringVar(&o.listen, "listen", envOr("LISTEN", ":8080"), "Listen address (LISTEN)")
 	f.StringVar(&o.mcpPath, "mcp-path", envOr("MCP_PATH", "/mcp"), "MCP endpoint path (MCP_PATH)")
+	f.DurationVar(&o.shutdownDelay, "shutdown-delay", envDuration("SHUTDOWN_DELAY", 0), "How long the server keeps serving after SIGTERM, /readyz answering 503, before it closes the listener: the time the cluster takes to drop the pod from the Service's endpoints. 0 closes at once (SHUTDOWN_DELAY)")
 	f.StringVar(&o.valkeyAddr, "valkey-addr", envOr("VALKEY_ADDR", ""), "host:port of the Valkey the inventory lives in (VALKEY_ADDR)")
 	f.DurationVar(&o.connectTimeout, "inventory-connect-timeout", envDuration("INVENTORY_CONNECT_TIMEOUT", 5*time.Minute), "How long the start waits for the inventory store, retrying with backoff, before the server gives up and exits; it serves meanwhile, not ready. 0 waits for ever (INVENTORY_CONNECT_TIMEOUT)")
 	f.StringVar(&o.org, "org", envOr("INVENTORY_ORG", "giantswarm"), "The GitHub organization the inventory covers (INVENTORY_ORG)")
@@ -192,7 +194,7 @@ func run(ctx context.Context, o *options, log *slog.Logger) error {
 		return sweepOnce(ctx, deps.Collector)
 	}
 
-	cfg := server.Config{Addr: o.listen, MCPPath: o.mcpPath}
+	cfg := server.Config{Addr: o.listen, MCPPath: o.mcpPath, ShutdownDelay: o.shutdownDelay}
 	if store != nil {
 		cfg.Ready = store.Ping
 	}
@@ -236,7 +238,7 @@ func run(ctx context.Context, o *options, log *slog.Logger) error {
 	if reader != nil {
 		readsAs = reader.Name()
 	}
-	log.Info("giantswarm-repo-manager starting", "version", deps.Version, "engine", tools.EngineVersion(), "listen", o.listen, "mcp", o.mcpPath,
+	log.Info("giantswarm-repo-manager starting", "version", deps.Version, "engine", tools.EngineVersion(), "listen", o.listen, "shutdownDelay", o.shutdownDelay, "mcp", o.mcpPath,
 		"oauth", o.oauthEnabled, "authorizationServer", deps.AuthorizationServer, "githubApp", deps.App != nil, "reads", readsAs,
 		"inventory", o.valkeyAddr, "inventoryConnectTimeout", o.connectTimeout, "collector", deps.Collector != nil, "sweepInterval", o.sweepInterval,
 		"reconcilerPollInterval", o.reconcilerPollInterval, "reconcilerWorkflow", o.reconcilerWorkflow, "releasesInterval", o.releasesInterval, "tagPipelines", deps.TagPipelines,

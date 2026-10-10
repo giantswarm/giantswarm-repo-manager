@@ -373,14 +373,19 @@ service:
   # -- Service port (the container listens on 8080).
   port: 8080
 
-# -- Container resources.
+# -- Container resources. `ephemeral-storage` covers the `tmp` emptyDir at
+# `/tmp` (the root filesystem is read-only), the container's log files and its
+# writable layer; the restricted policy requires both fields on a container
+# mounting an emptyDir.
 resources:
   requests:
     cpu: 50m
     memory: 64Mi
+    ephemeral-storage: 64Mi
   limits:
     cpu: 500m
     memory: 256Mi
+    ephemeral-storage: 512Mi
 
 # -- Extra container arguments.
 extraArgs: []

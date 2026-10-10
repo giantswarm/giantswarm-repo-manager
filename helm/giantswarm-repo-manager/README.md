@@ -98,7 +98,7 @@ its own app, not as a component of the `agent-platform` meta chart.
 | securityContext | object | `{"allowPrivilegeEscalation":false,"capabilities":{"drop":["ALL"]},"readOnlyRootFilesystem":true,"runAsGroup":1000,"runAsNonRoot":true,"runAsUser":1000,"seccompProfile":{"type":"RuntimeDefault"}}` | Container security context. |
 | service.type | string | `"ClusterIP"` | Service type. |
 | service.port | int | `8080` | Service port (the container listens on 8080). |
-| resources | object | `{"limits":{"cpu":"500m","memory":"256Mi"},"requests":{"cpu":"50m","memory":"64Mi"}}` | Container resources. |
+| resources | object | `{"limits":{"cpu":"500m","ephemeral-storage":"512Mi","memory":"256Mi"},"requests":{"cpu":"50m","ephemeral-storage":"64Mi","memory":"64Mi"}}` | Container resources. `ephemeral-storage` covers the `tmp` emptyDir at `/tmp` (the root filesystem is read-only), the container's log files and its writable layer; the restricted policy requires both fields on a container mounting an emptyDir. |
 | extraArgs | list | `[]` | Extra container arguments. |
 | extraEnv | list | `[]` | Extra environment variables. |
 | nodeSelector | object | `{}` | Node selector. |

@@ -402,7 +402,7 @@
         },
         "resources": {
             "type": "object",
-            "description": "Container resources.",
+            "description": "Container resources. `ephemeral-storage` covers the `tmp` emptyDir at `/tmp` (the root filesystem is read-only), the container's log files and its writable layer; the restricted policy requires both fields on a container mounting an emptyDir.",
             "additionalProperties": false,
             "properties": {
                 "limits": {
@@ -410,6 +410,9 @@
                     "additionalProperties": false,
                     "properties": {
                         "cpu": {
+                            "type": "string"
+                        },
+                        "ephemeral-storage": {
                             "type": "string"
                         },
                         "memory": {
@@ -422,6 +425,9 @@
                     "additionalProperties": false,
                     "properties": {
                         "cpu": {
+                            "type": "string"
+                        },
+                        "ephemeral-storage": {
                             "type": "string"
                         },
                         "memory": {

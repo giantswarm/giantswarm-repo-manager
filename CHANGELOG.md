@@ -16,6 +16,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Chart: the manager container sets `ephemeral-storage` requests (64Mi) and limits (512Mi) by default, as the
+  restricted policy `require-emptydir-requests-and-limits` requires of a container mounting an emptyDir (`/tmp`).
 - The write tools' dry runs (`validate_repository`, `update_repository`, `transfer_repository`, `adopt_repository`,
   and the entry rewrites of `set_lifecycle` and `align_repository`) validate with the repositories schema the team
   files declare, the one the inventory holds the entry to once it merges, instead of the copy embedded in the

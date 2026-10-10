@@ -73,4 +73,22 @@ pvc=$(yq "select(.kind == \"PersistentVolumeClaim\" and .metadata.name == \"$cla
 [ "$(yq '.resources.requests.storage' <<<"$pvc")" = 1Gi ] ||
   fail "PersistentVolumeClaim $claim: requests $(yq '.resources.requests.storage' <<<"$pvc"), want 1Gi"
 
+# A rollout keeps the MCP backend reachable with default values: one
+# replica, replaced by surging (maxSurge 1, maxUnavailable 0) so the old pod
+# stops only once the new one is ready; the readiness probe asks /readyz on
+# the serving port; and the server drains for SHUTDOWN_DELAY after SIGTERM, a
+# delay plus the 15 s graceful shutdown within the termination grace period.
+dep=$(yq 'select(.kind == "Deployment" and .metadata.labels["app.kubernetes.io/name"] == "giantswarm-repo-manager") | .spec' <<<"$render")
+[ -n "$dep" ] || fail "the default render has no giantswarm-repo-manager Deployment"
+[ "$(yq '.replicas' <<<"$dep")" = 1 ] || fail "Deployment: replicas $(yq '.replicas' <<<"$dep"), want 1"
+[ "$(yq '.strategy.type == "RollingUpdate" and .strategy.rollingUpdate.maxSurge == 1 and .strategy.rollingUpdate.maxUnavailable == 0' <<<"$dep")" = true ] ||
+  fail "Deployment: strategy $(yq -o=json -I=0 '.strategy' <<<"$dep"), want RollingUpdate with maxSurge 1, maxUnavailable 0"
+ctr=$(yq '.template.spec.containers[] | select(.name == "giantswarm-repo-manager")' <<<"$dep")
+[ "$(yq '.readinessProbe.httpGet.path == "/readyz" and .readinessProbe.httpGet.port == "http"' <<<"$ctr")" = true ] ||
+  fail "Deployment: readinessProbe $(yq -o=json -I=0 '.readinessProbe' <<<"$ctr"), want GET /readyz on port http"
+delay=$(yq '.env[] | select(.name == "SHUTDOWN_DELAY") | .value' <<<"$ctr")
+[[ $delay =~ ^([0-9]+)s$ ]] || fail "Deployment: SHUTDOWN_DELAY '$delay', want whole seconds"
+grace=$(yq '.template.spec.terminationGracePeriodSeconds // 30' <<<"$dep")
+((BASH_REMATCH[1] + 15 < grace)) || fail "Deployment: SHUTDOWN_DELAY $delay plus the 15 s shutdown exceeds the ${grace}s termination grace period"
+
 echo "verify-chart: ok"

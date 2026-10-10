@@ -35,7 +35,9 @@ its own app, not as a component of the `agent-platform` meta chart.
 | Key | Type | Default | Description |
 |-----|------|---------|-------------|
 | global | object | `{}` | Platform-wide values an umbrella chart shares with every component and Helm forwards here; this chart reads none of them. |
-| replicaCount | int | `1` | Number of replicas. The server holds its state in Valkey; more than one is fine. |
+| replicaCount | int | `1` | Number of replicas. One: every replica runs the collector's schedules — the org sweep and the release watch hold no lease — so a second one would sweep twice on the inventory App's budget and two release-watch passes could race to tell the same notice. A rollout stays available through `strategy` and `shutdownDelay` instead. |
+| strategy | object | `{"rollingUpdate":{"maxSurge":1,"maxUnavailable":0},"type":"RollingUpdate"}` | How a rollout replaces the pod: the new pod starts first and the old one stops only once the new one is ready — its `/readyz` answering on the serving port with the store connected — so the Service always has a serving pod behind it. |
+| shutdownDelay | string | `"10s"` | How long the server keeps serving after SIGTERM, `/readyz` answering 503, before it closes its port (a Go duration): the time the cluster takes to drop the stopping pod from the Service's endpoints, so a rollout's old pod refuses no connection still routed to it. Passed as `SHUTDOWN_DELAY`; with the server's 15 s graceful shutdown it stays within the pod's 30 s termination grace period. |
 | image.registry | string | `"gsoci.azurecr.io"` | Image registry. |
 | image.repository | string | `"giantswarm/giantswarm-repo-manager"` | Image repository. |
 | image.pullPolicy | string | `"IfNotPresent"` | Image pull policy. |

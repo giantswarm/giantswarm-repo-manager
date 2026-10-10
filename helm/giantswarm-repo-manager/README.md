@@ -22,8 +22,8 @@ connection re-establishes itself on the next command once Valkey is back; the
 sweep schedule starts on a connected store.
 
 The store's network policy is the chart's: the valkey subchart renders the
-CiliumNetworkPolicy `valkey` in the release's namespace (the valkey chart
-names it after itself), and it admits the server's pods on the Valkey port (6379), the
+CiliumNetworkPolicy `giantswarm-repo-manager-valkey` in the release's namespace
+(the valkey chart names it after the release), and it admits the server's pods on the Valkey port (6379), the
 metrics collectors (`valkey.ciliumNetworkPolicy.ingress.metricsScrapers`,
 alloy-metrics by default) on the exporter port and the kubelet's probes,
 nothing else; egress is DNS alone. A Valkey client outside the release goes
@@ -38,7 +38,7 @@ its own app, not as a component of the `agent-platform` meta chart.
 
 | Repository | Name | Version |
 |------------|------|---------|
-| oci://gsoci.azurecr.io/charts/giantswarm | valkey | 0.3.5 |
+| oci://gsoci.azurecr.io/charts/giantswarm | valkey | 0.3.6 |
 
 ## Values
 

@@ -16,6 +16,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Chart: the store's CiliumNetworkPolicy is named after the release (`giantswarm-repo-manager-valkey`, was the chart
+  name `valkey`), so it no longer collides with another `valkey` release's policy in the same namespace, which made the
+  upgrade fail. The chart's Valkey is the `valkey` app 0.3.6 (was 0.3.5).
 - Chart: the manager container sets `ephemeral-storage` requests (64Mi) and limits (512Mi) by default, as the
   restricted policy `require-emptydir-requests-and-limits` requires of a container mounting an emptyDir (`/tmp`).
 - The write tools' dry runs (`validate_repository`, `update_repository`, `transfer_repository`, `adopt_repository`,

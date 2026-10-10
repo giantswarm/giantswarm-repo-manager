@@ -22,6 +22,16 @@ runtime reads the same way — readiness fails, the pod stays up — and the
 connection re-establishes itself on the next command once Valkey is back; the
 sweep schedule starts on a connected store.
 
+The store's network policy is the chart's: the valkey subchart renders the
+CiliumNetworkPolicy `valkey` in the release's namespace (the valkey chart
+names it after itself), and it admits the server's pods on the Valkey port (6379), the
+metrics collectors (`valkey.ciliumNetworkPolicy.ingress.metricsScrapers`,
+alloy-metrics by default) on the exporter port and the kubelet's probes,
+nothing else; egress is DNS alone. A Valkey client outside the release goes
+into `valkey.ciliumNetworkPolicy.ingress.additionalPeers`. Cilium policies
+add up: any other policy selecting the store's pods widens this ingress, so
+none sits beside it.
+
 Giant Swarm-specific: it manages the giantswarm org's repositories and ships as
 its own app, not as a component of the `agent-platform` meta chart.
 

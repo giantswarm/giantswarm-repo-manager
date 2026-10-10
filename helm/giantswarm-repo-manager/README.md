@@ -21,6 +21,16 @@ runtime reads the same way — readiness fails, the pod stays up — and the
 connection re-establishes itself on the next command once Valkey is back; the
 sweep schedule starts on a connected store.
 
+The store's network policy is the chart's: the valkey subchart renders the
+CiliumNetworkPolicy `valkey` in the release's namespace (the valkey chart
+names it after itself), and it admits the server's pods on the Valkey port (6379), the
+metrics collectors (`valkey.ciliumNetworkPolicy.ingress.metricsScrapers`,
+alloy-metrics by default) on the exporter port and the kubelet's probes,
+nothing else; egress is DNS alone. A Valkey client outside the release goes
+into `valkey.ciliumNetworkPolicy.ingress.additionalPeers`. Cilium policies
+add up: any other policy selecting the store's pods widens this ingress, so
+none sits beside it.
+
 Giant Swarm-specific: it manages the giantswarm org's repositories and ships as
 its own app, not as a component of the `agent-platform` meta chart.
 
@@ -28,7 +38,7 @@ its own app, not as a component of the `agent-platform` meta chart.
 
 | Repository | Name | Version |
 |------------|------|---------|
-| oci://gsoci.azurecr.io/charts/giantswarm | valkey | 0.3.4 |
+| oci://gsoci.azurecr.io/charts/giantswarm | valkey | 0.3.5 |
 
 ## Values
 
@@ -46,7 +56,7 @@ its own app, not as a component of the `agent-platform` meta chart.
 | imagePullSecrets | list | `[]` | Image pull secrets. |
 | nameOverride | string | `""` | Override the chart name. |
 | fullnameOverride | string | `""` | Override the fully qualified app name. |
-| valkey | object | `{"ciliumNetworkPolicy":{"enabled":false},"enabled":true,"valkey":{"dataStorage":{"enabled":true,"requestedSize":"1Gi"},"deploymentStrategy":"Recreate","fullnameOverride":"giantswarm-repo-manager-valkey","metrics":{"exporter":{"securityContext":{"allowPrivilegeEscalation":false,"capabilities":{"drop":["ALL"]},"readOnlyRootFilesystem":true,"runAsNonRoot":true,"runAsUser":1000,"seccompProfile":{"type":"RuntimeDefault"}}}},"podAnnotations":{"karpenter.sh/do-not-disrupt":"true"},"podSecurityContext":{"fsGroup":1000,"runAsGroup":1000,"runAsUser":1000,"seccompProfile":{"type":"RuntimeDefault"}},"replicaCount":1,"securityContext":{"allowPrivilegeEscalation":false,"capabilities":{"drop":["ALL"]},"readOnlyRootFilesystem":true,"runAsNonRoot":true,"runAsUser":1000,"seccompProfile":{"type":"RuntimeDefault"}}},"vpa":{"enabled":false}}` | The inventory store: the Giant Swarm `valkey` app as a subchart (its values live under `valkey.valkey`, the upstream chart's). One replica on a 1Gi RWO volume with `Recreate`, so a rollout does not deadlock on the volume and the inventory survives a Valkey restart as well as a manager restart; the store is a cache — every record is rebuilt from the team files and GitHub — so the restart gap costs nothing. Set `valkey.enabled: false` and `inventory.valkeyAddress` to use a Valkey outside the release. |
+| valkey | object | `{"ciliumNetworkPolicy":{"enabled":true,"ingress":{"clients":[{"matchLabels":{"app.kubernetes.io/name":"giantswarm-repo-manager"},"namespace":""}],"metricsScrapers":[{"matchLabels":{"app.kubernetes.io/instance":"alloy-metrics"},"namespace":"kube-system"}]}},"enabled":true,"valkey":{"dataStorage":{"enabled":true,"requestedSize":"1Gi"},"deploymentStrategy":"Recreate","fullnameOverride":"giantswarm-repo-manager-valkey","metrics":{"exporter":{"securityContext":{"allowPrivilegeEscalation":false,"capabilities":{"drop":["ALL"]},"readOnlyRootFilesystem":true,"runAsNonRoot":true,"runAsUser":1000,"seccompProfile":{"type":"RuntimeDefault"}}}},"podAnnotations":{"karpenter.sh/do-not-disrupt":"true"},"podSecurityContext":{"fsGroup":1000,"runAsGroup":1000,"runAsUser":1000,"seccompProfile":{"type":"RuntimeDefault"}},"replicaCount":1,"securityContext":{"allowPrivilegeEscalation":false,"capabilities":{"drop":["ALL"]},"readOnlyRootFilesystem":true,"runAsNonRoot":true,"runAsUser":1000,"seccompProfile":{"type":"RuntimeDefault"}}},"vpa":{"enabled":false}}` | The inventory store: the Giant Swarm `valkey` app as a subchart (its values live under `valkey.valkey`, the upstream chart's). One replica on a 1Gi RWO volume with `Recreate`, so a rollout does not deadlock on the volume and the inventory survives a Valkey restart as well as a manager restart; the store is a cache — every record is rebuilt from the team files and GitHub — so the restart gap costs nothing. Set `valkey.enabled: false` and `inventory.valkeyAddress` to use a Valkey outside the release. |
 | inventory.valkeyAddress | string | `""` | Address (`host:port`) of the Valkey the inventory lives in, passed to the server as `VALKEY_ADDR`. Empty derives the subchart's Service, `<valkey.valkey.fullnameOverride>.<namespace>.svc:6379`; required when `valkey.enabled` is false. |
 | inventory.connectTimeout | string | `"5m"` | How long the server waits for the store at start (a Go duration), retrying with backoff, before it gives up and exits; it serves meanwhile, liveness passing and readiness failing until the store answers, so a Valkey that starts after the manager — a volume binding late, a restart — costs no container restart within the window. `"0"` waits for ever. |
 | inventory.org | string | `"giantswarm"` | The GitHub organization the inventory covers. |

@@ -12,6 +12,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/giantswarm/devctl/v8/pkg/reposetup/reconcile"
 	"github.com/google/go-github/v92/github"
 )
 
@@ -58,6 +59,9 @@ type fakeRepo struct {
 	// uninstalled says the inventory App's installation does not cover the
 	// repository: the App's reads on it answer 403.
 	uninstalled bool
+	// labels are the repository's issue labels by name; a seeded repository
+	// has none.
+	labels map[string]bool
 }
 
 // fakeRelease is the repository's latest release.
@@ -81,7 +85,8 @@ func (f *fakeRepos) add(name, admin string) *fakeRepo {
 	defer f.mu.Unlock()
 	now := time.Now()
 	r := &fakeRepo{name: name, admins: map[string]bool{admin: true}, files: map[string]string{readmeFile: "# " + name + "\n"},
-		blobs: map[string][]byte{}, trees: map[string][]*github.TreeEntry{}, commits: map[string]string{}, createdAt: now, headAt: now}
+		blobs: map[string][]byte{}, trees: map[string][]*github.TreeEntry{}, commits: map[string]string{}, createdAt: now, headAt: now,
+		labels: map[string]bool{}}
 	r.head = r.next("c")
 	f.repos[name] = r
 	return r
@@ -178,6 +183,14 @@ func (f *fakeRepos) register(mux *http.ServeMux, g *fakeGitHub) {
 	}
 	mux.HandleFunc("GET /api/v3/repos/{owner}/{repo}", withRepo(func(w http.ResponseWriter, r *http.Request, repo *fakeRepo) {
 		writeJSON(w, http.StatusOK, repo.toGitHub(repo.admins[g.logins[bearer(r)]]))
+	}))
+	mux.HandleFunc("GET /api/v3/repos/{owner}/{repo}/labels/{name}", withRepo(func(w http.ResponseWriter, r *http.Request, repo *fakeRepo) {
+		name := r.PathValue("name")
+		if !repo.labels[name] {
+			ghMessage(w, http.StatusNotFound, "Not Found")
+			return
+		}
+		writeJSON(w, http.StatusOK, github.Label{Name: name, Color: reconcile.DefaultLabelColor})
 	}))
 	mux.HandleFunc("GET /api/v3/user/memberships/orgs/{org}", func(w http.ResponseWriter, r *http.Request) {
 		role, ok := g.roles[g.logins[bearer(r)]]

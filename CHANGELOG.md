@@ -13,6 +13,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - devctl v8.120.0: an entry's `lineGate` gates a fork line's land push. The sync's App bypasses `devctl: default
   branch` and the engine keeps `devctl: line gate`, the line's required checks for every push with no bypass actor.
+- devctl v8.129.0: the set-up step `labels` keeps the owning team's issue label `team/<team>` on every declared
+  repository. The inventory's checks report a missing one as drift (`devctl repo status`, the Repositories page),
+  Align now's reconciler run creates it in the default colour, and Align now's warning names it.
 
 ### Fixed
 

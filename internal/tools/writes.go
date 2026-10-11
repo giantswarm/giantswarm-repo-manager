@@ -1000,7 +1000,7 @@ type Dispatch struct {
 const alignChanges = "merge settings (squash only, auto-merge, delete branch on merge, update branch), wiki and projects off, issues on, " +
 	"team permissions (employees admin, bots push), branch protection (one approving review, enforce_admins on, strict up-to-date, " +
 	"every reporting check required), the CircleCI follow and setup workflows, a CODEOWNERS pull request, description and visibility, " +
-	"lifecycle, catalog and mapping, and a missed release build"
+	"the owning team's issue label team/<team> (created when missing), lifecycle, catalog and mapping, and a missed release build"
 
 // alignTrue is the field of an entry that opts the repository in to
 // alignment, as the answers spell it.

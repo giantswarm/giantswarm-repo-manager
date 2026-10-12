@@ -149,3 +149,34 @@ func TestReadyzFollowsTheListenerAndDrains(t *testing.T) {
 		t.Fatal("the port still accepts connections after Run returned")
 	}
 }
+
+// A body beyond the bound is refused, and the endpoint keeps answering.
+func TestMCPBodyIsBounded(t *testing.T) {
+	s, err := New(Config{Addr: "127.0.0.1:0"}, mcpserver.NewMCPServer("test", "0"), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ts := httptest.NewServer(s.Handler())
+	defer ts.Close()
+	post := func(body string) int {
+		req, _ := http.NewRequest(http.MethodPost, ts.URL+"/mcp", strings.NewReader(body))
+		req.Header.Set("Content-Type", "application/json")
+		req.Header.Set("Accept", "application/json, text/event-stream")
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer func() { _ = resp.Body.Close() }()
+		_, _ = io.Copy(io.Discard, resp.Body)
+		return resp.StatusCode
+	}
+
+	big := `{"jsonrpc":"2.0","id":1,"method":"ping","params":{"pad":"` + strings.Repeat("x", maxMCPBodyBytes) + `"}}`
+	if code := post(big); code < 400 {
+		t.Errorf("MCP body over the bound: %d, want a refusal", code)
+	}
+	initialize := `{"jsonrpc":"2.0","id":2,"method":"initialize","params":{"protocolVersion":"2025-03-26","capabilities":{},"clientInfo":{"name":"probe","version":"0"}}}`
+	if code := post(initialize); code != http.StatusOK {
+		t.Errorf("MCP initialize after a refusal: %d, want 200", code)
+	}
+}

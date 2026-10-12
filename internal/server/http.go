@@ -81,7 +81,10 @@ func New(cfg Config, mcpSrv *mcpserver.MCPServer, log *slog.Logger) (*Server, er
 		g.register(mux)
 		s.guard = g
 	}
-	mux.Handle(cfg.MCPPath, s.protect(mcpserver.NewStreamableHTTPServer(mcpSrv, mcpserver.WithEndpointPath(cfg.MCPPath))))
+	// mcp-go reads a POST body whole before validating it (CVE-2026-108859):
+	// the bound keeps that read small.
+	mcpHandler := mcpserver.NewStreamableHTTPServer(mcpSrv, mcpserver.WithEndpointPath(cfg.MCPPath))
+	mux.Handle(cfg.MCPPath, http.MaxBytesHandler(s.protect(mcpHandler), maxMCPBodyBytes))
 
 	s.http = &http.Server{
 		Addr:              cfg.Addr,
@@ -98,6 +101,9 @@ func ok(w http.ResponseWriter, _ *http.Request) {
 	w.WriteHeader(http.StatusOK)
 	_, _ = w.Write([]byte("ok\n"))
 }
+
+// maxMCPBodyBytes bounds an MCP request body.
+const maxMCPBodyBytes = 1 << 20
 
 // errShuttingDown is /readyz's answer while the server drains.
 var errShuttingDown = errors.New("shutting down")

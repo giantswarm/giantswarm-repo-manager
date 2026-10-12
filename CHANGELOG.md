@@ -9,6 +9,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- The MCP endpoint refuses a request body larger than 1 MiB before mcp-go reads it whole (CVE-2026-108859, no fixed mcp-go release yet; the scan ignores it until 2026-11-12). ([#202](https://github.com/giantswarm/giantswarm-repo-manager/issues/202))
+
 ### Added
 
 - devctl v8.120.0: an entry's `lineGate` gates a fork line's land push. The sync's App bypasses `devctl: default

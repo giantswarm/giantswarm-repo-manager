@@ -11,7 +11,7 @@ import (
 	"testing"
 	"time"
 
-	mcpserver "github.com/mark3labs/mcp-go/server"
+	mcpserver "github.com/mark3labs/mcp-go/v2/server"
 )
 
 // /readyz is the check's: no check or a nil error is 200, an error is 503

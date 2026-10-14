@@ -26,9 +26,9 @@ import (
 	"github.com/giantswarm/devctl/v8/pkg/reposetup"
 
 	"github.com/alicebob/miniredis/v2"
-	"github.com/mark3labs/mcp-go/client"
-	"github.com/mark3labs/mcp-go/client/transport"
-	"github.com/mark3labs/mcp-go/mcp"
+	"github.com/mark3labs/mcp-go/v2/client"
+	"github.com/mark3labs/mcp-go/v2/client/transport"
+	"github.com/mark3labs/mcp-go/v2/mcp"
 
 	"github.com/giantswarm/giantswarm-repo-manager/internal/collect"
 	"github.com/giantswarm/giantswarm-repo-manager/internal/gh"

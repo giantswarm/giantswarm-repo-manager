@@ -10,7 +10,7 @@ import (
 	"time"
 
 	"github.com/giantswarm/devctl/v8/pkg/reposetup/reconcile"
-	"github.com/mark3labs/mcp-go/client"
+	"github.com/mark3labs/mcp-go/v2/client"
 
 	"github.com/giantswarm/giantswarm-repo-manager/internal/collect"
 	"github.com/giantswarm/giantswarm-repo-manager/internal/inventory"

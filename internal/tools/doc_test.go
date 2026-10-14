@@ -9,7 +9,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/mark3labs/mcp-go/mcp"
+	"github.com/mark3labs/mcp-go/v2/mcp"
 )
 
 // TestToolsDocIsCurrent keeps docs/tools.md — the tool names, descriptions

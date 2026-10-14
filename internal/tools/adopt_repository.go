@@ -7,7 +7,7 @@ import (
 	"strings"
 
 	"github.com/giantswarm/devctl/v8/pkg/reposetup"
-	"github.com/mark3labs/mcp-go/mcp"
+	"github.com/mark3labs/mcp-go/v2/mcp"
 
 	"github.com/giantswarm/giantswarm-repo-manager/internal/inventory"
 	"github.com/giantswarm/giantswarm-repo-manager/internal/teamfiles"

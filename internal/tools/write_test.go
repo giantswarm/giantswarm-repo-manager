@@ -8,9 +8,9 @@ import (
 	"testing"
 
 	"github.com/giantswarm/devctl/v8/pkg/reposetup"
-	"github.com/mark3labs/mcp-go/client"
-	"github.com/mark3labs/mcp-go/mcp"
-	mcpserver "github.com/mark3labs/mcp-go/server"
+	"github.com/mark3labs/mcp-go/v2/client"
+	"github.com/mark3labs/mcp-go/v2/mcp"
+	mcpserver "github.com/mark3labs/mcp-go/v2/server"
 
 	"github.com/giantswarm/giantswarm-repo-manager/internal/identity"
 	"github.com/giantswarm/giantswarm-repo-manager/internal/review"

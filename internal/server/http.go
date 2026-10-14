@@ -16,7 +16,7 @@ import (
 	"sync/atomic"
 	"time"
 
-	mcpserver "github.com/mark3labs/mcp-go/server"
+	mcpserver "github.com/mark3labs/mcp-go/v2/server"
 )
 
 // Config configures the listener.

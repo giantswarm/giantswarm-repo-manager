@@ -111,4 +111,16 @@ want='[{"app.kubernetes.io/instance":"alloy-metrics","io.kubernetes.pod.namespac
 [ "$(yq -o=json -I=0 '[.ingress[] | .fromEntities // [] | .[]]' <<<"$cnp")" = '["host"]' ] ||
   fail "Valkey policy: entities $(yq -o=json -I=0 '[.ingress[] | .fromEntities // [] | .[]]' <<<"$cnp"), want [\"host\"] alone"
 
+# The registration carries the name the Dev Portal shows for the server as its
+# ui.giantswarm.io/display-name annotation: muster.mcpServer.displayName,
+# "Repository Manager" by default; an empty one renders no annotation.
+mcp() { helm template t "$CHART" --set muster.mcpServer.enabled=true "$@" | yq 'select(.kind == "MCPServer") | .metadata'; }
+name=$(mcp | yq '.annotations["ui.giantswarm.io/display-name"]')
+[ "$name" = "Repository Manager" ] || fail "MCPServer: display name '$name', want 'Repository Manager'"
+name=$(mcp --set-string 'muster.mcpServer.displayName=Repos: all of them' | yq '.annotations["ui.giantswarm.io/display-name"]')
+[ "$name" = "Repos: all of them" ] || fail "MCPServer: display name '$name' with muster.mcpServer.displayName='Repos: all of them'"
+meta=$(mcp --set muster.mcpServer.displayName=)
+[ "$(yq 'has("annotations")' <<<"$meta")" = false ] ||
+  fail "MCPServer: annotations $(yq -o=json -I=0 '.annotations' <<<"$meta") with an empty muster.mcpServer.displayName, want none"
+
 echo "verify-chart: ok"

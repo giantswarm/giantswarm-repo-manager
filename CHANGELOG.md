@@ -15,6 +15,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Chart: `muster.mcpServer.displayName` (default `Repository Manager`) is rendered as the MCPServer's `ui.giantswarm.io/display-name` annotation, the name the Dev Portal shows for the server ([backstage#3012](https://github.com/giantswarm/backstage/pull/3012)). Empty renders no annotation.
 - devctl v8.120.0: an entry's `lineGate` gates a fork line's land push. The sync's App bypasses `devctl: default
   branch` and the engine keeps `devctl: line gate`, the line's required checks for every push with no bypass actor.
 - devctl v8.129.0: the set-up step `labels` keeps the owning team's issue label `team/<team>` on every declared

@@ -20,6 +20,10 @@ metadata:
     {{- with .Values.muster.mcpServer.labels }}
     {{- toYaml . | nindent 4 }}
     {{- end }}
+  {{- with .Values.muster.mcpServer.displayName }}
+  annotations:
+    ui.giantswarm.io/display-name: {{ . | quote }}
+  {{- end }}
 spec:
   autoStart: {{ .Values.muster.mcpServer.autoStart }}
   type: streamable-http

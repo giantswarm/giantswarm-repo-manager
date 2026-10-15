@@ -9,7 +9,7 @@ require (
 	github.com/google/go-github/v92 v92.0.0
 	github.com/mark3labs/mcp-go v1.3.0
 	github.com/sirupsen/logrus v1.10.2
-	github.com/valkey-io/valkey-go v1.0.78
+	github.com/valkey-io/valkey-go v1.0.79
 	gopkg.in/yaml.v3 v3.0.1
 )
 

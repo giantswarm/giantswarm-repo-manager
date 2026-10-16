@@ -9,6 +9,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- Renovate opens a `devctl/v8` bump PR as soon as devctl releases and merges it on green, so a devctl fix reaches the reconciler without delay.
+
 ### Fixed
 
 - The set-up check runs devctl 8.139.13's engine: a repository whose generated CI has no CircleCI job (GitHub Actions

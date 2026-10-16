@@ -37,11 +37,9 @@ func TestToolsDocIsCurrent(t *testing.T) {
 	}
 }
 
-// Description budgets (giantswarm/giantswarm#38592). muster's filter_tools
-// shows the first summaryChars of a description, the text a model picks a
-// tool by.
+// Description budgets (giantswarm/giantswarm#38592); the summary's is
+// SummaryMax.
 const (
-	summaryChars     = 117
 	descriptionChars = 600
 	paramChars       = 150
 	prefixChars      = 40
@@ -56,9 +54,9 @@ func TestToolDescriptionBudgets(t *testing.T) {
 	prefixes := map[string]string{}
 	for _, tool := range res.Tools {
 		d := tool.Description
-		first, _, _ := strings.Cut(d, ". ")
-		if n := len([]rune(first)) + 1; n > summaryChars {
-			t.Errorf("%s: first sentence is %d chars, over %d: %q", tool.Name, n, summaryChars, first)
+		first, _, _ := strings.Cut(d, "\n")
+		if n := len([]rune(strings.TrimSpace(first))); n > SummaryMax {
+			t.Errorf("%s: first line is %d runes, over %d: %q", tool.Name, n, SummaryMax, first)
 		}
 		if n := len([]rune(d)); n > descriptionChars {
 			t.Errorf("%s: description is %d chars, over %d", tool.Name, n, descriptionChars)
@@ -104,4 +102,20 @@ func renderToolsDoc(ts []mcp.Tool) string {
 		fmt.Fprintf(&b, "```json\n%s\n```\n", schema)
 	}
 	return b.String()
+}
+
+func TestDescribeToolRefusesALongSummary(t *testing.T) {
+	for _, summary := range []string{"", strings.Repeat("x", SummaryMax+1), "two\nlines"} {
+		func() {
+			defer func() {
+				if recover() == nil {
+					t.Errorf("summary %q: no panic", summary)
+				}
+			}()
+			describeTool(summary, "")
+		}()
+	}
+	if got := description(strings.Repeat("x", SummaryMax), " more "); got != strings.Repeat("x", SummaryMax)+"\n\nmore" {
+		t.Errorf("description: %q", got)
+	}
 }

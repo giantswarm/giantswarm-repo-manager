@@ -371,9 +371,9 @@ func (t *tools) repositoryName(args map[string]any) (string, error) {
 
 func (t *tools) updateRepository() WriteTool {
 	return WriteTool{
-		Name: ToolUpdateRepository,
-		Description: "Change a declared repository's team-file entry. Pass the whole entry, not a patch: omitted fields are removed. " +
-			"Lifecycle: set_lifecycle. Owner: transfer_repository. The team reviews the pull request.",
+		Name:    ToolUpdateRepository,
+		Summary: "Change a declared repository's team-file entry. Pass the whole entry, not a patch: omitted fields are removed.",
+		Details: "Lifecycle: set_lifecycle. Owner: transfer_repository. The team reviews the pull request.",
 		Options: []mcp.ToolOption{
 			mcp.WithString(argRepository, mcp.Required(), mcp.Description("Repository name, with or without the org.")),
 			mcp.WithObject(argEntry, mcp.Required(), mcp.Description("The whole entry as it should read afterwards, not a patch: omitted fields are removed."), mcp.AdditionalProperties(true)),
@@ -464,9 +464,9 @@ func reasonLine(reason string) string {
 
 func (t *tools) transferRepository() WriteTool {
 	return WriteTool{
-		Name: ToolTransferRepository,
-		Description: "Move a declared repository to another team via a team-file pull request; the receiving team approves. " +
-			"The reconciler then re-applies permissions, CODEOWNERS and catalog ownership.",
+		Name:    ToolTransferRepository,
+		Summary: "Move a declared repository to another team via a team-file pull request; the receiving team approves.",
+		Details: "The reconciler then re-applies permissions, CODEOWNERS and catalog ownership.",
 		Options: []mcp.ToolOption{
 			mcp.WithString(argRepository, mcp.Required(), mcp.Description("Repository name, with or without the org.")),
 			mcp.WithString(argToTeam, mcp.Required(), mcp.Description("The receiving team's slug (team-planeteers, …).")),
@@ -566,9 +566,9 @@ func decides(team, as string) string {
 
 func (t *tools) setLifecycle() WriteTool {
 	return WriteTool{
-		Name: ToolSetLifecycle,
-		Description: "Deprecate, archive or delete a declared repository. Deleting wipes code and issues; the person must type the name. " +
-			"deprecated: security-only Renovate. archived: archived on GitHub, unfollowed on CircleCI. deleted: deleted on GitHub with its " +
+		Name:    ToolSetLifecycle,
+		Summary: "Deprecate, archive or delete a declared repository. Deleting wipes code and issues; the person must type the name.",
+		Details: "deprecated: security-only Renovate. archived: archived on GitHub, unfollowed on CircleCI. deleted: deleted on GitHub with its " +
 			"code, issues, pull requests, releases and packages; an org owner can restore it for 90 days. The owning team approves.",
 		Destructive: true,
 		Options: []mcp.ToolOption{
@@ -722,9 +722,9 @@ type Approval struct {
 
 func (t *tools) approveChange() WriteTool {
 	return WriteTool{
-		Name: ToolApproveChange,
-		Description: "Approve and merge a team-file pull request in giantswarm/github as an owning-team member; authors can't self-approve. " +
-			"For a transfer, the receiving team approves. A pull request conflicting with its base is re-rendered on the current base first. " +
+		Name:    ToolApproveChange,
+		Summary: "Approve and merge a team-file pull request in giantswarm/github as an owning-team member; authors can't self-approve.",
+		Details: "For a transfer, the receiving team approves. A pull request conflicting with its base is re-rendered on the current base first. " +
 			"The Approve button of a Slack ask calls this tool.",
 		Options: []mcp.ToolOption{
 			mcp.WithNumber(argPullRequest, mcp.Required(), mcp.Description("The pull request number in the team-files repository (giantswarm/github).")),
@@ -1090,9 +1090,9 @@ func (t *tools) planOptIn(ctx context.Context, repo teamfiles.Repo, as string, t
 
 func (t *tools) alignRepository() WriteTool {
 	return WriteTool{
-		Name: ToolAlignRepository,
-		Description: "Apply a repository's declared set-up and company baseline now. Changes live GitHub/CircleCI settings: dry-run, show the person. " +
-			"The answer's warning lists what changes; show it before committing. Commit dispatches the reconciler as you; a declared repository " +
+		Name:    ToolAlignRepository,
+		Summary: "Apply a repository's declared set-up now. Changes live GitHub/CircleCI settings: dry-run and show the person first.",
+		Details: "The set-up is the declaration and the company baseline. The answer's warning lists what changes; show it before committing. Commit dispatches the reconciler as you; a declared repository " +
 			"without " + alignTrue + " gets the opt-in pull request instead, and one without an entry (pass team) is only checked.",
 		Destructive: true,
 		Options: []mcp.ToolOption{

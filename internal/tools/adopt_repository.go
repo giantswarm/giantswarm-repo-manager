@@ -29,9 +29,9 @@ var ErrAdoptDeleted = errors.New("adopting and deleting in one step is refused: 
 // repository that exists (the schema alone).
 func (t *tools) adoptRepository() WriteTool {
 	return WriteTool{
-		Name: ToolAdoptRepository,
-		Description: "Declare an existing, undeclared GitHub repository for a team. New: create_repository. Declared: update_repository. " +
-			"list_repositories scope unassigned lists the candidates; the team reviews the pull request. Set " + alignTrue + " in the entry to have " +
+		Name:    ToolAdoptRepository,
+		Summary: "Declare an existing, undeclared GitHub repository for a team. New: create_repository. Declared: update_repository.",
+		Details: "list_repositories scope unassigned lists the candidates; the team reviews the pull request. Set " + alignTrue + " in the entry to have " +
 			"the reconciler apply the declared set-up; without it, drift is only reported.",
 		Options: []mcp.ToolOption{
 			mcp.WithString(argRepository, mcp.Required(), mcp.Description("Repository name, with or without the org.")),

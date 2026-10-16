@@ -18,11 +18,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 
 - The tool descriptions are about a quarter of their length (~3.3k instead of ~7.5k tokens with the schemas). Each
-  starts with a sentence of at most 117 characters, the summary muster's `filter_tools` shows, saying what the tool
-  does and which tool to use instead; the shared `WRITES (…)` prefix is gone. What a model needs before a call stays
-  (whole entry, not a patch; the typed `confirm`; Align now's warning; calling `watch_repository` again); what the
-  answers and refusals already say, and how the service works inside, are left to them and the README. A test holds
-  the budgets ([giantswarm#38592](https://github.com/giantswarm/giantswarm/issues/38592)).
+  starts with a summary line of at most 120 runes, all muster's `filter_tools` shows (the first line, cut to 120),
+  saying what the tool does and which tool to use instead; the shared `WRITES (…)` prefix is gone. What a model needs
+  before a call stays (whole entry, not a patch; the typed `confirm`; Align now's warning; calling `watch_repository`
+  again); what the answers and refusals already say, and how the service works inside, are left to them and the
+  README. Every tool's description is built by `describeTool(summary, details)` (`Summary` and `Details` on a
+  `WriteTool`), which panics on a summary that does not fit; a test holds the other budgets
+  ([giantswarm#38592](https://github.com/giantswarm/giantswarm/issues/38592)).
 
 ### Added
 

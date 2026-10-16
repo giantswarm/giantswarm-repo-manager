@@ -45,8 +45,9 @@ var ErrNotImplemented = errors.New("not implemented yet")
 // DryRun or Commit.
 type WriteTool struct {
 	Name string
-	// Description is the tool's own text; registerWrite appends writeSuffix.
-	Description string
+	// Summary and Details are the tool's description (describeTool); Details
+	// gets writeSuffix appended.
+	Summary, Details string
 	// Destructive marks a write that deletes or overwrites what GitHub holds.
 	Destructive bool
 	// Options are the tool's own arguments (mcp.WithString and friends).
@@ -60,7 +61,7 @@ type WriteTool struct {
 // registerWrite adds wt to s with the framework's arguments and guard.
 func registerWrite(s *mcpserver.MCPServer, wt WriteTool) {
 	opts := []mcp.ToolOption{
-		mcp.WithDescription(wt.Description + writeSuffix),
+		describeTool(wt.Summary, wt.Details+writeSuffix),
 		mcp.WithBoolean(ArgDryRun, mcp.Description("Preview the change and write nothing (default false).")),
 		mcp.WithString(ArgMode, mcp.Description(`"commit": carry the change out as you. Required unless dryRun.`), mcp.Enum(string(ModeCommit))),
 		mcp.WithDestructiveHintAnnotation(wt.Destructive),

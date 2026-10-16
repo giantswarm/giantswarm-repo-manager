@@ -113,7 +113,7 @@ func creationArguments() []mcp.ToolOption {
 
 func (t *tools) registerValidate(s *mcpserver.MCPServer) {
 	opts := append([]mcp.ToolOption{
-		mcp.WithDescription("Preview create_repository with the same arguments: rendered entries, template, name check, refusals. Writes nothing. " +
+		describeTool("Preview create_repository with the same arguments: rendered entries, template, name check, refusals. Writes nothing.",
 			"Also the review notices a person sees before the pull request exists. Run it with exactly the arguments you then commit."),
 		readOnly(),
 	}, creationArguments()...)
@@ -128,9 +128,9 @@ func (t *tools) registerValidate(s *mcpserver.MCPServer) {
 // repository as its App, pushes the scaffold and sets it up.
 func (t *tools) createRepository() WriteTool {
 	return WriteTool{
-		Name: ToolCreateRepository,
-		Description: "Create new giantswarm repositories via a team-file pull request. For an existing repository: adopt_repository. " +
-			"Once it merges, the reconciler creates, scaffolds and sets up each repository. Preview with validate_repository. " +
+		Name:    ToolCreateRepository,
+		Summary: "Create new giantswarm repositories via a team-file pull request. For an existing repository: adopt_repository.",
+		Details: "Once it merges, the reconciler creates, scaffolds and sets up each repository. Preview with validate_repository. " +
 			"Visibility defaults to private: say `visibility: public` for a public repository.",
 		Options: creationArguments(),
 		DryRun:  func(ctx context.Context, args map[string]any) (any, error) { return t.validate(ctx, args) },

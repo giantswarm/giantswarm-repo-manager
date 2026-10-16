@@ -5,7 +5,7 @@ go 1.26.5
 require (
 	github.com/alicebob/miniredis/v2 v2.40.0
 	github.com/bradleyfalzon/ghinstallation/v2 v2.19.0
-	github.com/giantswarm/devctl/v8 v8.139.11
+	github.com/giantswarm/devctl/v8 v8.139.13
 	github.com/giantswarm/mcp-toolkit v0.4.0
 	github.com/google/go-github/v92 v92.0.0
 	github.com/mark3labs/mcp-go v1.3.0
@@ -138,6 +138,7 @@ require (
 	github.com/spf13/cast v1.10.0 // indirect
 	github.com/spf13/cobra v1.10.2 // indirect
 	github.com/spf13/pflag v1.0.10 // indirect
+	github.com/stretchr/objx v0.5.3 // indirect
 	github.com/theupdateframework/go-tuf/v2 v2.4.2 // indirect
 	github.com/titanous/json5 v1.0.0 // indirect
 	github.com/transparency-dev/formats v0.1.1 // indirect

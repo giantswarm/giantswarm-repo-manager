@@ -1,29 +1,31 @@
 # The tools
 
-Generated from the registered tools (`make tools-doc`); through muster every tool is `x_giantswarm-repo-manager_<name>`. Every write tool takes `dryRun` and `mode`; `commit` is the only write mode, `apply` is refused.
+Generated from the registered tools (`make tools-doc`); through muster every tool is `x_giantswarm-repo-manager_<name>`. `refresh_repository` and `sweep_inventory` write only the inventory cache; every other write tool takes `dryRun` and `mode`, where `commit` is the only write mode and `apply` is refused.
 
 | Tool | Kind |
 |---|---|
-| `adopt_repository` | write (dryRun, mode: commit) |
-| `align_repository` | write (dryRun, mode: commit) |
-| `approve_change` | write (dryRun, mode: commit) |
-| `create_repository` | write (dryRun, mode: commit) |
+| `adopt_repository` | write |
+| `align_repository` | write, destructive |
+| `approve_change` | write, destructive |
+| `create_repository` | write |
 | `get_info` | read-only |
 | `get_repository` | read-only |
 | `list_repositories` | read-only |
-| `refresh_repository` | cache annotation |
-| `set_lifecycle` | write (dryRun, mode: commit) |
-| `sweep_inventory` | cache annotation |
-| `transfer_repository` | write (dryRun, mode: commit) |
-| `update_repository` | write (dryRun, mode: commit) |
+| `refresh_repository` | write |
+| `set_lifecycle` | write, destructive |
+| `sweep_inventory` | write |
+| `transfer_repository` | write |
+| `update_repository` | write |
 | `validate_repository` | read-only |
 | `watch_repository` | read-only |
 
 ## `adopt_repository`
 
+```text
 Declare an existing, undeclared GitHub repository for a team. New: create_repository. Declared: update_repository.
 
 list_repositories scope unassigned lists the candidates; the team reviews the pull request. Set `align: true` in the entry to have the reconciler apply the declared set-up; without it, drift is only reported. A deprecated or archived entry gets `align: true`, so the reconciler applies the lifecycle and the baseline: tell the person. Writes as you: dryRun: true previews and writes nothing; mode: "commit" carries it out and can take a minute — wait for the answer.
+```
 
 ```json
 {
@@ -69,9 +71,11 @@ list_repositories scope unassigned lists the candidates; the team reviews the pu
 
 ## `align_repository`
 
+```text
 Apply a repository's declared set-up now. Changes live GitHub/CircleCI settings: dry-run and show the person first.
 
 The set-up is the declaration and the company baseline. The answer's warning lists what changes; show it before committing. Commit dispatches the reconciler as you; a declared repository without `align: true` gets the opt-in pull request instead, and one without an entry (pass team) is only checked. Writes as you: dryRun: true previews and writes nothing; mode: "commit" carries it out and can take a minute — wait for the answer.
+```
 
 ```json
 {
@@ -105,9 +109,11 @@ The set-up is the declaration and the company baseline. The answer's warning lis
 
 ## `approve_change`
 
+```text
 Approve a team-file pull request as an owning-team member and land it: merged, or auto-merge armed. Not your own.
 
 For a transfer, the receiving team approves. The answer says whether it merged, only armed auto-merge, or why neither. A pull request conflicting with its base is re-rendered on the current base and force-pushed as you first. The Approve button of a Slack ask calls this tool. Writes as you: dryRun: true previews and writes nothing; mode: "commit" carries it out and can take a minute — wait for the answer.
+```
 
 ```json
 {
@@ -137,9 +143,11 @@ For a transfer, the receiving team approves. The answer says whether it merged, 
 
 ## `create_repository`
 
+```text
 Create new giantswarm repositories via a team-file pull request. For an existing repository: adopt_repository.
 
 Once it merges, the reconciler creates, scaffolds and sets up each repository. Preview with validate_repository. Visibility defaults to private: say `visibility: public` for a public repository. Writes as you: dryRun: true previews and writes nothing; mode: "commit" carries it out and can take a minute — wait for the answer.
+```
 
 ```json
 {
@@ -187,9 +195,11 @@ Once it merges, the reconciler creates, scaffolds and sets up each repository. P
 
 ## `get_info`
 
+```text
 Who you are here, whether you can write, and the allowed componentType, flavour, language, visibility, lifecycle.
 
 Call it before composing a declaration, or when a call is refused for access. Also reports the service's version and configuration: team files, inventory, CircleCI, team reviews, engine and schema origin.
+```
 
 ```json
 {
@@ -201,9 +211,11 @@ Call it before composing a declaration, or when a call is refused for access. Al
 
 ## `get_repository`
 
+```text
 One repository's full inventory record: declaration, GitHub state, CI, set-up state, findings, pending run.
 
 Use it to check a repository or a write's outcome: setup.pendingRun is set until the reconciler has reported.
+```
 
 ```json
 {
@@ -222,9 +234,11 @@ Use it to check a repository or a write's outcome: setup.pendingRun is set until
 
 ## `list_repositories`
 
+```text
 Search and filter all giantswarm repositories: team, lifecycle, Renovate, CI, findings. Full record: get_repository.
 
 One row per repository with team, lifecycle, visibility, Renovate state, CI facts (architect orb, arm64, China push, cosign signing), finding kinds, set-up state and age, plus the last sweep's summary.
+```
 
 ```json
 {
@@ -329,9 +343,11 @@ One row per repository with team, lifecycle, visibility, Renovate state, CI fact
 
 ## `refresh_repository`
 
+```text
 Rebuild one repository's inventory record now, when it is stale or changed outside the manager. Writes only the cache.
 
 Reads GitHub, CircleCI and the team files, runs the engine's checks in read mode and returns the record.
+```
 
 ```json
 {
@@ -350,9 +366,11 @@ Reads GitHub, CircleCI and the team files, runs the engine's checks in read mode
 
 ## `set_lifecycle`
 
+```text
 Deprecate, archive or delete a declared repository. Deleting wipes code and issues; the person must type the name.
 
 deprecated: security-only Renovate. archived: archived on GitHub, unfollowed on CircleCI. deleted: deleted on GitHub with code, issues, pull requests, releases and packages; an org owner can restore it for 90 days. The owning team approves. An entry without `align: true` gets it, which opts the repository in to the company baseline: tell the person. Writes as you: dryRun: true previews and writes nothing; mode: "commit" carries it out and can take a minute — wait for the answer.
+```
 
 ```json
 {
@@ -400,9 +418,11 @@ deprecated: security-only Renovate. archived: archived on GitHub, unfollowed on 
 
 ## `sweep_inventory`
 
+```text
 Rebuild every repository's inventory record now instead of on schedule. Service-owner teams only; writes only the cache.
 
 Runs in the background: started is false while a sweep already runs; list_repositories shows the result when done.
+```
 
 ```json
 {
@@ -414,9 +434,11 @@ Runs in the background: started is false while a sweep already runs; list_reposi
 
 ## `transfer_repository`
 
+```text
 Move a declared repository to another team via a team-file pull request; the receiving team approves.
 
 The reconciler then re-applies permissions, CODEOWNERS and catalog ownership. Writes as you: dryRun: true previews and writes nothing; mode: "commit" carries it out and can take a minute — wait for the answer.
+```
 
 ```json
 {
@@ -455,9 +477,11 @@ The reconciler then re-applies permissions, CODEOWNERS and catalog ownership. Wr
 
 ## `update_repository`
 
+```text
 Change a declared repository's team-file entry. Pass the whole entry, not a patch: omitted fields are removed.
 
 Lifecycle: set_lifecycle. Owner: transfer_repository. The team reviews the pull request. Writes as you: dryRun: true previews and writes nothing; mode: "commit" carries it out and can take a minute — wait for the answer.
+```
 
 ```json
 {
@@ -498,9 +522,11 @@ Lifecycle: set_lifecycle. Owner: transfer_repository. The team reviews the pull 
 
 ## `validate_repository`
 
+```text
 Preview create_repository with the same arguments: rendered entries, template, name check, refusals. Writes nothing.
 
 Also the review notices a person sees before the pull request exists. Run it with exactly the arguments you then commit.
+```
 
 ```json
 {
@@ -537,9 +563,11 @@ Also the review notices a person sees before the pull request exists. Run it wit
 
 ## `watch_repository`
 
+```text
 After create_repository, follow the new repository until ready or a phase fails. Call again while changed or pending.
 
 Phases: declared, merged, created, scaffolded, setUp, released. Returns when ready, when a phase fails (failure says why; the watch ends), when a phase completes (changed: true — tell the person) or at timeout (pending names the phase); pendingReason says what is awaited.
+```
 
 ```json
 {

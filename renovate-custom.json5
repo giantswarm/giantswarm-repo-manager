@@ -1,0 +1,20 @@
+{
+  packageRules: [
+    {
+      // The reconciler embeds devctl: a devctl fix reaches repo get verdicts
+      // only once this module is bumped and rolled out. Open the bump PR as
+      // soon as a release exists and merge it on green, minor and major
+      // included.
+      matchDepNames: [
+        'github.com/giantswarm/devctl/v8',
+      ],
+      schedule: [
+        'at any time',
+      ],
+      minimumReleaseAge: null,
+      prCreation: 'immediate',
+      automerge: true,
+      automergeType: 'pr',
+    },
+  ],
+}

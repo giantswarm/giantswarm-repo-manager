@@ -222,6 +222,16 @@ func TestWatchRepositoryWaitsForTheDeclaredJobsAndTheSettleWindow(t *testing.T) 
 	if w.Ready || w.Failure == nil || w.Failure.Phase != tools.PhaseReleased || w.Failure.Reason != line[:len(line)-2]+" are failure: "+circleChart+" ("+stateFailure+")" {
 		t.Fatalf("build-chart red: %+v failure=%+v", w, w.Failure)
 	}
+
+	// A phase that turns red during the call ends the watch with no phase pending.
+	st.ghs.repos.report(shinyService, statePending, circleChart)
+	go func() {
+		time.Sleep(150 * time.Millisecond)
+		st.ghs.repos.report(shinyService, stateFailure, circleChart)
+	}()
+	if w = st.watch(t, c, pr, 5); w.Failure == nil || w.Failure.Phase != tools.PhaseReleased || w.Pending != "" || w.PendingReason != "" {
+		t.Fatalf("build-chart red mid-call: %+v failure=%+v", w, w.Failure)
+	}
 }
 
 // TestWatchRepositoryReadiesAPlainRepositoryOnceSettled: a declaration

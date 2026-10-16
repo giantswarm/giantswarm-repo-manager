@@ -29,20 +29,15 @@ var ErrAdoptDeleted = errors.New("adopting and deleting in one step is refused: 
 // repository that exists (the schema alone).
 func (t *tools) adoptRepository() WriteTool {
 	return WriteTool{
-		Name: ToolAdoptRepository,
-		Description: "Adopt a repository of the org that exists on GitHub and no team file declares (the inventory's unassigned scope): the entry you pass is added to the " +
-			"team's file (repositories/<team>.yaml in giantswarm/github) in a pull request opened as you with auto-merge armed, and the ask with the Approve button goes to the team's " +
-			"channel — an existing name is a plain addition, so the team reviews it: a member other than you approves. The entry is validated against the repositories schema (not the " +
-			"creation rules, which are for repositories the manager creates) and rendered as create_repository renders a declaration; `align` is yours to set: with true the reconciler " +
-			"run of the merge aligns the repository with its declared set-up and the company baseline, without it that run checks the repository and reports the drift, changing nothing. " +
-			"`lifecycle: deprecated` or `archived` in the entry adopts the repository and ends its life in the one pull request; the entry then gets " + alignTrue + " beside the " +
-			"lifecycle — else the reconciler would record the lifecycle and apply nothing — and the plan and the ask say so. `deleted` is refused here: declare first, then set_lifecycle " +
-			"with the name typed. Refused before any write when the name is free on GitHub (a new repository: use create_repository) or declared already (the refusal names the team; " +
-			"use update_repository, transfer_repository or set_lifecycle)." + pendingRunSentence,
+		Name:    ToolAdoptRepository,
+		Summary: "Declare an existing, undeclared GitHub repository for a team. New: create_repository. Declared: update_repository.",
+		Details: "list_repositories scope unassigned lists the candidates; the team reviews the pull request. Set " + alignTrue + " in the entry to have " +
+			"the reconciler apply the declared set-up; without it, drift is only reported. A deprecated or archived entry gets " + alignTrue +
+			", so the reconciler applies the lifecycle and the baseline: tell the person.",
 		Options: []mcp.ToolOption{
-			mcp.WithString(argRepository, mcp.Required(), mcp.Description("Repository name, with or without the org; it exists on GitHub and no team file declares it.")),
+			mcp.WithString(argRepository, mcp.Required(), mcp.Description("Repository name, with or without the org.")),
 			mcp.WithString(argTeam, mcp.Required(), mcp.Description("The adopting team's file, as its GitHub team slug: team-bumblebee, team-planeteers, …")),
-			mcp.WithObject(argEntry, mcp.Required(), mcp.Description("The declaration as it goes into the team file: componentType, description, visibility, lifecycle, align, gen and the other fields of the repositories schema; name is the repository and may be left out."), mcp.AdditionalProperties(true)),
+			mcp.WithObject(argEntry, mcp.Required(), mcp.Description("The declaration as it goes into the team file: componentType, description, visibility, align, gen, …; name may be left out."), mcp.AdditionalProperties(true)),
 			mcp.WithString(argReason, mcp.Description("Why, for the pull request body and the ask.")),
 		},
 		DryRun: func(ctx context.Context, args map[string]any) (any, error) {

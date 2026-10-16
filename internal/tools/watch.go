@@ -11,6 +11,7 @@ import (
 	"github.com/giantswarm/devctl/v8/pkg/circleciclient"
 	"github.com/giantswarm/devctl/v8/pkg/reposetup"
 	"github.com/giantswarm/devctl/v8/pkg/reposetup/reconcile"
+	"github.com/giantswarm/mcp-toolkit/tooldesc"
 	"github.com/google/go-github/v92/github"
 	"github.com/mark3labs/mcp-go/mcp"
 	mcpserver "github.com/mark3labs/mcp-go/server"
@@ -116,31 +117,10 @@ type WatchRelease struct {
 
 func (t *tools) registerWatch(s *mcpserver.MCPServer) {
 	s.AddTool(mcp.NewTool(ToolWatchRepository,
-		mcp.WithDescription("Read-only. Follow a new repository to readiness after create_repository, and return when it is ready, when a phase fails, "+
-			"as soon as a phase completes that was not complete when the call started (changed is true — narrate it and call again), "+
-			"or when timeout runs out — with the phases reached either way, each with its timestamp and the seconds since the phase before: "+
-			"declared (the declaration pull request is open), merged, created (the reconciler created the repository), scaffolded (its default branch carries "+
-			"the scaffold commit), setUp (the reconciler run of that pull request has reported: a failed step or a refused entry fails the phase, the run's other findings are "+
-			"carried as findings), released (the first release exists and its build is green, decided on one of two paths — get_info's circleci.tagPipelines says which "+
-			"this deployment runs: token reads the tag pipeline of every repository, anonymous of the public ones, off of none. The tag pipeline path reads the tag's own "+
-			"pipeline on CircleCI by the release watch's rule: a failed workflow fails the phase with its failed jobs, every workflow green is done at once, otherwise "+
-			"pendingReason names the workflows and their states; until CircleCI has a pipeline for the tag, the reconciler run's release step decides — a missed-tag-build "+
-			"finding for the tag fails the phase with its fix, anything else keeps waiting. The statuses path, where no tag pipeline is read: the CircleCI statuses on "+
-			"its commit are green, complete and settled: CircleCI posts one status "+
-			"per job as the job starts, so a green set counts only once it holds the jobs the declaration implies — a chart job when the flavours produce a chart, "+
-			fmt.Sprintf("push-to-registries when the default branch carries a Dockerfile — and has not changed for %d s; a failing status fails the phase at once; ", int(DefaultWatchSettle.Seconds()))+
-			"while the statuses are pending, incomplete or settling, pendingReason lists the ones reported and what is awaited; until the tag pipeline itself has "+
-			"reported on the release's commit — a status of a job the pipeline runs on the tag and not on the default branch; the first tag's commit is the default "+
-			"branch head, where the pipeline the reconciler's follow starts posts its own jobs' statuses — the reconciler run's release step, which read the tag's own "+
-			"pipeline, decides: a failed step, or a red-release or missed-tag-build finding for the tag, fails the phase with its fix, anything else keeps waiting "+
-			"for the statuses). ready is true when every phase is done; "+
-			"pending names the phase still waited for when the timeout ran out — call again to keep following. Who reads what: the repository, its commits, "+
-			"the pull request and the release are read as you every few seconds; the tag pipeline as the manager's CircleCI client (circleci.existingSecret's token, "+
-			"or anonymously); the commit statuses and the Dockerfile as the inventory App giantswarm-repo-manager-inventory, "+
-			"the identity of the unattended reads (your token through the App giantswarm-repo-manager cannot read them) — on the statuses path without that App the reconciler "+
-			"run's release step alone decides the released phase and pendingReason says so. A read GitHub or CircleCI refuses keeps its phase pending with the "+
-			"refusal in pendingReason; the call errors only on wrong arguments. Takes the repository and the pull request number create_repository's answer carries."),
-		mcp.WithReadOnlyHintAnnotation(true),
+		tooldesc.Describe("After create_repository, follow the new repository until ready or a phase fails. Call again while changed or pending.",
+			"Phases: declared, merged, created, scaffolded, setUp, released. Returns when ready, when a phase fails (failure says why; the watch ends), "+
+				"when a phase completes (changed: true — tell the person) or at timeout (pending names the phase); pendingReason says what is awaited."),
+		readOnly(),
 		mcp.WithString(argRepository, mcp.Required(), mcp.Description("Repository name, with or without the org.")),
 		mcp.WithNumber(argPullRequest, mcp.Required(), mcp.Description("The declaration pull request's number in the team files repository (create_repository's pullRequest.number).")),
 		mcp.WithNumber(argTimeout, mcp.Description(fmt.Sprintf("Seconds to wait before answering with what is pending (default %d, at most %d — under the MCPServer's 180 s).", DefaultWatchTimeout, MaxWatchTimeout)),
@@ -296,6 +276,7 @@ func (w *watcher) advance(ctx context.Context) error {
 		switch {
 		case o.failed:
 			w.out.Failure = &Failure{Phase: c.name, Reason: o.reason}
+			w.out.Pending, w.out.PendingReason = "", ""
 			return nil
 		case !o.done:
 			w.out.Pending, w.out.PendingReason = c.name, o.reason

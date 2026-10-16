@@ -117,10 +117,6 @@ type Committed struct {
 	PendingRun *inventory.PendingRun `json:"pendingRun,omitempty"`
 }
 
-// pendingRunSentence closes the description of every write that opens a
-// pull request: what the record shows until the run of the merge reports.
-const pendingRunSentence = " The record shows setup.pendingRun until the reconciler run of the merged pull request has reported (get_repository)."
-
 // Delivery is what became of an ask or notice.
 type Delivery struct {
 	Team string `json:"team"`
@@ -375,14 +371,12 @@ func (t *tools) repositoryName(args map[string]any) (string, error) {
 
 func (t *tools) updateRepository() WriteTool {
 	return WriteTool{
-		Name: ToolUpdateRepository,
-		Description: "Change the configuration of a declared repository: its team-file entry is replaced by the entry you pass " +
-			"(the whole entry — name, componentType, gen and every other field as it should read afterwards). The entry is validated against " +
-			"the repositories schema (not the creation rules, which apply to new repositories only); the reconciler applies the change after " +
-			"the team's review. Use set_lifecycle to deprecate or archive and transfer_repository to move a repository to another team." + pendingRunSentence,
+		Name:    ToolUpdateRepository,
+		Summary: "Change a declared repository's team-file entry. Pass the whole entry, not a patch: omitted fields are removed.",
+		Details: "Lifecycle: set_lifecycle. Owner: transfer_repository. The team reviews the pull request.",
 		Options: []mcp.ToolOption{
 			mcp.WithString(argRepository, mcp.Required(), mcp.Description("Repository name, with or without the org.")),
-			mcp.WithObject(argEntry, mcp.Required(), mcp.Description("The entry as it should read in the team file afterwards (the full entry, not a patch)."), mcp.AdditionalProperties(true)),
+			mcp.WithObject(argEntry, mcp.Required(), mcp.Description("The whole entry as it should read afterwards, not a patch: omitted fields are removed."), mcp.AdditionalProperties(true)),
 			mcp.WithString(argReason, mcp.Description("Why, for the pull request body.")),
 		},
 		DryRun: func(ctx context.Context, args map[string]any) (any, error) {
@@ -470,10 +464,9 @@ func reasonLine(reason string) string {
 
 func (t *tools) transferRepository() WriteTool {
 	return WriteTool{
-		Name: ToolTransferRepository,
-		Description: "Move a declared repository to another team: its entry leaves the giving team's file and enters the receiving team's " +
-			"file in one pull request that names both teams. The ask goes to the receiving team's channel (its member approves), the giving team " +
-			"gets a notice in its standup channel. The reconciler then re-applies permissions, CODEOWNERS and the catalog mapping for the new owner." + pendingRunSentence,
+		Name:    ToolTransferRepository,
+		Summary: "Move a declared repository to another team via a team-file pull request; the receiving team approves.",
+		Details: "The reconciler then re-applies permissions, CODEOWNERS and catalog ownership.",
 		Options: []mcp.ToolOption{
 			mcp.WithString(argRepository, mcp.Required(), mcp.Description("Repository name, with or without the org.")),
 			mcp.WithString(argToTeam, mcp.Required(), mcp.Description("The receiving team's slug (team-planeteers, …).")),
@@ -573,19 +566,17 @@ func decides(team, as string) string {
 
 func (t *tools) setLifecycle() WriteTool {
 	return WriteTool{
-		Name: ToolSetLifecycle,
-		Description: "Deprecate, archive or delete a declared repository by setting lifecycle in its team-file entry. deprecated: security-only Renovate " +
-			"and a catalog flag. archived: the reconciler archives the repository on GitHub and unfollows it on CircleCI; the entry stays as the " +
-			"record. deleted: the reconciler unfollows the repository on CircleCI and deletes it on GitHub — code, issues, pull requests, releases and " +
-			"packages with it (an organization owner can restore it on GitHub for 90 days); the entry stays as the record of the deletion; needs confirm, " +
-			"the repository's name typed by the person, and is refused without it. An entry without " + alignTrue + " gets it beside the lifecycle — the change opts the repository in to alignment, else the reconciler " +
-			"would record the lifecycle and apply nothing — and the ask says so. The ask goes to the owning team's channel; " +
-			"a member's Approve (or an approving review on GitHub) lands it." + pendingRunSentence,
+		Name:    ToolSetLifecycle,
+		Summary: "Deprecate, archive or delete a declared repository. Deleting wipes code and issues; the person must type the name.",
+		Details: "deprecated: security-only Renovate. archived: archived on GitHub, unfollowed on CircleCI. deleted: deleted on GitHub with " +
+			"code, issues, pull requests, releases and packages; an org owner can restore it for 90 days. The owning team approves. An entry without " +
+			alignTrue + " gets it, which opts the repository in to the company baseline: tell the person.",
+		Destructive: true,
 		Options: []mcp.ToolOption{
 			mcp.WithString(argRepository, mcp.Required(), mcp.Description("Repository name, with or without the org.")),
 			mcp.WithString(argLifecycle, mcp.Required(), mcp.Enum(teamfiles.LifecycleDeprecated, teamfiles.LifecycleArchived, teamfiles.LifecycleDeleted), mcp.Description("deprecated, archived or deleted.")),
 			mcp.WithString(argReason, mcp.Description("Why, for the pull request body and the ask.")),
-			mcp.WithString(argConfirm, mcp.Description("For deleted: the repository's name, with or without the org, as the person typed it. Refused when absent or another name.")),
+			mcp.WithString(argConfirm, mcp.Description("For deleted: the repository name exactly as the person typed it. Ask them; never fill it in yourself.")),
 		},
 		DryRun: func(ctx context.Context, args map[string]any) (any, error) {
 			pn, err := t.planner(ctx)
@@ -732,15 +723,12 @@ type Approval struct {
 
 func (t *tools) approveChange() WriteTool {
 	return WriteTool{
-		Name: ToolApproveChange,
-		Description: "Approve a team-file pull request as you, after this server has checked on GitHub that you are a member of the team " +
-			"the change belongs to (the owning team; for a transfer the receiving team), and land it: merged as you when GitHub lets it, else left " +
-			"to GitHub's auto-merge (armed if it was not) — the answer says which, or why neither. A pull request GitHub reports conflicting with " +
-			"its base (a neighbouring entry of the team file changed first) is re-rendered on the current base before the approval — the entries it " +
-			"changes re-applied to the files as they read now and the branch force-pushed as you, the pull request, its ask and its auto-merge kept — " +
-			"and the answer names it (rerendered). The Approve button of a Slack ask calls this tool " +
-			"as the clicking member; a member may also call it directly, and approving on GitHub is equivalent (GitHub does not re-render). A non-member is refused, and so is the " +
-			"person who opened the pull request: GitHub does not accept an author's approval of their own pull request, another member has to approve.",
+		Name:    ToolApproveChange,
+		Summary: "Approve a team-file pull request as an owning-team member and land it: merged, or auto-merge armed. Not your own.",
+		Details: "For a transfer, the receiving team approves. The answer says whether it merged, only armed auto-merge, or why neither. " +
+			"A pull request conflicting with its base is re-rendered on the current base and force-pushed as you first. " +
+			"The Approve button of a Slack ask calls this tool.",
+		Destructive: true,
 		Options: []mcp.ToolOption{
 			mcp.WithNumber(argPullRequest, mcp.Required(), mcp.Description("The pull request number in the team-files repository (giantswarm/github).")),
 		},
@@ -995,8 +983,8 @@ type Dispatch struct {
 	Warning string `json:"warning"`
 }
 
-// alignChanges is what an alignment does to a repository, for the warning
-// and the tool description: the engine's baseline in one sentence.
+// alignChanges is what an alignment does to a repository, for the warning:
+// the engine's baseline in one sentence.
 const alignChanges = "merge settings (squash only, auto-merge, delete branch on merge, update branch), wiki and projects off, issues on, " +
 	"team permissions (employees admin, bots push), branch protection (one approving review, enforce_admins on, strict up-to-date, " +
 	"every reporting check required), the CircleCI follow and setup workflows, a CODEOWNERS pull request, description and visibility, " +
@@ -1105,25 +1093,14 @@ func (t *tools) planOptIn(ctx context.Context, repo teamfiles.Repo, as string, t
 
 func (t *tools) alignRepository() WriteTool {
 	return WriteTool{
-		Name: ToolAlignRepository,
-		Description: "Align now: aligns one repository with its declared set-up and the company baseline. WARNING — an alignment changes the repository " +
-			"on GitHub and CircleCI: " + alignChanges + ". The repository's entry in repositories/<team>.yaml decides the mode, and the answer (dry run and " +
-			"commit alike) says which. align: the repository has opted in (" + alignTrue + " in its entry) — the reconcile-repositories workflow in giantswarm/github " +
-			"is dispatched for it as you and applies the planned changes. opt-in: the repository is declared without the field — nothing is dispatched; the team-file " +
-			"pull request that sets " + alignTrue + " in its entry (nothing else changes) is planned (dry run) or opened as you (commit) with auto-merge armed, the ask " +
-			"with the Approve button goes to the owning team's channel (a member other than you approves), and the reconciler's run aligns the repository when it merges. " +
-			"check: the repository has no entry (pass team) — the workflow is dispatched as you and checks from the team alone, changing nothing. The answer carries " +
-			"mode, optedIn, declared, team, the planned changes from the inventory's last check (per step, with checkedAt), a warning paragraph to show the person " +
-			"before they confirm, and for opt-in the plan (optIn.plan: the entry before and after, the pull request, the ask) and after the commit what became of it " +
-			"(optIn.committed: pullRequest, ask, pendingRun). The record shows setup.pendingRun until the inventory has read the run's artifact (within seconds of a " +
-			"dispatched run completing; after the merge for an opt-in) as setup.lastRun, with the run's change block (kind, by, pullRequest) — its failed steps and " +
-			"findings are on the record and in the run. The team's standup channel hears nothing about a dispatch or the opt-in itself: the sentences about who created, " +
-			"added, transferred, archived or deprecated a repository, and the failed steps and findings of a run, follow a merged pull request only. A run that fails " +
-			"before its report step leaves the finding reconcile-run-missing naming the run and its conclusion as soon as it completes; one that does not report within " +
-			"15 minutes leaves it too. Here mode commit means: dispatch — or, for opt-in, open the pull request.",
+		Name:    ToolAlignRepository,
+		Summary: "Apply a repository's declared set-up now. Changes live GitHub/CircleCI settings: dry-run and show the person first.",
+		Details: "The set-up is the declaration and the company baseline. The answer's warning lists what changes; show it before committing. Commit dispatches the reconciler as you; a declared repository " +
+			"without " + alignTrue + " gets the opt-in pull request instead, and one without an entry (pass team) is only checked.",
+		Destructive: true,
 		Options: []mcp.ToolOption{
 			mcp.WithString(argRepository, mcp.Required(), mcp.Description("Repository name, with or without the org.")),
-			mcp.WithString(argTeam, mcp.Description("Team slug; required for a repository without an entry (it is then aligned from the team alone), optional otherwise.")),
+			mcp.WithString(argTeam, mcp.Description("Team slug; required for a repository without an entry.")),
 		},
 		DryRun: func(ctx context.Context, args map[string]any) (any, error) {
 			return t.dispatch(ctx, args, false)

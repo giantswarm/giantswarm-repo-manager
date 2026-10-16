@@ -14,6 +14,7 @@ import (
 
 	"github.com/giantswarm/devctl/v8/pkg/circleciclient"
 	"github.com/giantswarm/devctl/v8/pkg/reposetup"
+	"github.com/giantswarm/mcp-toolkit/tooldesc"
 	"github.com/mark3labs/mcp-go/mcp"
 	mcpserver "github.com/mark3labs/mcp-go/server"
 
@@ -125,11 +126,16 @@ func (ts *Tools) MCPServer() *mcpserver.MCPServer {
 	d, t := ts.t.d, ts.t
 	s := mcpserver.NewMCPServer(ToolPrefix, d.Version,
 		mcpserver.WithToolCapabilities(false),
-		mcpserver.WithInstructions("Giant Swarm's repository set-up service. The team files in giantswarm/github (repositories/team-*.yaml) are the desired state of every repository; GitHub is the reality. Call get_info first: it reports who you are to this server (the GitHub login of the token muster put on the call — your own authorization of the App giantswarm-repo-manager), the identity of the unattended reads — the read-only App giantswarm-repo-manager-inventory — and the inventory store. The inventory (list_repositories, get_repository) is one record per repository of the org — declaration, GitHub reality, set-up state, findings — refreshed by a scheduled sweep, after every reconciler run and on refresh_repository; every record carries its age. Every write tool takes dryRun and mode; the only write mode is commit — a team-file pull request opened as you — and apply is refused."),
+		mcpserver.WithInstructions("Giant Swarm's repository set-up service. The team files in giantswarm/github (repositories/team-*.yaml) declare every repository's desired state; "+
+			"writes go through team-file pull requests opened as you, which the reconciler applies once merged; align_repository dispatches the reconciler "+
+			"directly and approve_change approves a pull request. The inventory (list_repositories, get_repository) "+
+			"records each repository's declaration, GitHub state, set-up state and findings. get_info says who you are and which declaration values are allowed."),
 	)
 	s.AddTool(mcp.NewTool(ToolGetInfo,
-		mcp.WithDescription("Read-only. Report the service version and how this call is authenticated: the caller (the GitHub login and id GET /user answered for the bearer muster put on the call — the person's own user token through the App giantswarm-repo-manager) and the authorization server pinned for it; whether your credential reaches the team files (teamFiles.readable); the identity of the unattended inventory reads (the read-only App giantswarm-repo-manager-inventory, or not configured) and the inventory store; where the inventory's CircleCI facts come from (commit statuses and the reconciler's run artifact, and for the latest release the release watch's read of the tag's own pipeline — circleci.tagPipelines says whether it reads anonymously, which CircleCI answers for public projects, or with a configured token, and so where watch_repository decides the released phase from the tag pipeline rather than the commit statuses); the team-review endpoint (reviews.configured; when configured, reviews.url, the gateway the asks and notices go to, and reviews.audience, the audience of the projected ServiceAccount token it admits; reviews.debugChannel when one channel receives every ask and notice instead of the channels each team's teams/<team>.yaml names); the engine (devctl reposetup package); the declaration vocabulary (schema: the values the repositories schema the dry runs validate with allows for componentType, gen.flavours, gen.language, visibility and lifecycle, in the schema's order, and its origin — the schema the team files declare, `team files (<owner>/<name>@<ref>)`, else the copy embedded in the engine's devctl version — or schema.error when they cannot be read); and the write modes. Call first."),
-		mcp.WithReadOnlyHintAnnotation(true),
+		tooldesc.Describe("Who you are here, whether you can write, and the allowed componentType, flavour, language, visibility, lifecycle.",
+			"Call it before composing a declaration, or when a call is refused for access. Also reports the service's version and configuration: "+
+				"team files, inventory, CircleCI, team reviews, engine and schema origin."),
+		readOnly(),
 	), t.getInfo)
 	t.registerInventory(s)
 	t.registerValidate(s)
@@ -138,6 +144,16 @@ func (ts *Tools) MCPServer() *mcpserver.MCPServer {
 		registerWrite(s, wt)
 	}
 	return s
+}
+
+// readOnly annotates a tool that writes nothing. Without the destructive and
+// idempotent hints mcp-go reports a read as destructive.
+func readOnly() mcp.ToolOption {
+	return func(t *mcp.Tool) {
+		mcp.WithReadOnlyHintAnnotation(true)(t)
+		mcp.WithDestructiveHintAnnotation(false)(t)
+		mcp.WithIdempotentHintAnnotation(true)(t)
+	}
 }
 
 // tools is the tool set's state: the dependencies and the per-token cache of

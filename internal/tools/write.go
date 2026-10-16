@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/giantswarm/mcp-toolkit/tooldesc"
 	"github.com/mark3labs/mcp-go/mcp"
 	mcpserver "github.com/mark3labs/mcp-go/server"
 
@@ -34,6 +35,9 @@ const (
 const ApplyRefusal = `mode "apply" is refused: a repository without its declaration is drift the reconciler reports. ` +
 	`Use mode "commit" (a team-file pull request opened as you) or dryRun: true for the rendered change`
 
+// writeSuffix closes every write tool's description.
+const writeSuffix = ` Writes as you: dryRun: true previews and writes nothing; mode: "commit" carries it out and can take a minute — wait for the answer.`
+
 // ErrNotImplemented marks a commit path a later slice delivers.
 var ErrNotImplemented = errors.New("not implemented yet")
 
@@ -41,8 +45,12 @@ var ErrNotImplemented = errors.New("not implemented yet")
 // dryRun and mode, refuses apply before the tool runs, and dispatches to
 // DryRun or Commit.
 type WriteTool struct {
-	Name        string
-	Description string
+	Name string
+	// Summary and Details are the tool's description (tooldesc.Describe); Details
+	// gets writeSuffix appended.
+	Summary, Details string
+	// Destructive marks a write that deletes or overwrites what GitHub holds.
+	Destructive bool
 	// Options are the tool's own arguments (mcp.WithString and friends).
 	Options []mcp.ToolOption
 	// DryRun renders the change and writes nothing.
@@ -54,14 +62,10 @@ type WriteTool struct {
 // registerWrite adds wt to s with the framework's arguments and guard.
 func registerWrite(s *mcpserver.MCPServer, wt WriteTool) {
 	opts := []mcp.ToolOption{
-		mcp.WithDescription("WRITES (as you, with your own GitHub token through the App giantswarm-repo-manager). " + wt.Description +
-			" Every write takes dryRun and mode: dryRun: true returns the rendered change and writes nothing; " +
-			`mode: "commit" opens the team-file pull request as you and may take up to a minute (its writes run on GitHub within the call) — wait for the one answer. ` +
-			`mode: "apply" is refused for every write tool ` +
-			"(a repository without its declaration is drift), and mode is required unless dryRun is true."),
-		mcp.WithBoolean(ArgDryRun, mcp.Description("Render the change and write nothing (default false).")),
-		mcp.WithString(ArgMode, mcp.Description(`How the change lands: "commit" (a team-file pull request as you). "apply" is refused.`), mcp.Enum(string(ModeCommit))),
-		mcp.WithDestructiveHintAnnotation(false),
+		tooldesc.Describe(wt.Summary, wt.Details+writeSuffix),
+		mcp.WithBoolean(ArgDryRun, mcp.Description("Preview the change and write nothing (default false).")),
+		mcp.WithString(ArgMode, mcp.Description(`"commit": carry the change out as you. Required unless dryRun.`), mcp.Enum(string(ModeCommit))),
+		mcp.WithDestructiveHintAnnotation(wt.Destructive),
 		mcp.WithIdempotentHintAnnotation(true),
 	}
 	opts = append(opts, wt.Options...)

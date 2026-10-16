@@ -9,6 +9,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/giantswarm/mcp-toolkit/tooldesc"
 	"github.com/mark3labs/mcp-go/mcp"
 )
 
@@ -34,6 +35,14 @@ func TestToolsDocIsCurrent(t *testing.T) {
 	}
 	if string(got) != want {
 		t.Errorf("docs/tools.md is out of date: run `make tools-doc`")
+	}
+}
+
+// TestToolDescriptionBudgets holds the registered descriptions to the
+// budget of giantswarm/giantswarm#38592.
+func TestToolDescriptionBudgets(t *testing.T) {
+	if err := tooldesc.CheckServer(NewMCPServer(Deps{Version: testVersion}), tooldesc.DefaultBudget); err != nil {
+		t.Error(err)
 	}
 }
 

@@ -199,8 +199,9 @@ func TestCreateRepositoryDryRunIsTheEngineValidation(t *testing.T) {
 func TestCommitNeedsACaller(t *testing.T) {
 	s := mcpserver.NewMCPServer("t", "0")
 	registerWrite(s, WriteTool{
-		Name:   "noop",
-		DryRun: func(context.Context, map[string]any) (any, error) { return map[string]any{"dry": true}, nil },
+		Name:    "noop",
+		Summary: "Do nothing.",
+		DryRun:  func(context.Context, map[string]any) (any, error) { return map[string]any{"dry": true}, nil },
 		Commit: func(ctx context.Context, _ map[string]any) (any, error) {
 			return map[string]any{"as": identity.Caller(ctx)}, nil
 		},

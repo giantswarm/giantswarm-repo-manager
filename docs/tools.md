@@ -23,7 +23,7 @@ Generated from the registered tools (`make tools-doc`); through muster every too
 
 Declare an existing, undeclared GitHub repository for a team. New: create_repository. Declared: update_repository.
 
-list_repositories scope unassigned lists the candidates; the team reviews the pull request. Set `align: true` in the entry to have the reconciler apply the declared set-up; without it, drift is only reported. Writes as you: dryRun: true previews and writes nothing; mode: "commit" carries it out and can take a minute — wait for the answer.
+list_repositories scope unassigned lists the candidates; the team reviews the pull request. Set `align: true` in the entry to have the reconciler apply the declared set-up; without it, drift is only reported. A deprecated or archived entry gets `align: true`, so the reconciler applies the lifecycle and the baseline: tell the person. Writes as you: dryRun: true previews and writes nothing; mode: "commit" carries it out and can take a minute — wait for the answer.
 
 ```json
 {
@@ -105,9 +105,9 @@ The set-up is the declaration and the company baseline. The answer's warning lis
 
 ## `approve_change`
 
-Approve and merge a team-file pull request in giantswarm/github as an owning-team member; authors can't self-approve.
+Approve a team-file pull request as an owning-team member and land it: merged, or auto-merge armed. Not your own.
 
-For a transfer, the receiving team approves. A pull request conflicting with its base is re-rendered on the current base first. The Approve button of a Slack ask calls this tool. Writes as you: dryRun: true previews and writes nothing; mode: "commit" carries it out and can take a minute — wait for the answer.
+For a transfer, the receiving team approves. The answer says whether it merged, only armed auto-merge, or why neither. A pull request conflicting with its base is re-rendered on the current base and force-pushed as you first. The Approve button of a Slack ask calls this tool. Writes as you: dryRun: true previews and writes nothing; mode: "commit" carries it out and can take a minute — wait for the answer.
 
 ```json
 {
@@ -306,7 +306,7 @@ One row per repository with team, lifecycle, visibility, Renovate state, CI fact
       "type": "string"
     },
     "team": {
-      "description": "Team slug (team-bumblebee); none: only undeclared repositories. Under mine, one of your teams.",
+      "description": "Team slug (team-bumblebee); none: only undeclared repositories. Under mine, one of your teams; ignored under unassigned.",
       "type": "string"
     },
     "undeclared": {
@@ -352,7 +352,7 @@ Reads GitHub, CircleCI and the team files, runs the engine's checks in read mode
 
 Deprecate, archive or delete a declared repository. Deleting wipes code and issues; the person must type the name.
 
-deprecated: security-only Renovate. archived: archived on GitHub, unfollowed on CircleCI. deleted: deleted on GitHub with its code, issues, pull requests, releases and packages; an org owner can restore it for 90 days. The owning team approves. Writes as you: dryRun: true previews and writes nothing; mode: "commit" carries it out and can take a minute — wait for the answer.
+deprecated: security-only Renovate. archived: archived on GitHub, unfollowed on CircleCI. deleted: deleted on GitHub with code, issues, pull requests, releases and packages; an org owner can restore it for 90 days. The owning team approves. An entry without `align: true` gets it, which opts the repository in to the company baseline: tell the person. Writes as you: dryRun: true previews and writes nothing; mode: "commit" carries it out and can take a minute — wait for the answer.
 
 ```json
 {
@@ -537,9 +537,9 @@ Also the review notices a person sees before the pull request exists. Run it wit
 
 ## `watch_repository`
 
-After create_repository, follow the new repository until ready. Call again while changed is true or pending is set.
+After create_repository, follow the new repository until ready or a phase fails. Call again while changed or pending.
 
-Phases: declared, merged, created, scaffolded, setUp, released. Returns when ready, when a phase fails (failure says why), when a phase completes (changed: true — tell the person) or at timeout (pending names the phase); pendingReason says what is awaited.
+Phases: declared, merged, created, scaffolded, setUp, released. Returns when ready, when a phase fails (failure says why; the watch ends), when a phase completes (changed: true — tell the person) or at timeout (pending names the phase); pendingReason says what is awaited.
 
 ```json
 {

@@ -127,7 +127,8 @@ func (ts *Tools) MCPServer() *mcpserver.MCPServer {
 	s := mcpserver.NewMCPServer(ToolPrefix, d.Version,
 		mcpserver.WithToolCapabilities(false),
 		mcpserver.WithInstructions("Giant Swarm's repository set-up service. The team files in giantswarm/github (repositories/team-*.yaml) declare every repository's desired state; "+
-			"every write is a team-file pull request opened as you, which the reconciler applies once merged. The inventory (list_repositories, get_repository) "+
+			"writes go through team-file pull requests opened as you, which the reconciler applies once merged; align_repository dispatches the reconciler "+
+			"directly and approve_change approves a pull request. The inventory (list_repositories, get_repository) "+
 			"records each repository's declaration, GitHub state, set-up state and findings. get_info says who you are and which declaration values are allowed."),
 	)
 	s.AddTool(mcp.NewTool(ToolGetInfo,

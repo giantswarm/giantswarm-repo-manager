@@ -13,7 +13,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - The MCP endpoint refuses a request body larger than 1 MiB before mcp-go reads it whole (CVE-2026-108859, no fixed mcp-go release yet; the scan ignores it until 2026-11-12). ([#202](https://github.com/giantswarm/giantswarm-repo-manager/issues/202))
 - The read-only tools are annotated `destructiveHint: false` and `idempotentHint: true` (mcp-go's defaults had
-  reported them destructive); `set_lifecycle` and `align_repository` are annotated `destructiveHint: true`.
+  reported them destructive); `set_lifecycle`, `align_repository` and `approve_change` (which force-pushes a re-rendered branch) are annotated `destructiveHint: true`.
+- `watch_repository` no longer answers with a `pending` phase beside the `failure` when a phase fails during the call.
 
 ### Changed
 

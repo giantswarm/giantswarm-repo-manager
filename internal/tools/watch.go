@@ -117,8 +117,8 @@ type WatchRelease struct {
 
 func (t *tools) registerWatch(s *mcpserver.MCPServer) {
 	s.AddTool(mcp.NewTool(ToolWatchRepository,
-		tooldesc.Describe("After create_repository, follow the new repository until ready. Call again while changed is true or pending is set.",
-			"Phases: declared, merged, created, scaffolded, setUp, released. Returns when ready, when a phase fails (failure says why), "+
+		tooldesc.Describe("After create_repository, follow the new repository until ready or a phase fails. Call again while changed or pending.",
+			"Phases: declared, merged, created, scaffolded, setUp, released. Returns when ready, when a phase fails (failure says why; the watch ends), "+
 				"when a phase completes (changed: true — tell the person) or at timeout (pending names the phase); pendingReason says what is awaited."),
 		readOnly(),
 		mcp.WithString(argRepository, mcp.Required(), mcp.Description("Repository name, with or without the org.")),
@@ -276,6 +276,7 @@ func (w *watcher) advance(ctx context.Context) error {
 		switch {
 		case o.failed:
 			w.out.Failure = &Failure{Phase: c.name, Reason: o.reason}
+			w.out.Pending, w.out.PendingReason = "", ""
 			return nil
 		case !o.done:
 			w.out.Pending, w.out.PendingReason = c.name, o.reason

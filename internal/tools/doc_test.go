@@ -38,15 +38,10 @@ func TestToolsDocIsCurrent(t *testing.T) {
 	}
 }
 
-// TestToolDescriptionBudgets holds the descriptions muster lists to the
+// TestToolDescriptionBudgets holds the registered descriptions to the
 // budget of giantswarm/giantswarm#38592.
 func TestToolDescriptionBudgets(t *testing.T) {
-	c := newTestClient(t, NewMCPServer(Deps{Version: testVersion}))
-	res, err := c.ListTools(context.Background(), mcp.ListToolsRequest{})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := tooldesc.Check(res.Tools, tooldesc.DefaultBudget); err != nil {
+	if err := tooldesc.CheckServer(NewMCPServer(Deps{Version: testVersion}), tooldesc.DefaultBudget); err != nil {
 		t.Error(err)
 	}
 }

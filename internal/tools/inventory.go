@@ -78,7 +78,7 @@ func (t *tools) registerInventory(s *mcpserver.MCPServer) {
 				"finding kinds, set-up state and age, plus the last sweep's summary."),
 		readOnly(),
 		mcp.WithString(argScope, mcp.Enum(ScopeMine, ScopeTeam, ScopeUnassigned, ScopeAll), mcp.Description("mine (your teams), team, unassigned (no declaration) or all (default).")),
-		mcp.WithString(argTeam, mcp.Description("Team slug (team-bumblebee); none: only undeclared repositories. Under mine, one of your teams.")),
+		mcp.WithString(argTeam, mcp.Description("Team slug (team-bumblebee); none: only undeclared repositories. Under mine, one of your teams; ignored under unassigned.")),
 		mcp.WithBoolean(argUndeclared, mcp.Description("Only repositories without a declaration (same as scope unassigned).")),
 		mcp.WithString(argSearch, mcp.Description("Name or description contains this text (case-insensitive).")),
 		mcp.WithString(argRenovate, mcp.Enum(RenovateConfigured, RenovateMissing, RenovateActive, RenovateInactive), mcp.Description("configured (has a renovate.json5), missing, active (Renovate activity within the server's period, default 180 days), inactive.")),

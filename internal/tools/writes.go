@@ -568,8 +568,9 @@ func (t *tools) setLifecycle() WriteTool {
 	return WriteTool{
 		Name:    ToolSetLifecycle,
 		Summary: "Deprecate, archive or delete a declared repository. Deleting wipes code and issues; the person must type the name.",
-		Details: "deprecated: security-only Renovate. archived: archived on GitHub, unfollowed on CircleCI. deleted: deleted on GitHub with its " +
-			"code, issues, pull requests, releases and packages; an org owner can restore it for 90 days. The owning team approves.",
+		Details: "deprecated: security-only Renovate. archived: archived on GitHub, unfollowed on CircleCI. deleted: deleted on GitHub with " +
+			"code, issues, pull requests, releases and packages; an org owner can restore it for 90 days. The owning team approves. An entry without " +
+			alignTrue + " gets it, which opts the repository in to the company baseline: tell the person.",
 		Destructive: true,
 		Options: []mcp.ToolOption{
 			mcp.WithString(argRepository, mcp.Required(), mcp.Description("Repository name, with or without the org.")),
@@ -723,9 +724,11 @@ type Approval struct {
 func (t *tools) approveChange() WriteTool {
 	return WriteTool{
 		Name:    ToolApproveChange,
-		Summary: "Approve and merge a team-file pull request in giantswarm/github as an owning-team member; authors can't self-approve.",
-		Details: "For a transfer, the receiving team approves. A pull request conflicting with its base is re-rendered on the current base first. " +
+		Summary: "Approve a team-file pull request as an owning-team member and land it: merged, or auto-merge armed. Not your own.",
+		Details: "For a transfer, the receiving team approves. The answer says whether it merged, only armed auto-merge, or why neither. " +
+			"A pull request conflicting with its base is re-rendered on the current base and force-pushed as you first. " +
 			"The Approve button of a Slack ask calls this tool.",
+		Destructive: true,
 		Options: []mcp.ToolOption{
 			mcp.WithNumber(argPullRequest, mcp.Required(), mcp.Description("The pull request number in the team-files repository (giantswarm/github).")),
 		},
@@ -980,8 +983,8 @@ type Dispatch struct {
 	Warning string `json:"warning"`
 }
 
-// alignChanges is what an alignment does to a repository, for the warning
-// and the tool description: the engine's baseline in one sentence.
+// alignChanges is what an alignment does to a repository, for the warning:
+// the engine's baseline in one sentence.
 const alignChanges = "merge settings (squash only, auto-merge, delete branch on merge, update branch), wiki and projects off, issues on, " +
 	"team permissions (employees admin, bots push), branch protection (one approving review, enforce_admins on, strict up-to-date, " +
 	"every reporting check required), the CircleCI follow and setup workflows, a CODEOWNERS pull request, description and visibility, " +

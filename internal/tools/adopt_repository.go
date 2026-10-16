@@ -32,7 +32,8 @@ func (t *tools) adoptRepository() WriteTool {
 		Name:    ToolAdoptRepository,
 		Summary: "Declare an existing, undeclared GitHub repository for a team. New: create_repository. Declared: update_repository.",
 		Details: "list_repositories scope unassigned lists the candidates; the team reviews the pull request. Set " + alignTrue + " in the entry to have " +
-			"the reconciler apply the declared set-up; without it, drift is only reported.",
+			"the reconciler apply the declared set-up; without it, drift is only reported. A deprecated or archived entry gets " + alignTrue +
+			", so the reconciler applies the lifecycle and the baseline: tell the person.",
 		Options: []mcp.ToolOption{
 			mcp.WithString(argRepository, mcp.Required(), mcp.Description("Repository name, with or without the org.")),
 			mcp.WithString(argTeam, mcp.Required(), mcp.Description("The adopting team's file, as its GitHub team slug: team-bumblebee, team-planeteers, …")),

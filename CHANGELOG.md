@@ -11,6 +11,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- The set-up check runs devctl 8.139.13's engine: a repository whose generated CI has no CircleCI job (GitHub Actions
+  only) is no CircleCI pipeline, and its `circleci` step no longer reports a follow, setup workflows and a deploy key
+  as drift. ([giantswarm/github#6681](https://github.com/giantswarm/github/issues/6681))
 - The MCP endpoint refuses a request body larger than 1 MiB before mcp-go reads it whole (CVE-2026-108859, no fixed mcp-go release yet; the scan ignores it until 2026-11-12). ([#202](https://github.com/giantswarm/giantswarm-repo-manager/issues/202))
 - The read-only tools are annotated `destructiveHint: false` and `idempotentHint: true` (mcp-go's defaults had
   reported them destructive); `set_lifecycle`, `align_repository` and `approve_change` (which force-pushes a re-rendered branch) are annotated `destructiveHint: true`.

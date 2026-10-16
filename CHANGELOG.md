@@ -18,6 +18,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- `docs/tools.md` is rendered by mcp-toolkit v0.4.0 (`tooldesc.RenderServerDoc`) and kept current by
+  `tooldesctest.AssertServerDoc`, replacing the copied renderer: descriptions are fenced text blocks, so the page shows
+  the characters a model reads, and the tool table takes its kinds from the annotations (`read-only`, `write`,
+  `write, destructive`) ([mcp-toolkit#126](https://github.com/giantswarm/mcp-toolkit/issues/126)).
 - The tool descriptions are about a quarter of their length (~3.3k instead of ~7.5k tokens with the schemas). Each
   starts with a summary line of at most 120 runes, all muster's `filter_tools` shows (the first line, cut to 120),
   saying what the tool does and which tool to use instead; the shared `WRITES (…)` prefix is gone. What a model needs

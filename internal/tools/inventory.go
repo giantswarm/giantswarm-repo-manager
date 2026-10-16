@@ -73,48 +73,43 @@ const DefaultRenovateActive = 180 * 24 * time.Hour
 
 func (t *tools) registerInventory(s *mcpserver.MCPServer) {
 	s.AddTool(mcp.NewTool(ToolListRepositories,
-		mcp.WithDescription("Read-only. The inventory of the org's repositories from the store: one row per repository with team, lifecycle, "+
-			"visibility, archived (on GitHub), fork, Renovate state, finding kinds, CI facts (architect orb version, arm64 images, China push, cosign signing), set-up state and record age, sorted by repository name, plus the last sweep's summary. "+
-			"Scope per caller: mine (the teams you belong to on GitHub, read as you), team (the team "+
-			"argument, or your teams), unassigned (on GitHub without a declaration), all. Filters as on the Repositories page: search, team (in every scope: "+
-			"under mine one of your teams — another selects no rows and note says so; none under all: undeclared), renovate, visibility, fork, lifecycle, archived, "+
-			"inactiveDays, finding, orb, arm64, chinaPush, signing. get_repository has the full record."),
-		mcp.WithReadOnlyHintAnnotation(true),
-		mcp.WithString(argScope, mcp.Enum(ScopeMine, ScopeTeam, ScopeUnassigned, ScopeAll), mcp.Description("mine | team | unassigned | all (default all).")),
-		mcp.WithString(argTeam, mcp.Description("Only repositories declared by this team (slug: team-bumblebee). Under all, none: only undeclared repositories; under mine: one of your teams (another selects no rows, and note says so); under unassigned: ignored.")),
-		mcp.WithBoolean(argUndeclared, mcp.Description("Only repositories on GitHub without a declaration (same as scope unassigned).")),
-		mcp.WithString(argSearch, mcp.Description("Only repositories whose name or description contains this text (case-insensitive).")),
-		mcp.WithString(argRenovate, mcp.Enum(RenovateConfigured, RenovateMissing, RenovateActive, RenovateInactive), mcp.Description("Renovate state: configured (a renovate.json5), missing, active (a Renovate pull request or commit within the server's Renovate activity period, default 180 days), inactive.")),
+		mcp.WithDescription("Search and filter all giantswarm repositories: team, lifecycle, Renovate, CI, findings. Full record: get_repository. "+
+			"One row per repository with team, lifecycle, visibility, Renovate state, CI facts (architect orb, arm64, China push, cosign signing), "+
+			"finding kinds, set-up state and age, plus the last sweep's summary."),
+		readOnly(),
+		mcp.WithString(argScope, mcp.Enum(ScopeMine, ScopeTeam, ScopeUnassigned, ScopeAll), mcp.Description("mine (your teams), team, unassigned (no declaration) or all (default).")),
+		mcp.WithString(argTeam, mcp.Description("Team slug (team-bumblebee); none: only undeclared repositories. Under mine, one of your teams.")),
+		mcp.WithBoolean(argUndeclared, mcp.Description("Only repositories without a declaration (same as scope unassigned).")),
+		mcp.WithString(argSearch, mcp.Description("Name or description contains this text (case-insensitive).")),
+		mcp.WithString(argRenovate, mcp.Enum(RenovateConfigured, RenovateMissing, RenovateActive, RenovateInactive), mcp.Description("configured (has a renovate.json5), missing, active (Renovate activity within the server's period, default 180 days), inactive.")),
 		mcp.WithString(argVisibility, mcp.Enum("public", "private"), mcp.Description("Only public or only private repositories.")),
 		mcp.WithBoolean(argFork, mcp.Description("Only forks (true) or only non-forks (false).")),
-		mcp.WithString(argLifecycle, mcp.Description("Only repositories with this lifecycle: active (none declared, and not archived on GitHub), deprecated (declared), archived (declared archived, or archived on GitHub), deleted (declared; the repository is gone or about to be); another value is matched against the declared lifecycle.")),
-		mcp.WithBoolean(argArchived, mcp.Description("Only repositories whose life is over — declared archived or deleted, or archived on GitHub (true) — or only those that are not (false). Independent of lifecycle.")),
-		mcp.WithNumber(argInactive, mcp.Description("Only repositories whose last commit by a person is older than this many days (or that have none).")),
-		mcp.WithString(argFinding, mcp.Description("Only repositories with a finding of this kind (declared-but-gone, undeclared-on-github, entry-refused, gen-circleci-refused, entry-field-unknown, default-icon, …).")),
-		mcp.WithString(argOrb, mcp.Description("Only repositories whose CircleCI pipeline pins this giantswarm/architect orb version, or one starting with it (10 selects every 10.x.y).")),
-		mcp.WithBoolean(argARM64, mcp.Description("Only repositories whose CircleCI pipeline builds linux/arm64 images (true) or builds images without it (false).")),
-		mcp.WithString(argChinaPush, mcp.Enum(inventory.ChinaPushSplit, inventory.ChinaPushInline, inventory.ChinaPushCustom, inventory.ChinaPushNone), mcp.Description("How the images reach the China registry: split (the in-China sync job), inline (the push job pushes there itself), custom (an overridden registry list), none (no image push).")),
-		mcp.WithString(argSigning, mcp.Enum(inventory.SigningSigned, inventory.SigningUnsigned, inventory.SigningUnknown, inventory.SigningNone), mcp.Description("Whether the pushed images and charts are signed with cosign: signed, unsigned (the record says why), unknown, none (nothing pushed).")),
+		mcp.WithString(argLifecycle, mcp.Description("active, deprecated, archived (declared or on GitHub) or deleted.")),
+		mcp.WithBoolean(argArchived, mcp.Description("Life over — declared archived or deleted, or archived on GitHub (true) — or not (false). Independent of lifecycle.")),
+		mcp.WithNumber(argInactive, mcp.Description("Last commit by a person older than this many days, or none at all.")),
+		mcp.WithString(argFinding, mcp.Description("A finding kind: declared-but-gone, undeclared-on-github, entry-refused, gen-circleci-refused, default-icon, …")),
+		mcp.WithString(argOrb, mcp.Description("Pinned giantswarm/architect orb version, or its prefix (10 matches every 10.x.y).")),
+		mcp.WithBoolean(argARM64, mcp.Description("The pipeline builds linux/arm64 images (true) or images without it (false).")),
+		mcp.WithString(argChinaPush, mcp.Enum(inventory.ChinaPushSplit, inventory.ChinaPushInline, inventory.ChinaPushCustom, inventory.ChinaPushNone), mcp.Description("split (in-China sync job), inline (the push job pushes there), custom (overridden registries), none (no image push).")),
+		mcp.WithString(argSigning, mcp.Enum(inventory.SigningSigned, inventory.SigningUnsigned, inventory.SigningUnknown, inventory.SigningNone), mcp.Description("cosign signing of the pushed images and charts: signed, unsigned (the record says why), unknown, none (nothing pushed).")),
 		mcp.WithNumber(argLimit, mcp.Description(fmt.Sprintf("Rows to return (default %d).", defaultLimit))),
 	), t.listRepositories)
 	s.AddTool(mcp.NewTool(ToolGetRepository,
-		mcp.WithDescription("Read-only. The full inventory record of one repository: declaration, GitHub reality, CircleCI, Renovate, catalog and mapping, "+
-			"set-up state (the engine's read-mode checks and the last reconciler run), findings and age."),
-		mcp.WithReadOnlyHintAnnotation(true),
+		mcp.WithDescription("One repository's full inventory record: declaration, GitHub state, CI, set-up state, findings, pending run. "+
+			"Use it to check a repository or a write's outcome: setup.pendingRun is set until the reconciler has reported."),
+		readOnly(),
 		mcp.WithString(argRepository, mcp.Required(), mcp.Description("Repository name, with or without the org (giantswarm/muster or muster).")),
 	), t.getRepository)
 	s.AddTool(mcp.NewTool(ToolRefreshRepository,
-		mcp.WithDescription("Rebuild one repository's inventory record now from GitHub, CircleCI and the team files, run the engine's checks in read mode, "+
-			"and return it. Writes the inventory cache only, nothing on GitHub."),
+		mcp.WithDescription("Rebuild one repository's inventory record now, when it is stale or changed outside the manager. Writes only the cache. "+
+			"Reads GitHub, CircleCI and the team files, runs the engine's checks in read mode and returns the record."),
 		mcp.WithIdempotentHintAnnotation(true),
 		mcp.WithDestructiveHintAnnotation(false),
 		mcp.WithString(argRepository, mcp.Required(), mcp.Description("Repository name, with or without the org.")),
 	), t.refreshRepository)
 	s.AddTool(mcp.NewTool(ToolSweepInventory,
-		mcp.WithDescription("Start the full inventory sweep over the org now — every repository's record rebuilt from GitHub and the team files "+
-			"the way the schedule does it — for a member of the teams that own this service (the server's sweep teams, checked on GitHub as you); "+
-			"a non-member is refused. The sweep runs in the background: the answer carries started (false while one already runs), "+
-			"running and the last sweep's summary; list_repositories shows the new one when it is done. Writes the inventory cache only, nothing on GitHub."),
+		mcp.WithDescription("Rebuild every repository's inventory record now instead of on schedule. Service-owner teams only; writes only the cache. "+
+			"Runs in the background: started is false while a sweep already runs; list_repositories shows the result when done."),
 		mcp.WithIdempotentHintAnnotation(true),
 		mcp.WithDestructiveHintAnnotation(false),
 	), t.sweepInventory)

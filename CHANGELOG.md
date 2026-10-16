@@ -12,6 +12,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 
 - The MCP endpoint refuses a request body larger than 1 MiB before mcp-go reads it whole (CVE-2026-108859, no fixed mcp-go release yet; the scan ignores it until 2026-11-12). ([#202](https://github.com/giantswarm/giantswarm-repo-manager/issues/202))
+- The read-only tools are annotated `destructiveHint: false` and `idempotentHint: true` (mcp-go's defaults had
+  reported them destructive); `set_lifecycle` and `align_repository` are annotated `destructiveHint: true`.
+
+### Changed
+
+- The tool descriptions are about a quarter of their length (~3.3k instead of ~7.5k tokens with the schemas). Each
+  starts with a sentence of at most 117 characters, the summary muster's `filter_tools` shows, saying what the tool
+  does and which tool to use instead; the shared `WRITES (…)` prefix is gone. What a model needs before a call stays
+  (whole entry, not a patch; the typed `confirm`; Align now's warning; calling `watch_repository` again); what the
+  answers and refusals already say, and how the service works inside, are left to them and the README. A test holds
+  the budgets ([giantswarm#38592](https://github.com/giantswarm/giantswarm/issues/38592)).
 
 ### Added
 

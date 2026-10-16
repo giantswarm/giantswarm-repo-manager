@@ -37,6 +37,46 @@ func TestToolsDocIsCurrent(t *testing.T) {
 	}
 }
 
+// Description budgets (giantswarm/giantswarm#38592). muster's filter_tools
+// shows the first summaryChars of a description, the text a model picks a
+// tool by.
+const (
+	summaryChars     = 117
+	descriptionChars = 600
+	paramChars       = 150
+	prefixChars      = 40
+)
+
+func TestToolDescriptionBudgets(t *testing.T) {
+	c := newTestClient(t, NewMCPServer(Deps{Version: testVersion}))
+	res, err := c.ListTools(context.Background(), mcp.ListToolsRequest{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	prefixes := map[string]string{}
+	for _, tool := range res.Tools {
+		d := tool.Description
+		first, _, _ := strings.Cut(d, ". ")
+		if n := len([]rune(first)) + 1; n > summaryChars {
+			t.Errorf("%s: first sentence is %d chars, over %d: %q", tool.Name, n, summaryChars, first)
+		}
+		if n := len([]rune(d)); n > descriptionChars {
+			t.Errorf("%s: description is %d chars, over %d", tool.Name, n, descriptionChars)
+		}
+		p := string([]rune(d)[:min(prefixChars, len([]rune(d)))])
+		if other, ok := prefixes[p]; ok {
+			t.Errorf("%s and %s start alike: %q", tool.Name, other, p)
+		}
+		prefixes[p] = tool.Name
+		for name, prop := range tool.InputSchema.Properties {
+			pd, _ := prop.(map[string]any)["description"].(string)
+			if n := len([]rune(pd)); n > paramChars {
+				t.Errorf("%s.%s: description is %d chars, over %d", tool.Name, name, n, paramChars)
+			}
+		}
+	}
+}
+
 func renderToolsDoc(ts []mcp.Tool) string {
 	sort.Slice(ts, func(i, j int) bool { return ts[i].Name < ts[j].Name })
 	var b strings.Builder

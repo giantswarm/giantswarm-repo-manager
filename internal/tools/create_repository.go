@@ -32,11 +32,6 @@ const (
 	// run after the creation-only pull request sets the repository up only
 	// from an opted-in entry.
 	alignRefusal = "a repository created through the manager is opted in to alignment by its creation: leave `align` out or set it to true"
-	// createdOptedIn is the sentence of the creation tools' descriptions
-	// about the field every created entry carries.
-	createdOptedIn = "Every entry is written with `align: true` — the creation is the repository's opt-in to alignment, so the reconciler run after the pull request " +
-		"merges sets the repository up; an entry saying `align: false` is refused. An entry without a visibility is written with " +
-		"`visibility: private`, the org's default; say `visibility: public` for a public repository. "
 )
 
 // Validation is validate_repository's result: the engine's dry run plus who
@@ -110,24 +105,17 @@ type CreatedRepository struct {
 func creationArguments() []mcp.ToolOption {
 	return []mcp.ToolOption{
 		mcp.WithString(argTeam, mcp.Required(), mcp.Description("The owning team's file, as its GitHub team slug: team-bumblebee, team-planeteers, …")),
-		mcp.WithObject(argEntry, mcp.Description("One declaration as it goes into the team file: name, componentType, gen: {language, flavours}, description, visibility and the other fields of the repositories schema."), mcp.AdditionalProperties(true)),
+		mcp.WithObject(argEntry, mcp.Description("One declaration as it goes into the team file: name, componentType, gen: {language, flavours}, description, visibility, …"), mcp.AdditionalProperties(true)),
 		mcp.WithArray(argEntries, mcp.Description("Several declarations at once (a batch above three entries gets a person's review)."), mcp.Items(map[string]any{"type": "object", "additionalProperties": true})),
-		mcp.WithString(argReason, mcp.Description("Why, for the pull request body: the dry run plans it, create_repository writes it.")),
+		mcp.WithString(argReason, mcp.Description("Why, for the pull request body.")),
 	}
 }
 
 func (t *tools) registerValidate(s *mcpserver.MCPServer) {
 	opts := append([]mcp.ToolOption{
-		mcp.WithDescription("Read-only. The dry run of creating one or more new repositories for a team, exactly what create_repository would do: each entry " +
-			"rendered with the schema's defaults, the implied template (giantswarm/template for Go, template-app for a chart, " +
-			"the minimal scaffold otherwise) and its options, whether the name is free on GitHub, and the refusals of the creation rules as data " +
-			"(entries[].problems, and as the engine's findings entry-refused / gen-circleci-refused). " + createdOptedIn +
-			"Plus the guard notices a person sees before any pull request exists: team-review when the author is outside the " +
-			"owning team and team-planeteers, batch-review above three entries, names-unchecked without the App. And the creation (creation): the declaration pull request " +
-			"opened as you, its body carrying your reason, from which the reconciler creates the repositories as its App once it merges — or the refusal. Writes nothing. " +
-			"Takes the same arguments as create_repository (team, entry or entries, reason), so you run it with exactly the arguments you commit. " +
-			"Use it before create_repository; an existing repository that no team file declares is declared with adopt_repository, and its state is read with get_repository."),
-		mcp.WithReadOnlyHintAnnotation(true),
+		mcp.WithDescription("Preview create_repository with the same arguments: rendered entries, template, name check, refusals. Writes nothing. " +
+			"Also the review notices a person sees before the pull request exists. Run it with exactly the arguments you then commit."),
+		readOnly(),
 	}, creationArguments()...)
 	s.AddTool(mcp.NewTool(ToolValidateRepository, opts...), func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 		return result(t.validate(ctx, req.GetArguments()))
@@ -141,13 +129,9 @@ func (t *tools) registerValidate(s *mcpserver.MCPServer) {
 func (t *tools) createRepository() WriteTool {
 	return WriteTool{
 		Name: ToolCreateRepository,
-		Description: "Create one or more new repositories of the giantswarm org: the pull request adding the entries to the team's file " +
-			"(repositories/<team>.yaml in giantswarm/github), opened as you; once it merges, the reconciler creates each repository as its App, pushes one scaffold " +
-			"commit rendered by the engine from the declaration (" + FirstRelease + ") and sets it up. No owner role in the org is needed. " + createdOptedIn +
-			"dryRun: true is validate_repository's result with the creation plan (creation: the pull request) and writes nothing; refusals are data " +
-			"(entries[].problems, creation.refusal), an error means the validation could not run. mode commit refuses before any write — the engine's refusals, " +
-			"a taken name (an existing repository no team file declares is declared with adopt_repository) — and reports the pull request already open for the branch. " +
-			"A declaration of a repository that does not exist yet keeps the owning team's review.",
+		Description: "Create new giantswarm repositories via a team-file pull request. For an existing repository: adopt_repository. " +
+			"Once it merges, the reconciler creates, scaffolds and sets up each repository. Preview with validate_repository. " +
+			"Visibility defaults to private: say `visibility: public` for a public repository.",
 		Options: creationArguments(),
 		DryRun:  func(ctx context.Context, args map[string]any) (any, error) { return t.validate(ctx, args) },
 		Commit:  t.commitCreate,

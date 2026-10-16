@@ -11,6 +11,7 @@ import (
 	"github.com/giantswarm/devctl/v8/pkg/circleciclient"
 	"github.com/giantswarm/devctl/v8/pkg/reposetup"
 	"github.com/giantswarm/devctl/v8/pkg/reposetup/reconcile"
+	"github.com/giantswarm/mcp-toolkit/tooldesc"
 	"github.com/google/go-github/v92/github"
 	"github.com/mark3labs/mcp-go/mcp"
 	mcpserver "github.com/mark3labs/mcp-go/server"
@@ -116,7 +117,7 @@ type WatchRelease struct {
 
 func (t *tools) registerWatch(s *mcpserver.MCPServer) {
 	s.AddTool(mcp.NewTool(ToolWatchRepository,
-		describeTool("After create_repository, follow the new repository until ready. Call again while changed is true or pending is set.",
+		tooldesc.Describe("After create_repository, follow the new repository until ready. Call again while changed is true or pending is set.",
 			"Phases: declared, merged, created, scaffolded, setUp, released. Returns when ready, when a phase fails (failure says why), "+
 				"when a phase completes (changed: true — tell the person) or at timeout (pending names the phase); pendingReason says what is awaited."),
 		readOnly(),

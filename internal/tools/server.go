@@ -14,6 +14,7 @@ import (
 
 	"github.com/giantswarm/devctl/v8/pkg/circleciclient"
 	"github.com/giantswarm/devctl/v8/pkg/reposetup"
+	"github.com/giantswarm/mcp-toolkit/tooldesc"
 	"github.com/mark3labs/mcp-go/mcp"
 	mcpserver "github.com/mark3labs/mcp-go/server"
 
@@ -130,7 +131,7 @@ func (ts *Tools) MCPServer() *mcpserver.MCPServer {
 			"records each repository's declaration, GitHub state, set-up state and findings. get_info says who you are and which declaration values are allowed."),
 	)
 	s.AddTool(mcp.NewTool(ToolGetInfo,
-		describeTool("Who you are here, whether you can write, and the allowed componentType, flavour, language, visibility, lifecycle.",
+		tooldesc.Describe("Who you are here, whether you can write, and the allowed componentType, flavour, language, visibility, lifecycle.",
 			"Call it before composing a declaration, or when a call is refused for access. Also reports the service's version and configuration: "+
 				"team files, inventory, CircleCI, team reviews, engine and schema origin."),
 		readOnly(),

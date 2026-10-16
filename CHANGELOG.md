@@ -22,9 +22,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   saying what the tool does and which tool to use instead; the shared `WRITES (…)` prefix is gone. What a model needs
   before a call stays (whole entry, not a patch; the typed `confirm`; Align now's warning; calling `watch_repository`
   again); what the answers and refusals already say, and how the service works inside, are left to them and the
-  README. Every tool's description is built by `describeTool(summary, details)` (`Summary` and `Details` on a
-  `WriteTool`), which panics on a summary that does not fit; a test holds the other budgets
-  ([giantswarm#38592](https://github.com/giantswarm/giantswarm/issues/38592)).
+  README. Every tool's description is built by mcp-toolkit's `tooldesc.Describe(summary, details)` (`Summary` and
+  `Details` on a `WriteTool`), which panics on a summary that does not fit; `tooldesc.Check` holds the other budgets
+  in a test ([giantswarm#38592](https://github.com/giantswarm/giantswarm/issues/38592)).
 
 ### Added
 

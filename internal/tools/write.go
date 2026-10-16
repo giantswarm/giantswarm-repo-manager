@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/giantswarm/mcp-toolkit/tooldesc"
 	"github.com/mark3labs/mcp-go/mcp"
 	mcpserver "github.com/mark3labs/mcp-go/server"
 
@@ -45,7 +46,7 @@ var ErrNotImplemented = errors.New("not implemented yet")
 // DryRun or Commit.
 type WriteTool struct {
 	Name string
-	// Summary and Details are the tool's description (describeTool); Details
+	// Summary and Details are the tool's description (tooldesc.Describe); Details
 	// gets writeSuffix appended.
 	Summary, Details string
 	// Destructive marks a write that deletes or overwrites what GitHub holds.
@@ -61,7 +62,7 @@ type WriteTool struct {
 // registerWrite adds wt to s with the framework's arguments and guard.
 func registerWrite(s *mcpserver.MCPServer, wt WriteTool) {
 	opts := []mcp.ToolOption{
-		describeTool(wt.Summary, wt.Details+writeSuffix),
+		tooldesc.Describe(wt.Summary, wt.Details+writeSuffix),
 		mcp.WithBoolean(ArgDryRun, mcp.Description("Preview the change and write nothing (default false).")),
 		mcp.WithString(ArgMode, mcp.Description(`"commit": carry the change out as you. Required unless dryRun.`), mcp.Enum(string(ModeCommit))),
 		mcp.WithDestructiveHintAnnotation(wt.Destructive),

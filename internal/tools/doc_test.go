@@ -9,6 +9,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/giantswarm/mcp-toolkit/tooldesc"
 	"github.com/mark3labs/mcp-go/mcp"
 )
 
@@ -37,41 +38,16 @@ func TestToolsDocIsCurrent(t *testing.T) {
 	}
 }
 
-// Description budgets (giantswarm/giantswarm#38592); the summary's is
-// SummaryMax.
-const (
-	descriptionChars = 600
-	paramChars       = 150
-	prefixChars      = 40
-)
-
+// TestToolDescriptionBudgets holds the descriptions muster lists to the
+// budget of giantswarm/giantswarm#38592.
 func TestToolDescriptionBudgets(t *testing.T) {
 	c := newTestClient(t, NewMCPServer(Deps{Version: testVersion}))
 	res, err := c.ListTools(context.Background(), mcp.ListToolsRequest{})
 	if err != nil {
 		t.Fatal(err)
 	}
-	prefixes := map[string]string{}
-	for _, tool := range res.Tools {
-		d := tool.Description
-		first, _, _ := strings.Cut(d, "\n")
-		if n := len([]rune(strings.TrimSpace(first))); n > SummaryMax {
-			t.Errorf("%s: first line is %d runes, over %d: %q", tool.Name, n, SummaryMax, first)
-		}
-		if n := len([]rune(d)); n > descriptionChars {
-			t.Errorf("%s: description is %d chars, over %d", tool.Name, n, descriptionChars)
-		}
-		p := string([]rune(d)[:min(prefixChars, len([]rune(d)))])
-		if other, ok := prefixes[p]; ok {
-			t.Errorf("%s and %s start alike: %q", tool.Name, other, p)
-		}
-		prefixes[p] = tool.Name
-		for name, prop := range tool.InputSchema.Properties {
-			pd, _ := prop.(map[string]any)["description"].(string)
-			if n := len([]rune(pd)); n > paramChars {
-				t.Errorf("%s.%s: description is %d chars, over %d", tool.Name, name, n, paramChars)
-			}
-		}
+	if err := tooldesc.Check(res.Tools, tooldesc.DefaultBudget); err != nil {
+		t.Error(err)
 	}
 }
 
@@ -102,20 +78,4 @@ func renderToolsDoc(ts []mcp.Tool) string {
 		fmt.Fprintf(&b, "```json\n%s\n```\n", schema)
 	}
 	return b.String()
-}
-
-func TestDescribeToolRefusesALongSummary(t *testing.T) {
-	for _, summary := range []string{"", strings.Repeat("x", SummaryMax+1), "two\nlines"} {
-		func() {
-			defer func() {
-				if recover() == nil {
-					t.Errorf("summary %q: no panic", summary)
-				}
-			}()
-			describeTool(summary, "")
-		}()
-	}
-	if got := description(strings.Repeat("x", SummaryMax), " more "); got != strings.Repeat("x", SummaryMax)+"\n\nmore" {
-		t.Errorf("description: %q", got)
-	}
 }

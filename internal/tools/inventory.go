@@ -9,7 +9,7 @@ import (
 	"time"
 
 	"github.com/giantswarm/devctl/v8/pkg/reposetup/reconcile"
-
+	"github.com/giantswarm/mcp-toolkit/tooldesc"
 	"github.com/mark3labs/mcp-go/mcp"
 	mcpserver "github.com/mark3labs/mcp-go/server"
 
@@ -73,7 +73,7 @@ const DefaultRenovateActive = 180 * 24 * time.Hour
 
 func (t *tools) registerInventory(s *mcpserver.MCPServer) {
 	s.AddTool(mcp.NewTool(ToolListRepositories,
-		describeTool("Search and filter all giantswarm repositories: team, lifecycle, Renovate, CI, findings. Full record: get_repository.",
+		tooldesc.Describe("Search and filter all giantswarm repositories: team, lifecycle, Renovate, CI, findings. Full record: get_repository.",
 			"One row per repository with team, lifecycle, visibility, Renovate state, CI facts (architect orb, arm64, China push, cosign signing), "+
 				"finding kinds, set-up state and age, plus the last sweep's summary."),
 		readOnly(),
@@ -95,20 +95,20 @@ func (t *tools) registerInventory(s *mcpserver.MCPServer) {
 		mcp.WithNumber(argLimit, mcp.Description(fmt.Sprintf("Rows to return (default %d).", defaultLimit))),
 	), t.listRepositories)
 	s.AddTool(mcp.NewTool(ToolGetRepository,
-		describeTool("One repository's full inventory record: declaration, GitHub state, CI, set-up state, findings, pending run.",
+		tooldesc.Describe("One repository's full inventory record: declaration, GitHub state, CI, set-up state, findings, pending run.",
 			"Use it to check a repository or a write's outcome: setup.pendingRun is set until the reconciler has reported."),
 		readOnly(),
 		mcp.WithString(argRepository, mcp.Required(), mcp.Description("Repository name, with or without the org (giantswarm/muster or muster).")),
 	), t.getRepository)
 	s.AddTool(mcp.NewTool(ToolRefreshRepository,
-		describeTool("Rebuild one repository's inventory record now, when it is stale or changed outside the manager. Writes only the cache.",
+		tooldesc.Describe("Rebuild one repository's inventory record now, when it is stale or changed outside the manager. Writes only the cache.",
 			"Reads GitHub, CircleCI and the team files, runs the engine's checks in read mode and returns the record."),
 		mcp.WithIdempotentHintAnnotation(true),
 		mcp.WithDestructiveHintAnnotation(false),
 		mcp.WithString(argRepository, mcp.Required(), mcp.Description("Repository name, with or without the org.")),
 	), t.refreshRepository)
 	s.AddTool(mcp.NewTool(ToolSweepInventory,
-		describeTool("Rebuild every repository's inventory record now instead of on schedule. Service-owner teams only; writes only the cache.",
+		tooldesc.Describe("Rebuild every repository's inventory record now instead of on schedule. Service-owner teams only; writes only the cache.",
 			"Runs in the background: started is false while a sweep already runs; list_repositories shows the result when done."),
 		mcp.WithIdempotentHintAnnotation(true),
 		mcp.WithDestructiveHintAnnotation(false),

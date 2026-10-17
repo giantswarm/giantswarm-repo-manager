@@ -10,7 +10,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/giantswarm/devctl/v8/pkg/reposetup"
 	"github.com/google/go-github/v92/github"
 
 	"github.com/giantswarm/giantswarm-repo-manager/internal/gh"
@@ -42,7 +41,7 @@ func (t *tools) person(ctx context.Context) (*person, error) {
 	if err != nil {
 		return nil, err
 	}
-	who, err := reposetup.Remote{GitHub: p.gh, Owner: p.repo.Owner, Repo: p.repo.Name, Ref: p.repo.Ref}.Person(ctx, t.org())
+	teams, err := userTeams(ctx, p.gh, t.org())
 	if err != nil {
 		// The bearer was verified, so the person is known; the teams stay
 		// unknown (the App lacks Organization members: read, or the person is
@@ -50,9 +49,32 @@ func (t *tools) person(ctx context.Context) (*person, error) {
 		t.d.Log.Warn("caller's teams unreadable", "login", p.login, "error", err)
 		return p, nil
 	}
-	p.teams = who.Teams
+	p.teams = teams
 	sort.Strings(p.teams)
 	return p, nil
+}
+
+// userTeams are the slugs of the org's teams the token's user belongs to:
+// every team, since scope mine lists the caller's teams before any is asked
+// about.
+func userTeams(ctx context.Context, c *github.Client, org string) ([]string, error) {
+	var out []string
+	opts := &github.ListOptions{PerPage: 100}
+	for {
+		teams, resp, err := c.Teams.ListUserTeams(ctx, opts)
+		if err != nil {
+			return out, err
+		}
+		for _, t := range teams {
+			if strings.EqualFold(t.GetOrganization().GetLogin(), org) {
+				out = append(out, t.GetSlug())
+			}
+		}
+		if resp.NextPage == 0 {
+			return out, nil
+		}
+		opts.Page = resp.NextPage
+	}
 }
 
 // caller is the person with the client on the request's token and the

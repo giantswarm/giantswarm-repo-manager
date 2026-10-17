@@ -5,6 +5,7 @@ import (
 	"fmt"
 
 	"github.com/giantswarm/devctl/v8/pkg/circleciclient"
+	"github.com/giantswarm/devctl/v8/pkg/reposetup/reconcile"
 
 	"github.com/giantswarm/giantswarm-repo-manager/internal/inventory"
 )
@@ -13,7 +14,8 @@ import (
 // the newest run of every workflow name (a rerun from failed is a second run
 // of the same name; the one it replaced keeps its failed status): the rule
 // the release watch settles a release by and watch_repository decides its
-// released phase by. A failed workflow makes it red whatever still runs;
+// released phase by. A failed workflow makes it red whatever still runs,
+// unless only the job that publishes the GitHub release failed (releaseOnly);
 // built once none failed, none is still moving and one at least succeeded;
 // a workflow the pipeline's filters left out (not_run) is neither.
 type TagPipeline struct {
@@ -54,6 +56,10 @@ func ReadTagPipeline(ctx context.Context, cc *circleciclient.Client, org, name s
 			if err != nil {
 				return tp, fmt.Errorf("the jobs of workflow %s of pipeline %d: %w", run.Name, p.Number, err)
 			}
+			if releaseOnly(jobs) {
+				tp.Succeeded++
+				continue
+			}
 			names := failedJobs(jobs)
 			if len(names) == 0 {
 				names = []string{run.Name + " (" + failureWord(run.Status) + ")"}
@@ -70,4 +76,17 @@ func ReadTagPipeline(ctx context.Context, cc *circleciclient.Client, org, name s
 		}
 	}
 	return tp, nil
+}
+
+// releaseOnly says whether a failed workflow's failed jobs all leave nothing
+// unpublished by devctl's rule (reconcile.UnpublishedJobs): the job whose
+// output is the GitHub release the watch follows. Such a workflow is green.
+func releaseOnly(jobs []circleciclient.Job) bool {
+	var red []string
+	for _, j := range jobs {
+		if _, ok := failedJobStatuses[j.Status]; ok {
+			red = append(red, j.Name)
+		}
+	}
+	return len(red) > 0 && len(reconcile.UnpublishedJobs(red)) == 0
 }

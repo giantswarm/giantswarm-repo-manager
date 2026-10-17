@@ -9,7 +9,7 @@ import (
 	"time"
 
 	"github.com/giantswarm/devctl/v8/pkg/reposetup"
-	"github.com/google/go-github/v92/github"
+	"github.com/google/go-github/v93/github"
 )
 
 // A pull request this server opens is one commit on a fresh branch of Ref.

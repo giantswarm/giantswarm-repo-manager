@@ -9,7 +9,7 @@ import (
 
 	"github.com/giantswarm/devctl/v8/pkg/reposetup"
 	"github.com/giantswarm/devctl/v8/pkg/reposetup/reconcile"
-	"github.com/google/go-github/v92/github"
+	"github.com/google/go-github/v93/github"
 	"github.com/mark3labs/mcp-go/mcp"
 
 	"github.com/giantswarm/giantswarm-repo-manager/internal/inventory"

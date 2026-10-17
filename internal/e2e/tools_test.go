@@ -64,7 +64,7 @@ func TestValidateRepositoryRendersAndRefuses(t *testing.T) {
 
 	four := []any{}
 	for _, n := range []string{"a-one", "a-two", "a-three", "a-four"} {
-		e := map[string]any{kName: n, kComponentType: kService, kGen: map[string]any{kLanguage: kGo, kFlavours: []any{"generic"}}}
+		e := map[string]any{kName: n, kComponentType: kService, kGen: map[string]any{kLanguage: kGo, kFlavours: []any{kGeneric}}}
 		four = append(four, e)
 	}
 	st.callJSON(t, asAlice, tools.ToolValidateRepository, map[string]any{argTeam: team, "entries": four}, &v)

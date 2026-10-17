@@ -193,7 +193,7 @@ func TestWatchRepositoryWaitsForTheDeclaredJobsAndTheSettleWindow(t *testing.T) 
 	created, prURL := st.createShiny(t, c)
 	pr := created.PullRequest.Number
 	st.ghs.repos.put(shinyService, "Dockerfile", "FROM scratch\n")
-	st.declared(pr, "- name: "+shinyService+"\n  componentType: service\n  gen:\n    language: go\n    flavours: [app]\n    ci:\n      chartName: "+shinyService+"\n")
+	st.declared(pr, "- name: "+shinyService+"\n  componentType: service\n  gen:\n    language: go\n    flavours: [app]\n    ci:\n      generate: true\n      chartName: "+shinyService+"\n")
 	st.reported(t, pr, prURL, reconcile.StepResult{Step: reconcile.StepRelease, Verdict: reconcile.VerdictRepaired, Summary: "trigger the missed tag build for " + firstTag})
 	st.ghs.repos.publish(shinyService, firstTag)
 	line := "the CircleCI statuses on " + firstTag + ": "
@@ -241,7 +241,7 @@ func TestWatchRepositoryWaitsForTheDeclaredJobsAndTheSettleWindow(t *testing.T) 
 func TestWatchRepositoryReadiesAPlainRepositoryOnceSettled(t *testing.T) {
 	st := newStack(t)
 	c := st.as(t, aliceToken)
-	created, prURL := st.create(t, c, map[string]any{kName: shinyService, kComponentType: kService, kGen: map[string]any{kLanguage: kGo, kFlavours: []any{"generic"}}})
+	created, prURL := st.create(t, c, map[string]any{kName: shinyService, kComponentType: kService, kGen: map[string]any{kLanguage: kGo, kFlavours: []any{kGeneric}}})
 	pr := created.PullRequest.Number
 	st.declared(pr, "- name: "+shinyService+"\n  componentType: service\n  gen:\n    language: go\n    flavours: [generic]\n")
 	st.reported(t, pr, prURL, reconcile.StepResult{Step: reconcile.StepRelease, Verdict: reconcile.VerdictRepaired, Summary: "trigger the missed tag build for " + firstTag})
@@ -253,6 +253,61 @@ func TestWatchRepositoryReadiesAPlainRepositoryOnceSettled(t *testing.T) {
 	w := st.watch(t, c, pr, 3)
 	if !w.Ready || w.Pending != "" || w.PendingReason != "" || w.Failure != nil || names(w.Phases) != allPhases {
 		t.Fatalf("settled: %+v", w)
+	}
+}
+
+// noCIEntry declares shiny-service without generated CI, as the team file
+// carries it once merged.
+const noCIEntry = "- name: " + shinyService + "\n  componentType: unspecified\n  gen:\n    language: go\n    flavours: [generic]\n    ci:\n      generate: false\n"
+
+// createWithoutCI creates shiny-service as alice from noCIEntry's
+// declaration and merges nothing.
+func (st *stack) createWithoutCI(t *testing.T, c *client.Client) (tools.Created, string) {
+	t.Helper()
+	return st.create(t, c, map[string]any{kName: shinyService, kComponentType: "unspecified",
+		kGen: map[string]any{kLanguage: kGo, kFlavours: []any{kGeneric}, "ci": map[string]any{"generate": false}}})
+}
+
+// TestWatchRepositoryReadiesARepositoryWithoutCIOnceSetUp: a declaration
+// with gen.ci.generate: false has no release to wait for: the watch is ready
+// once the reconciler run has reported, without a released phase, and says
+// why; a call that starts there is ready at once.
+func TestWatchRepositoryReadiesARepositoryWithoutCIOnceSetUp(t *testing.T) {
+	st := newStack(t)
+	c := st.as(t, aliceToken)
+	created, prURL := st.createWithoutCI(t, c)
+	pr := created.PullRequest.Number
+	st.declared(pr, noCIEntry)
+	if w := st.watch(t, c, pr, 0.3); w.Ready || w.WithoutCI || w.Pending != tools.PhaseSetUp || names(w.Phases) != throughMerged {
+		t.Fatalf("before the run: %+v", w)
+	}
+	st.reported(t, pr, prURL, reconcile.StepResult{Step: reconcile.StepScaffold, Verdict: reconcile.VerdictOK})
+	w := st.watch(t, c, pr, 5)
+	if !w.Ready || !w.WithoutCI || w.Pending != "" || w.PendingReason != "" || w.Failure != nil || w.Release != nil || names(w.Phases) != throughSetUp || w.Waited != 0 {
+		t.Fatalf("set up without CI: %+v", w)
+	}
+	if w = st.watch(t, c, pr, 5); !w.Ready || !w.WithoutCI || w.Changed || w.Waited != 0 {
+		t.Fatalf("a call that starts ready: %+v", w)
+	}
+}
+
+// TestWatchRepositoryReadiesATemplatesLeftoverPipelineWithoutCI: a
+// declaration with gen.ci.generate: false whose default branch still carries
+// the CircleCI configuration of the template it was created from releases
+// nothing: ready once set up all the same.
+func TestWatchRepositoryReadiesATemplatesLeftoverPipelineWithoutCI(t *testing.T) {
+	st := newStack(t)
+	c := st.as(t, aliceToken)
+	created, prURL := st.createWithoutCI(t, c)
+	pr := created.PullRequest.Number
+	st.ghs.repos.put(shinyService, ".circleci/config.yml", "version: 2.1\nworkflows:\n  test:\n    jobs:\n      - architect/go-build\n")
+	st.declared(pr, noCIEntry)
+	st.reported(t, pr, prURL, reconcile.StepResult{Step: reconcile.StepScaffold, Verdict: reconcile.VerdictOK})
+	if rec := st.record(t, shinyService); rec.CI == nil {
+		t.Fatalf("the record without the leftover pipeline: %+v", rec)
+	}
+	if w := st.watch(t, c, pr, 0.3); !w.Ready || !w.WithoutCI || w.Pending != "" || names(w.Phases) != throughSetUp {
+		t.Fatalf("a template's leftover pipeline: %+v", w)
 	}
 }
 

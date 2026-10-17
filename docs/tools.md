@@ -566,7 +566,7 @@ Also the review notices a person sees before the pull request exists. Run it wit
 ```text
 After create_repository, follow the new repository until ready or a phase fails. Call again while changed or pending.
 
-Phases: declared, merged, created, scaffolded, setUp, released. Returns when ready, when a phase fails (failure says why; the watch ends), when a phase completes (changed: true — tell the person) or at timeout (pending names the phase); pendingReason says what is awaited.
+Phases: declared, merged, created, scaffolded, setUp, released. Returns when ready, when a phase fails (failure says why; the watch ends), when a phase completes (changed: true — tell the person) or at timeout (pending names the phase); pendingReason says what is awaited. A repository without CI (withoutCI: true) is ready once set up.
 ```
 
 ```json

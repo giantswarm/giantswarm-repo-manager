@@ -9,6 +9,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.37.2] - 2026-10-18
+
 ### Fixed
 
 - `watch_repository` completes `setUp` on a repository whose pull request's run a later run has replaced on the record (a nightly run, an Align now, another pull request's run): a run that finished after the merge sets it up, with its findings and failed steps. A watch started days after the creation no longer waits for `setUp` until its timeout.
@@ -861,7 +863,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Repository bootstrap: the Go module, a health-serving binary, the Dockerfile and the Helm chart with its Valkey dependency.
 
-[Unreleased]: https://github.com/giantswarm/giantswarm-repo-manager/compare/v0.37.1-rc.1...HEAD
+[Unreleased]: https://github.com/giantswarm/giantswarm-repo-manager/compare/v0.37.2...HEAD
+[0.37.2]: https://github.com/giantswarm/giantswarm-repo-manager/compare/v0.37.1-rc.1...v0.37.2
 [0.37.1-rc.1]: https://github.com/giantswarm/giantswarm-repo-manager/compare/v0.37.0...v0.37.1-rc.1
 [0.37.0]: https://github.com/giantswarm/giantswarm-repo-manager/compare/v0.37.0-rc.1...v0.37.0
 [0.37.0-rc.1]: https://github.com/giantswarm/giantswarm-repo-manager/compare/v0.36.1...v0.37.0-rc.1

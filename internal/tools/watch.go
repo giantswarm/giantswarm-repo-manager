@@ -48,7 +48,8 @@ const contextImagePush = "push-to-registries"
 // reported, and the
 // first release exists with its tag pipeline's workflows green — or, where
 // the manager reads no tag pipeline, its CircleCI statuses green, complete
-// for the declaration and settled.
+// for the declaration and settled. A repository without CI (withoutCI) has
+// no release to wait for: it is ready once set up.
 const (
 	PhaseDeclared   = "declared"
 	PhaseMerged     = "merged"
@@ -72,6 +73,10 @@ type Watch struct {
 	Changed bool `json:"changed"`
 	// Ready says every phase is done without a failure.
 	Ready bool `json:"ready"`
+	// WithoutCI says the repository is declared without CI
+	// (gen.ci.generate: false): no release comes, so it is ready once set
+	// up, without a released phase.
+	WithoutCI bool `json:"withoutCI,omitempty"`
 	// Pending names the phase still waited for when the call's timeout ran
 	// out; empty when ready or failed.
 	Pending string `json:"pending,omitempty"`
@@ -119,7 +124,8 @@ func (t *tools) registerWatch(s *mcpserver.MCPServer) {
 	s.AddTool(mcp.NewTool(ToolWatchRepository,
 		tooldesc.Describe("After create_repository, follow the new repository until ready or a phase fails. Call again while changed or pending.",
 			"Phases: declared, merged, created, scaffolded, setUp, released. Returns when ready, when a phase fails (failure says why; the watch ends), "+
-				"when a phase completes (changed: true — tell the person) or at timeout (pending names the phase); pendingReason says what is awaited."),
+				"when a phase completes (changed: true — tell the person) or at timeout (pending names the phase); pendingReason says what is awaited. "+
+				"A repository without CI (withoutCI: true) is ready once set up."),
 		readOnly(),
 		mcp.WithString(argRepository, mcp.Required(), mcp.Description("Repository name, with or without the org.")),
 		mcp.WithNumber(argPullRequest, mcp.Required(), mcp.Description("The declaration pull request's number in the team files repository (create_repository's pullRequest.number).")),
@@ -224,6 +230,9 @@ type watcher struct {
 	// ci is the record's CI block, from the same record: its jobs and their
 	// filters say which statuses only the tag pipeline posts.
 	ci *inventory.CI
+	// ciGenerate is the declaration's gen.ci.generate, from the same
+	// record; nil when the entry does not say.
+	ciGenerate *bool
 	// run is the reconciler run, from the setUp phase.
 	run *inventory.LastRun
 	// dockerfile says whether the default branch carries a Dockerfile — the
@@ -258,7 +267,8 @@ func undecided(reason string) outcome { return outcome{reason: reason} }
 var pending = outcome{}
 
 // advance reads the phases after the ones done, in order, until one is
-// pending or failed, or all are done. An error is the tool's own: a wrong
+// pending or failed, or all are done — through setUp for a repository
+// without CI. An error is the tool's own: a wrong
 // argument or the inventory store, never a read GitHub refused.
 func (w *watcher) advance(ctx context.Context) error {
 	checks := []struct {
@@ -287,6 +297,10 @@ func (w *watcher) advance(ctx context.Context) error {
 			ph.Seconds = int(ph.At.Sub(w.out.Phases[n-1].At).Round(time.Second) / time.Second)
 		}
 		w.out.Phases = append(w.out.Phases, ph)
+		if c.name == PhaseSetUp && w.withoutCI() {
+			w.out.WithoutCI = true
+			break
+		}
 	}
 	w.out.Ready, w.out.Pending, w.out.PendingReason = true, "", ""
 	return nil
@@ -380,7 +394,7 @@ func (w *watcher) setUp(ctx context.Context) (outcome, error) {
 		return pending, err
 	}
 	if rec.Declaration != nil {
-		w.flavours = rec.Declaration.Flavours
+		w.flavours, w.ciGenerate = rec.Declaration.Flavours, rec.Declaration.CIGenerate
 	}
 	w.ci = rec.CI
 	if p := rec.Setup.PendingRun; p.Follows(w.number) && p.MergedAt == nil && w.t.d.Collector != nil {
@@ -409,6 +423,16 @@ func (w *watcher) setUp(ctx context.Context) (outcome, error) {
 		return failed(fmt.Sprintf("the reconciler refused the entry and ran no step: %s (%s)", findingsText(s.Findings), run.RunURL)), nil
 	}
 	return done(run.Timestamp), nil
+}
+
+// withoutCI says the repository is declared without CI, as the setUp
+// phase's record shows the entry: gen.ci.generate: false, which a creation
+// always writes out. The reconciler scaffolds no pipeline and no release
+// comes; a CircleCI configuration a template left behind changes nothing. An
+// entry that does not say, or a record that does not know it, waits for the
+// release as before.
+func (w *watcher) withoutCI() bool {
+	return w.ciGenerate != nil && !*w.ciGenerate
 }
 
 // released: the first release exists (read as the caller) and, where the

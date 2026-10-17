@@ -9,6 +9,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- `watch_repository` is ready once set up for a repository declared without CI (`gen.ci.generate: false`) and says so with `withoutCI`, instead of waiting for a release that never comes; a CircleCI configuration a template left behind changes nothing. An entry with generated CI, or one that does not say, still waits for `released`. The record's declaration carries `ciGenerate`.
+
 ### Changed
 
 - Renovate opens a `devctl/v8` bump PR as soon as devctl releases and merges it on green, so a devctl fix reaches the reconciler without delay.

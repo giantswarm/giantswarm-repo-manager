@@ -41,6 +41,7 @@ const (
 	modeCommit     = "commit"
 	kComponentType = "componentType"
 	kApp           = "app"
+	kGeneric       = "generic"
 	kPublic        = "public"
 	kPath          = "path"
 	kContent       = "content"

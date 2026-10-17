@@ -57,6 +57,10 @@ type Declaration struct {
 	Lifecycle     string   `json:"lifecycle,omitempty"`
 	Language      string   `json:"language,omitempty"`
 	Flavours      []string `json:"flavours,omitempty"`
+	// CIGenerate is the entry's gen.ci.generate: true, the reconciler
+	// generates the CircleCI pipeline that releases the repository; false,
+	// it is declared without CI; nil, the entry does not say.
+	CIGenerate *bool `json:"ciGenerate,omitempty"`
 	// Entry is the declaration as the team file carries it (one-item YAML list).
 	Entry string `json:"entry"`
 	// Accepted is the verdict of the repositories schema the team file

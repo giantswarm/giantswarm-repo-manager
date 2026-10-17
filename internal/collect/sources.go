@@ -279,6 +279,11 @@ func fillDeclaration(d *inventory.Declaration, decl reposetup.Declaration) {
 				}
 			}
 		}
+		if ci, ok := gen["ci"].(map[string]any); ok {
+			if g, ok := ci["generate"].(bool); ok {
+				d.CIGenerate = &g
+			}
+		}
 	}
 }
 

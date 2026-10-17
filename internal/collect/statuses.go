@@ -43,15 +43,23 @@ const (
 // the declaration has such jobs: a release cut on the default branch head
 // carries that branch's green build of the shared jobs whether or not the
 // tag was ever built (devctl#2408: `built: CircleCI success (1 job)` for a
-// tag no pipeline built), and reads unchecked.
+// tag no pipeline built), and reads unchecked. A failed job whose output is
+// the GitHub release the step was given is no failure of the release, by
+// devctl's rule (reconcile.UnpublishedJobs): app-catalog-cleanup-tool
+// v0.3.0, red only in publish-github-release with its image pushed, reads
+// built and names the job.
 func statusesReleaseStep(slug, tag string, b *inventory.HeadStatus, ci *inventory.CI, tagOnly []string) reconcile.StepResult {
 	sr := reconcile.StepResult{Step: reconcile.StepRelease}
 	own, foreign := splitStatuses(b, ci, func(j inventory.CIJob) bool { return j.RunsOnTag(tag) })
 	failed, pending := statesOf(b, own)
+	failed, published := unpublished(failed)
 	count := fmt.Sprintf("%s, %s", plural(len(own), "job"), b.At.UTC().Format(time.RFC3339))
-	ignored := ""
+	notes := ""
 	if len(foreign) > 0 {
-		ignored = fmt.Sprintf("; %s of a branch pipeline at the commit ignored", plural(len(foreign), "status"))
+		notes = fmt.Sprintf("; %s of a branch pipeline at the commit ignored", plural(len(foreign), "status"))
+	}
+	if len(published) > 0 {
+		notes += fmt.Sprintf("; %s failed, the GitHub release it publishes exists", jobNames(published))
 	}
 	switch {
 	case len(failed) > 0 && len(foreign) > 0 && !anyTagOnly(failed, ci, tag):
@@ -62,22 +70,22 @@ func statusesReleaseStep(slug, tag string, b *inventory.HeadStatus, ci *inventor
 			fmt.Sprintf("configure a CircleCI token (`circleci.existingSecret`) so the release watch reads the tag's own pipeline; `devctl release wait %s %s` tells now", slug, tag))}
 	case len(failed) > 0:
 		sr.Verdict = reconcile.VerdictReported
-		sr.Summary = fmt.Sprintf("release %s: CircleCI failure in %s (%s)%s", tag, jobNames(failed), count, ignored)
+		sr.Summary = fmt.Sprintf("release %s: CircleCI failure in %s (%s)%s", tag, jobNames(failed), count, notes)
 		sr.Findings = []reconcile.Finding{finding(reconcile.FindingRedRelease,
 			fmt.Sprintf("the tag pipeline of %s %s failed in %s", slug, tag, jobNames(failed)),
 			fmt.Sprintf("nothing was published for %s: rerun the failed workflow from failed on CircleCI, then `devctl release wait %s %s` confirms the images and chart; when the cause is in the code, the next tag is the release", tag, slug, tag))}
 	case len(pending) > 0:
 		sr.Verdict = reconcile.VerdictOK
-		sr.Summary = fmt.Sprintf("release %s: CircleCI pipeline running (%s)%s", tag, count, ignored)
+		sr.Summary = fmt.Sprintf("release %s: CircleCI pipeline running (%s)%s", tag, count, notes)
 	case len(tagOnly) > 0 && !inventory.Reported(own, tagOnly):
 		sr.Verdict = reconcile.VerdictReported
-		sr.Summary = fmt.Sprintf("release %s: none of the tag pipeline's own jobs (%s) on its commit (%s)%s", tag, strings.Join(tagOnly, ", "), count, ignored)
+		sr.Summary = fmt.Sprintf("release %s: none of the tag pipeline's own jobs (%s) on its commit (%s)%s", tag, strings.Join(tagOnly, ", "), count, notes)
 		sr.Findings = []reconcile.Finding{finding(reconcile.FindingUnchecked,
 			fmt.Sprintf("whether CircleCI built the tag %s of %s is out of the inventory's reach: %s on its commit run on the default branch too, and none of the jobs only the tag pipeline runs (%s) has reported", tag, slug, jobNames(own), strings.Join(tagOnly, ", ")),
 			fmt.Sprintf("configure a CircleCI token (`circleci.existingSecret`) so the release watch reads the tag's own pipeline; `devctl release wait %s %s` tells now", slug, tag))}
 	default:
 		sr.Verdict = reconcile.VerdictOK
-		sr.Summary = fmt.Sprintf("release %s built: CircleCI success (%s)%s", tag, count, ignored)
+		sr.Summary = fmt.Sprintf("release %s built: CircleCI success (%s)%s", tag, count, notes)
 	}
 	return sr
 }
@@ -130,6 +138,21 @@ func statesOf(s *inventory.HeadStatus, own []string) (failed, pending []string) 
 		return nil, nil
 	}
 	return among(s.Failed, own), among(s.Pending, own)
+}
+
+// unpublished divides failed contexts by devctl's release rule
+// (reconcile.UnpublishedJobs): failed keeps the jobs that leave something of
+// the release unpublished, published the ones whose output is the GitHub
+// release itself.
+func unpublished(contexts []string) (failed, published []string) {
+	for _, c := range contexts {
+		if len(reconcile.UnpublishedJobs([]string{inventory.JobOf(c)})) == 0 {
+			published = append(published, c)
+			continue
+		}
+		failed = append(failed, c)
+	}
+	return failed, published
 }
 
 // jobIndex is the declaration's jobs by name; a name used by several

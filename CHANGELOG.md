@@ -12,6 +12,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 
 - Renovate opens a `devctl/v8` bump PR as soon as devctl releases and merges it on green, so a devctl fix reaches the reconciler without delay.
+- Check set-up with devctl 8.140.0's engine. The caller's teams are listed by the server itself, since devctl's `Remote.Person` now checks only the teams it is given.
+
+### Fixed
+
+- A release whose tag pipeline is red only in `publish-github-release` reads built, not `red-release`: that job's one output is the GitHub release, which exists, and the artifacts were pushed before it ran (devctl's `reconcile.UnpublishedJobs`). This holds for the release step from the tag commit's statuses and for the release watch. A red artifact job is still `red-release`.
 
 ### Fixed
 

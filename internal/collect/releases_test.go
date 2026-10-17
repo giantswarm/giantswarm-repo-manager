@@ -120,6 +120,23 @@ func TestReadReleaseDecidesFromTheTagPipeline(t *testing.T) {
 			calls: 2,
 		},
 		{
+			name: "built: app-catalog-cleanup-tool v0.3.0, red only in the job that publishes the GitHub release",
+			fake: &fakeTagPipelines{project: org + "/" + name, pipelines: []circleciclient.Pipeline{tagPipeline},
+				workflows: map[string][]circleciclient.Workflow{pipelineTag: {greenSetup, failedBuild}},
+				jobs:      map[string][]circleciclient.Job{wfBuild: {{Name: releaseJobName, Status: stateSuccess}, {Name: reconcile.GitHubReleaseJob, Status: "failed"}}}},
+			want:  inventory.ReleaseWatch{State: inventory.ReleaseBuilt, Pipeline: &inventory.ReleasePipeline{Number: 11508, URL: backstage11508}},
+			calls: 3,
+		},
+		{
+			name: "red: an artifact job red beside the job that publishes the GitHub release",
+			fake: &fakeTagPipelines{project: org + "/" + name, pipelines: []circleciclient.Pipeline{tagPipeline},
+				workflows: map[string][]circleciclient.Workflow{pipelineTag: {greenSetup, failedBuild}},
+				jobs:      map[string][]circleciclient.Job{wfBuild: {{Name: releaseJobName, Status: "failed"}, {Name: reconcile.GitHubReleaseJob, Status: "failed"}}}},
+			want: inventory.ReleaseWatch{State: inventory.ReleaseRed, FailedJobs: []string{releaseJobName + " (failed)", reconcile.GitHubReleaseJob + " (failed)"},
+				Pipeline: &inventory.ReleasePipeline{Number: 11508, URL: backstage11508, Workflow: backstage11508 + "/workflows/" + wfBuild}},
+			calls: 3,
+		},
+		{
 			name: "watching: a workflow still running",
 			fake: &fakeTagPipelines{project: org + "/" + name, pipelines: []circleciclient.Pipeline{tagPipeline},
 				workflows: map[string][]circleciclient.Workflow{pipelineTag: {greenSetup, {ID: "wf-run", Name: workflowBuild, Status: statusRunning, CreatedAt: t0}}}},

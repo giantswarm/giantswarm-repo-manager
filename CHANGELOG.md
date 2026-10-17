@@ -11,6 +11,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- `watch_repository` completes `setUp` on a repository whose pull request's run a later run has replaced on the record (a nightly run, an Align now, another pull request's run): a run that finished after the merge sets it up, with its findings and failed steps. A watch started days after the creation no longer waits for `setUp` until its timeout.
 - `watch_repository` is ready once set up for a repository declared without CI (`gen.ci.generate: false`) and says so with `withoutCI`, instead of waiting for a release that never comes; a CircleCI configuration a template left behind changes nothing. An entry with generated CI, or one that does not say, still waits for `released`. The record's declaration carries `ciGenerate`.
 
 ### Changed

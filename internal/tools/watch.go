@@ -380,11 +380,11 @@ func (w *watcher) merged(ctx context.Context) (outcome, error) {
 	return pending, nil
 }
 
-// setUp: the record's last run is the one of the pull request. Its failed
-// steps fail the phase, so does a refused entry (the entry step's
-// findings); the other findings are carried for the person. A run the
-// poller gave up as missing after the merge fails the phase; one it still
-// expects keeps it pending.
+// setUp: the record's last run is the one of the pull request, or a later
+// run that finished after the merge (setUpRun). Its failed steps fail the
+// phase, so does a refused entry (the entry step's findings); the other
+// findings are carried for the person. A run the poller gave up as missing
+// after the merge fails the phase; one it still expects keeps it pending.
 func (w *watcher) setUp(ctx context.Context) (outcome, error) {
 	rec, err := w.t.d.Inventory.Get(ctx, w.org()+"/"+w.name)
 	switch {
@@ -407,7 +407,7 @@ func (w *watcher) setUp(ctx context.Context) (outcome, error) {
 		return failed(rec.MissingRunFinding().Message), nil
 	}
 	run := rec.Setup.LastRun
-	if run == nil || run.Change == nil || run.Change.PullRequest == nil || run.Change.PullRequest.Number != w.number {
+	if !w.setUpRun(run, rec.Setup.PendingRun) {
 		return pending, nil
 	}
 	w.run = run
@@ -423,6 +423,34 @@ func (w *watcher) setUp(ctx context.Context) (outcome, error) {
 		return failed(fmt.Sprintf("the reconciler refused the entry and ran no step: %s (%s)", findingsText(s.Findings), run.RunURL)), nil
 	}
 	return done(run.Timestamp), nil
+}
+
+// setUpRun says whether run sets the repository up for the watch: the run
+// of the pull request, or — once a nightly run, an Align now or another
+// pull request's run has replaced it on the record — a run that finished
+// after the merge while the poller expects no run of the pull request any
+// more. A run from before the merge says nothing about the declaration.
+func (w *watcher) setUpRun(run *inventory.LastRun, expected *inventory.PendingRun) bool {
+	switch {
+	case run == nil:
+		return false
+	case run.Change != nil && run.Change.PullRequest != nil && run.Change.PullRequest.Number == w.number:
+		return true
+	case expected.Follows(w.number):
+		return false
+	}
+	merged, ok := w.reached(PhaseMerged)
+	return ok && run.Timestamp.After(merged)
+}
+
+// reached is when the phase named was reached, if it is done.
+func (w *watcher) reached(name string) (time.Time, bool) {
+	for _, p := range w.out.Phases {
+		if p.Name == name {
+			return p.At, true
+		}
+	}
+	return time.Time{}, false
 }
 
 // withoutCI says the repository is declared without CI, as the setUp

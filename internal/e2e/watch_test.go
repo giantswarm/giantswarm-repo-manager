@@ -88,13 +88,19 @@ func (st *stack) watch(t *testing.T, c *client.Client, pr int, timeout float64) 
 // creation's pull request and lets the poller read it.
 func (st *stack) reported(t *testing.T, pr int, prURL string, steps ...reconcile.StepResult) {
 	t.Helper()
+	st.reportedChange(t, &inventory.Change{Kind: inventory.ChangeCreated, By: alice, PullRequest: &inventory.ChangePullRequest{Number: pr, URL: prURL}}, steps...)
+}
+
+// reportedChange adds a completed reconciler run over shiny-service for
+// change, finished now, and lets the poller read it.
+func (st *stack) reportedChange(t *testing.T, change *inventory.Change, steps ...reconcile.StepResult) {
+	t.Helper()
 	finished := time.Now().UTC().Truncate(time.Second)
 	res := reconcile.Result{Steps: steps}
 	res.Converged = len(res.Failed()) == 0
-	st.ghs.actions.addRun(t, runStatusCompleted, finished, artifactReport{name: shinyService, finishedAt: finished, result: res,
-		change: &inventory.Change{Kind: inventory.ChangeCreated, By: alice, PullRequest: &inventory.ChangePullRequest{Number: pr, URL: prURL}}})
+	st.ghs.actions.addRun(t, runStatusCompleted, finished, artifactReport{name: shinyService, finishedAt: finished, result: res, change: change})
 	if p := st.poll(t); p.Artifacts != 1 || p.Pending != 0 {
-		t.Fatalf("poll with the creation's run: %+v", p)
+		t.Fatalf("poll with the %s run: %+v", change.Kind, p)
 	}
 }
 
@@ -308,6 +314,38 @@ func TestWatchRepositoryReadiesATemplatesLeftoverPipelineWithoutCI(t *testing.T)
 	}
 	if w := st.watch(t, c, pr, 0.3); !w.Ready || !w.WithoutCI || w.Pending != "" || names(w.Phases) != throughSetUp {
 		t.Fatalf("a template's leftover pipeline: %+v", w)
+	}
+}
+
+// TestWatchRepositoryCountsALaterRunAfterTheMerge: a watch started after a
+// nightly run replaced the pull request's run on the record. A nightly run
+// that finished before the merge says nothing: setUp stays pending. A nightly run that finished after the
+// merge sets the repository up with its findings, and its failed step fails
+// the phase.
+func TestWatchRepositoryCountsALaterRunAfterTheMerge(t *testing.T) {
+	st := newStack(t)
+	c := st.as(t, aliceToken)
+	created, _ := st.createWithoutCI(t, c)
+	pr := created.PullRequest.Number
+	nightly := &inventory.Change{Kind: inventory.ChangeNightly}
+	st.reportedChange(t, nightly, reconcile.StepResult{Step: reconcile.StepScaffold, Verdict: reconcile.VerdictOK})
+	st.declared(pr, noCIEntry)
+	if w := st.watch(t, c, pr, 0.3); w.Ready || w.Failure != nil || w.Pending != tools.PhaseSetUp || names(w.Phases) != throughMerged {
+		t.Fatalf("a nightly run before the merge: %+v", w)
+	}
+
+	time.Sleep(2 * time.Second)
+	st.reportedChange(t, nightly, reconcile.StepResult{Step: reconcile.StepMetadata, Verdict: reconcile.VerdictReported,
+		Findings: []reconcile.Finding{{Kind: reconcile.FindingDefaultIcon, Advisory: true, Message: "the template's icon", Fix: "replace it"}}})
+	w := st.watch(t, c, pr, 0.3)
+	if !w.Ready || !w.WithoutCI || w.Failure != nil || names(w.Phases) != throughSetUp || len(w.Findings) != 1 || w.Findings[0].Kind != reconcile.FindingDefaultIcon {
+		t.Fatalf("a nightly run after the merge: %+v", w)
+	}
+
+	time.Sleep(time.Second)
+	st.reportedChange(t, nightly, reconcile.StepResult{Step: reconcile.StepProtection, Verdict: reconcile.VerdictFailed, Summary: "PUT branch protection: 403"})
+	if w = st.watch(t, c, pr, 0.3); w.Ready || w.Failure == nil || w.Failure.Phase != tools.PhaseSetUp || !strings.Contains(w.Failure.Reason, "the protection step failed") {
+		t.Fatalf("a later run with a failed step: %+v failure=%+v", w, w.Failure)
 	}
 }
 

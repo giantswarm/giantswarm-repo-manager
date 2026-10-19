@@ -67,7 +67,7 @@ func TestValidateRepositoryRendersAndRefuses(t *testing.T) {
 		e := map[string]any{kName: n, kComponentType: kService, kGen: map[string]any{kLanguage: kGo, kFlavours: []any{kGeneric}}}
 		four = append(four, e)
 	}
-	st.callJSON(t, asAlice, tools.ToolValidateRepository, map[string]any{argTeam: team, "entries": four}, &v)
+	st.callJSON(t, asAlice, tools.ToolValidateRepository, map[string]any{argTeam: team, argEntries: four}, &v)
 	if len(v.Entries) != 4 || !hasNotice(v.Notices, "batch-review") {
 		t.Errorf("four entries should carry batch-review: %d entries, %+v", len(v.Entries), v.Notices)
 	}
@@ -135,7 +135,7 @@ func TestCreateCommitSaysTheFirstReleasePerRepository(t *testing.T) {
 		kGen: map[string]any{kLanguage: kGo, kFlavours: []any{kGeneric}, kCI: map[string]any{kGenerate: false}}}
 	shinier := map[string]any{kName: "shinier-service", kComponentType: kService, kGen: map[string]any{kLanguage: kGo, kFlavours: []any{kGeneric}}}
 	var out tools.Created
-	st.callJSON(t, st.as(t, aliceToken), tools.ToolCreateRepository, map[string]any{argMode: modeCommit, argTeam: team, "entries": []any{quiet, shinier}}, &out)
+	st.callJSON(t, st.as(t, aliceToken), tools.ToolCreateRepository, map[string]any{argMode: modeCommit, argTeam: team, argEntries: []any{quiet, shinier}}, &out)
 	if out.FirstRelease != tools.FirstReleasePerRepository || len(out.Repositories) != 2 ||
 		out.Repositories[0].FirstRelease != tools.NoFirstRelease || out.Repositories[1].FirstRelease != tools.FirstRelease {
 		t.Errorf("a mixed batch: %q %+v", out.FirstRelease, out.Repositories)

@@ -96,6 +96,7 @@ the message to the team's standup channel is rendered from (README, "Asks and me
     "language": "go",
     "flavours": ["app"],
     "ciGenerate": true,                 // gen.ci.generate: true generated CI, false declared without CI; absent when the entry does not say
+    "releaseWorkflow": "auto-release",  // gen.ci.releaseWorkflow; absent when the entry does not say (auto-release with generated CI, else legacy)
     "entry": "- name: present-service\n  ...",   // the entry as the team file carries it
     "accepted": true,                   // the verdict of the schema the team file declares (giantswarm/github's own, at the commit read); problems[] names the refusals
     "problems": [],

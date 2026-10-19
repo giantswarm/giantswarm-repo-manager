@@ -126,6 +126,22 @@ func assertNoRepositoryWrites(t *testing.T, st *stack) {
 	}
 }
 
+// TestCreateCommitSaysTheFirstReleasePerRepository: a batch whose entries
+// differ in their release workflow says so per repository, and the result's
+// firstRelease points there.
+func TestCreateCommitSaysTheFirstReleasePerRepository(t *testing.T) {
+	st := newStack(t)
+	quiet := map[string]any{kName: "quiet-service", kComponentType: "unspecified",
+		kGen: map[string]any{kLanguage: kGo, kFlavours: []any{kGeneric}, kCI: map[string]any{kGenerate: false}}}
+	shinier := map[string]any{kName: "shinier-service", kComponentType: kService, kGen: map[string]any{kLanguage: kGo, kFlavours: []any{kGeneric}}}
+	var out tools.Created
+	st.callJSON(t, st.as(t, aliceToken), tools.ToolCreateRepository, map[string]any{argMode: modeCommit, argTeam: team, "entries": []any{quiet, shinier}}, &out)
+	if out.FirstRelease != tools.FirstReleasePerRepository || len(out.Repositories) != 2 ||
+		out.Repositories[0].FirstRelease != tools.NoFirstRelease || out.Repositories[1].FirstRelease != tools.FirstRelease {
+		t.Errorf("a mixed batch: %q %+v", out.FirstRelease, out.Repositories)
+	}
+}
+
 // TestCreateCommitOpensTheDeclarationAsThePerson: alice gets the declaration
 // pull request under her name and nothing else; the repository is the
 // reconciler's to create once it merges. The result names the pull request

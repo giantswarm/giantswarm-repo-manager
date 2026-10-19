@@ -74,8 +74,8 @@ type Watch struct {
 	// Ready says every phase is done without a failure.
 	Ready bool `json:"ready"`
 	// WithoutCI says the repository is declared without CI
-	// (gen.ci.generate: false): no release comes, so it is ready once set
-	// up, without a released phase.
+	// (gen.ci.generate false or absent): no release comes, so it is ready
+	// once set up, without a released phase.
 	WithoutCI bool `json:"withoutCI,omitempty"`
 	// Pending names the phase still waited for when the call's timeout ran
 	// out; empty when ready or failed.
@@ -230,8 +230,10 @@ type watcher struct {
 	// ci is the record's CI block, from the same record: its jobs and their
 	// filters say which statuses only the tag pipeline posts.
 	ci *inventory.CI
-	// ciGenerate is the declaration's gen.ci.generate, from the same
-	// record; nil when the entry does not say.
+	// knowsEntry says the record read in the setUp phase carries the
+	// declaration; ciGenerate is its gen.ci.generate, nil when the entry
+	// does not say.
+	knowsEntry bool
 	ciGenerate *bool
 	// run is the reconciler run, from the setUp phase.
 	run *inventory.LastRun
@@ -394,7 +396,7 @@ func (w *watcher) setUp(ctx context.Context) (outcome, error) {
 		return pending, err
 	}
 	if rec.Declaration != nil {
-		w.flavours, w.ciGenerate = rec.Declaration.Flavours, rec.Declaration.CIGenerate
+		w.knowsEntry, w.flavours, w.ciGenerate = true, rec.Declaration.Flavours, rec.Declaration.CIGenerate
 	}
 	w.ci = rec.CI
 	if p := rec.Setup.PendingRun; p.Follows(w.number) && p.MergedAt == nil && w.t.d.Collector != nil {
@@ -454,13 +456,12 @@ func (w *watcher) reached(name string) (time.Time, bool) {
 }
 
 // withoutCI says the repository is declared without CI, as the setUp
-// phase's record shows the entry: gen.ci.generate: false, which a creation
-// always writes out. The reconciler scaffolds no pipeline and no release
-// comes; a CircleCI configuration a template left behind changes nothing. An
-// entry that does not say, or a record that does not know it, waits for the
-// release as before.
+// phase's record shows the entry: gen.ci.generate false, or absent, which
+// align-files reads the same way. The reconciler scaffolds no pipeline and
+// no release comes; a CircleCI configuration a template left behind changes nothing. A
+// record that does not know the declaration waits for the release as before.
 func (w *watcher) withoutCI() bool {
-	return w.ciGenerate != nil && !*w.ciGenerate
+	return w.knowsEntry && (w.ciGenerate == nil || !*w.ciGenerate)
 }
 
 // released: the first release exists (read as the caller) and, where the

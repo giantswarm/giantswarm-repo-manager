@@ -249,7 +249,7 @@ func TestWatchRepositoryReadiesAPlainRepositoryOnceSettled(t *testing.T) {
 	c := st.as(t, aliceToken)
 	created, prURL := st.create(t, c, map[string]any{kName: shinyService, kComponentType: kService, kGen: map[string]any{kLanguage: kGo, kFlavours: []any{kGeneric}}})
 	pr := created.PullRequest.Number
-	st.declared(pr, "- name: "+shinyService+"\n  componentType: service\n  gen:\n    language: go\n    flavours: [generic]\n")
+	st.declared(pr, "- name: "+shinyService+"\n  componentType: service\n  gen:\n    language: go\n    flavours: [generic]\n    ci:\n      generate: true\n")
 	st.reported(t, pr, prURL, reconcile.StepResult{Step: reconcile.StepRelease, Verdict: reconcile.VerdictRepaired, Summary: "trigger the missed tag build for " + firstTag})
 	st.ghs.repos.publish(shinyService, firstTag)
 	st.ghs.repos.report(shinyService, stateSuccess, circleSetup, circleBuild)
@@ -282,6 +282,9 @@ func TestWatchRepositoryReadiesARepositoryWithoutCIOnceSetUp(t *testing.T) {
 	st := newStack(t)
 	c := st.as(t, aliceToken)
 	created, prURL := st.createWithoutCI(t, c)
+	if created.FirstRelease != tools.NoFirstRelease || created.Repositories[0].FirstRelease != tools.NoFirstRelease {
+		t.Errorf("a creation without CI promises no release: %q %+v", created.FirstRelease, created.Repositories)
+	}
 	pr := created.PullRequest.Number
 	st.declared(pr, noCIEntry)
 	if w := st.watch(t, c, pr, 0.3); w.Ready || w.WithoutCI || w.Pending != tools.PhaseSetUp || names(w.Phases) != throughMerged {
@@ -294,6 +297,21 @@ func TestWatchRepositoryReadiesARepositoryWithoutCIOnceSetUp(t *testing.T) {
 	}
 	if w = st.watch(t, c, pr, 5); !w.Ready || !w.WithoutCI || w.Changed || w.Waited != 0 {
 		t.Fatalf("a call that starts ready: %+v", w)
+	}
+}
+
+// TestWatchRepositoryReadiesAnEntryWithoutGenCIOnceSetUp: an entry that does
+// not say gen.ci.generate gets no generated CI from align-files and no
+// release: the watch is ready once set up, as for gen.ci.generate: false.
+func TestWatchRepositoryReadiesAnEntryWithoutGenCIOnceSetUp(t *testing.T) {
+	st := newStack(t)
+	c := st.as(t, aliceToken)
+	created, prURL := st.createWithoutCI(t, c)
+	pr := created.PullRequest.Number
+	st.declared(pr, "- name: "+shinyService+"\n  componentType: unspecified\n  gen:\n    language: go\n    flavours: [generic]\n")
+	st.reported(t, pr, prURL, reconcile.StepResult{Step: reconcile.StepScaffold, Verdict: reconcile.VerdictOK})
+	if w := st.watch(t, c, pr, 0.3); !w.Ready || !w.WithoutCI || w.Pending != "" || w.Release != nil || names(w.Phases) != throughSetUp {
+		t.Fatalf("an entry without gen.ci: %+v", w)
 	}
 }
 
@@ -570,7 +588,7 @@ func TestWatchRepositoryReportsATagNoPipelineBuilt(t *testing.T) {
 	created, prURL := st.createShiny(t, c)
 	pr := created.PullRequest.Number
 	st.ghs.repos.put(shinyService, ".circleci/workflows.yml", fakeCIChartWorkflows)
-	st.declared(pr, "- name: "+shinyService+"\n  componentType: service\n  gen:\n    language: go\n    flavours: [app]\n")
+	st.declared(pr, "- name: "+shinyService+"\n  componentType: service\n  gen:\n    language: go\n    flavours: [app]\n    ci:\n      generate: true\n")
 	missed := "release " + firstTag + " of " + org + "/" + shinyService + " has no pipeline: nothing was built or published for the tag"
 	fix := "cut the next tag, or trigger the tag's pipeline by hand"
 	st.reported(t, pr, prURL, reconcile.StepResult{Step: reconcile.StepRelease, Verdict: reconcile.VerdictReported,

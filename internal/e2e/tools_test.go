@@ -67,7 +67,7 @@ func TestValidateRepositoryRendersAndRefuses(t *testing.T) {
 		e := map[string]any{kName: n, kComponentType: kService, kGen: map[string]any{kLanguage: kGo, kFlavours: []any{kGeneric}}}
 		four = append(four, e)
 	}
-	st.callJSON(t, asAlice, tools.ToolValidateRepository, map[string]any{argTeam: team, "entries": four}, &v)
+	st.callJSON(t, asAlice, tools.ToolValidateRepository, map[string]any{argTeam: team, argEntries: four}, &v)
 	if len(v.Entries) != 4 || !hasNotice(v.Notices, "batch-review") {
 		t.Errorf("four entries should carry batch-review: %d entries, %+v", len(v.Entries), v.Notices)
 	}
@@ -126,12 +126,33 @@ func assertNoRepositoryWrites(t *testing.T, st *stack) {
 	}
 }
 
+// TestCreateCommitSaysTheFirstReleasePerRepository: a batch whose entries
+// differ in their release workflow says so per repository, and the result's
+// firstRelease points there.
+func TestCreateCommitSaysTheFirstReleasePerRepository(t *testing.T) {
+	st := newStack(t)
+	quiet := map[string]any{kName: "quiet-service", kComponentType: "unspecified",
+		kGen: map[string]any{kLanguage: kGo, kFlavours: []any{kGeneric}, kCI: map[string]any{kGenerate: false}}}
+	shinier := map[string]any{kName: "shinier-service", kComponentType: kService, kGen: map[string]any{kLanguage: kGo, kFlavours: []any{kGeneric}}}
+	var out tools.Created
+	st.callJSON(t, st.as(t, aliceToken), tools.ToolCreateRepository, map[string]any{argMode: modeCommit, argTeam: team, argEntries: []any{quiet, shinier}}, &out)
+	if out.FirstRelease != tools.FirstReleasePerRepository || len(out.Repositories) != 2 ||
+		out.Repositories[0].FirstRelease != tools.NoFirstRelease || out.Repositories[1].FirstRelease != tools.FirstRelease {
+		t.Errorf("a mixed batch: %q %+v", out.FirstRelease, out.Repositories)
+	}
+}
+
 // TestCreateCommitOpensTheDeclarationAsThePerson: alice gets the declaration
 // pull request under her name and nothing else; the repository is the
 // reconciler's to create once it merges. The result names the pull request
 // and the repository to come.
 func TestCreateCommitOpensTheDeclarationAsThePerson(t *testing.T) {
 	st := newStack(t)
+	var v tools.Validation
+	st.callJSON(t, st.as(t, aliceToken), tools.ToolValidateRepository, map[string]any{argTeam: team, argEntry: newEntry}, &v)
+	if len(v.Entries) != 1 || !strings.Contains(v.Entries[0].Rendered, "    ci:\n      generate: true\n") {
+		t.Fatalf("the dry run writes the creation default out: %+v", v.Entries)
+	}
 	var out tools.Created
 	st.callJSON(t, st.as(t, aliceToken), tools.ToolCreateRepository, map[string]any{argMode: modeCommit, argTeam: team, argEntry: newEntry, argReason: "the shiny thing"}, &out)
 
@@ -140,11 +161,20 @@ func TestCreateCommitOpensTheDeclarationAsThePerson(t *testing.T) {
 	if len(prs) != 1 || out.PullRequest == nil || out.PullRequest.Number != prs[0].Number || prs[0].Author != alice || out.PullRequest.Author != alice || out.PullRequest.Existing {
 		t.Fatalf("pull request as alice: %+v %+v", out.PullRequest, prs)
 	}
-	if len(out.Repositories) != 1 || out.Repositories[0].Repository != "https://github.com/"+org+"/shiny-service" || out.FirstRelease != tools.FirstRelease {
-		t.Errorf("result: %+v", out.Repositories)
+	if len(out.Repositories) != 1 || out.Repositories[0].Repository != "https://github.com/"+org+"/shiny-service" ||
+		out.FirstRelease != tools.FirstRelease || out.Repositories[0].FirstRelease != tools.FirstRelease {
+		t.Errorf("result: %q %+v", out.FirstRelease, out.Repositories)
 	}
 	pr := prs[0]
 	file := string(pr.Files["repositories/"+team+".yaml"])
+	// The pull request commits the entry the dry run rendered, defaults and
+	// all: align-files reads the file, not the dry run.
+	if !strings.Contains(file, v.Entries[0].Rendered) {
+		t.Errorf("the creation pull request's entry should be the rendered one:\n%s\nrendered:\n%s", file, v.Entries[0].Rendered)
+	}
+	if !strings.Contains(pr.Body, "- https://github.com/"+org+"/"+shinyService+": "+tools.FirstRelease) {
+		t.Errorf("the pull request body should say where v0.1.0 comes from:\n%s", pr.Body)
+	}
 	// The declared entry carries the opt-in and the private default, in the
 	// team files' key order.
 	if !strings.Contains(file, "- name: "+shinyService+"\n  componentType: "+kService+"\n  visibility: private\n  align: true\n  gen:\n") {

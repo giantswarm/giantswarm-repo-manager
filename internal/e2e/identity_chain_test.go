@@ -43,6 +43,7 @@ const (
 	argTeam    = "team"
 	argReason  = "reason"
 	argEntry   = "entry"
+	argEntries = "entries"
 	argFinding = "finding"
 	alice      = "alice"
 	// The user tokens muster puts on the calls: alice's and carol's are

@@ -11,7 +11,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- `create_repository` commits the entry `validate_repository` rendered, with the creation defaults written out. It committed the caller's entry without them, so an entry that did not say `gen.ci.generate` was previewed with `generate: true` and committed without it: align-files generated no CI and no release came.
+- `create_repository` says per repository whether v0.1.0 follows on its own (`repositories[].firstRelease`), from the committed entry's release workflow, in its result and in the pull request body. `firstRelease` is the repositories' value when they agree.
+- `watch_repository` decides whether a release comes from the entry's release workflow, as align-files resolves it: `gen.ci.releaseWorkflow`, else auto-release with `gen.ci.generate: true`. A repository without one is ready once set up and says so with `withoutRelease`, instead of waiting for a release that never comes: an entry without `gen.ci.generate`, or with `releaseWorkflow: legacy`. One without CI (`gen.ci.generate` false or absent, `withoutCI`) that auto-release still releases is released once the release exists.
 - `watch_repository` completes `setUp` on a repository whose pull request's run a later run has replaced on the record (a nightly run, an Align now, another pull request's run): a run that finished after the merge sets it up, with its findings and failed steps. A watch started days after the creation no longer waits for `setUp` until its timeout.
+
+### Added
+
+- The record's declaration carries `releaseWorkflow`, the entry's `gen.ci.releaseWorkflow`.
 
 ## [0.37.1-rc.1] - 2026-10-17
 

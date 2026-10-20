@@ -5,7 +5,7 @@ go 1.26.5
 require (
 	github.com/alicebob/miniredis/v2 v2.40.0
 	github.com/bradleyfalzon/ghinstallation/v2 v2.19.0
-	github.com/giantswarm/devctl/v8 v8.146.1
+	github.com/giantswarm/devctl/v8 v8.146.2
 	github.com/giantswarm/mcp-toolkit v0.4.2
 	github.com/google/go-github/v93 v93.0.0
 	github.com/mark3labs/mcp-go v1.3.0
@@ -98,7 +98,6 @@ require (
 	github.com/google/go-containerregistry v0.22.1 // indirect
 	github.com/google/go-github/v86 v86.0.0 // indirect
 	github.com/google/go-github/v88 v88.0.0 // indirect
-	github.com/google/go-github/v92 v92.0.0 // indirect
 	github.com/google/go-querystring v1.2.0 // indirect
 	github.com/google/jsonschema-go v0.4.2 // indirect
 	github.com/google/uuid v1.6.0 // indirect

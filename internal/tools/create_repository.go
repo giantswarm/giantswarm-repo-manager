@@ -25,8 +25,17 @@ const (
 	argEntry   = "entry"
 	argEntries = "entries"
 
-	// FirstRelease says where a created repository's v0.1.0 comes from.
-	FirstRelease = "v0.1.0 follows from the scaffold's auto-release"
+	// FirstRelease says where a created repository's v0.1.0 comes from when
+	// its entry releases with auto-release; NoFirstRelease that none comes
+	// on its own when it does not (firstRelease). FirstReleasePerRepository
+	// is the result's firstRelease when its repositories differ.
+	FirstRelease              = "v0.1.0 follows from the scaffold's auto-release"
+	NoFirstRelease            = "no release follows on its own: the entry's release workflow (gen.ci.releaseWorkflow, else auto-release with gen.ci.generate: true) is not auto-release"
+	FirstReleasePerRepository = "per repository: see repositories[].firstRelease"
+
+	// releaseWorkflowAutoRelease is the gen.ci.releaseWorkflow that cuts
+	// releases from the default branch.
+	releaseWorkflowAutoRelease = "auto-release"
 
 	// alignRefusal is why an entry that says align: false is refused: the
 	// creation is the repository's opt-in to alignment, and the reconciler
@@ -77,6 +86,8 @@ type CreationPlan struct {
 type Created struct {
 	Repositories []CreatedRepository `json:"repositories"`
 	*Committed
+	// FirstRelease is the repositories' firstRelease when they agree, else
+	// says to read each repository's.
 	FirstRelease string `json:"firstRelease"`
 	// Then says how to follow the repositories to readiness.
 	Then string `json:"then"`
@@ -84,7 +95,7 @@ type Created struct {
 
 // createdThen is what follows a creation: the repository is minutes from
 // usable, and watch_repository follows it there.
-const createdThen = "the repositories do not exist yet: the pull request merges, the reconciler creates and sets them up and the first release builds — " +
+const createdThen = "the repositories do not exist yet: the pull request merges, the reconciler creates and sets them up and, where firstRelease says v0.1.0 follows, the first release builds — " +
 	"follow each with " + ToolWatchRepository + " (repository, pullRequest: pullRequest.number) and report the link when it answers ready; " +
 	"get_repository shows setup.pendingRun until the reconciler run of the pull request has reported"
 
@@ -93,6 +104,9 @@ type CreatedRepository struct {
 	Name string `json:"name"`
 	// Repository is the URL on GitHub once the reconciler created it.
 	Repository string `json:"repository"`
+	// FirstRelease says whether its v0.1.0 follows on its own, as its
+	// committed entry declares the release workflow.
+	FirstRelease string `json:"firstRelease"`
 	// PendingRun is the record's expectation of the reconciler run that
 	// follows the pull request's merge, the way an Align now leaves one: the
 	// inventory reads the run's artifact within its pending interval.
@@ -225,7 +239,11 @@ func (t *tools) dryRun(ctx context.Context, args map[string]any, p *person, perr
 // planCreation is the declaration pull request planned as the caller; a
 // refusal is reported in its place. Nothing is written.
 func (t *tools) planCreation(ctx context.Context, p *person, v *Validation, args map[string]any) *CreationPlan {
-	pl, err := t.declaration(ctx, p, v, args)
+	entries, err := renderedEntries(v.Team, v.Entries)
+	if err != nil {
+		return &CreationPlan{Refusal: err.Error()}
+	}
+	pl, err := t.declaration(ctx, p, v, entries, args)
 	if err != nil {
 		return &CreationPlan{Refusal: err.Error()}
 	}
@@ -302,29 +320,24 @@ func (t *tools) runValidator(ctx context.Context, repo *teamfiles.Repo, req repo
 	return v.Validate(ctx, req)
 }
 
-// declaration plans the declaration pull request: the entries inserted
-// into the team file read as the person, refused when one is declared
-// already. It writes nothing.
-func (t *tools) declaration(ctx context.Context, p *person, v *Validation, args map[string]any) (*Plan, error) {
+// declaration plans the declaration pull request: the entries
+// (renderedEntries) inserted into the team file read as the person, refused
+// when one is declared already. It writes nothing.
+func (t *tools) declaration(ctx context.Context, p *person, v *Validation, entries []reposetup.Declaration, args map[string]any) (*Plan, error) {
 	team := v.Team
 	tf, err := p.repo.TeamFile(ctx, team)
 	if err != nil {
 		return nil, err
 	}
-	entries, _ := entriesArg(args)
-	parsed, err := parseEntries(team, entries)
-	if err != nil {
-		return nil, err
-	}
-	content, names, err := insertEntries(team, tf, parsed.Entries)
+	content, names, err := insertEntries(team, tf, entries)
 	if err != nil {
 		return nil, err
 	}
 	reason, _ := args[argReason].(string)
 	pl := &Plan{Repository: t.org() + "/" + strings.Join(names, ","), Team: team, Accepted: true, change: teamfiles.Change{Files: map[string][]byte{tf.Path: content}}}
 	repos := ""
-	for _, n := range names {
-		repos += "\n- https://github.com/" + t.org() + "/" + n
+	for _, d := range entries {
+		repos += "\n- https://github.com/" + t.org() + "/" + d.Name + ": " + firstRelease(d)
 	}
 	notices := ""
 	for _, n := range v.Notices {
@@ -334,8 +347,8 @@ func (t *tools) declaration(ctx context.Context, p *person, v *Validation, args 
 		notices = "\n\nNotices from the dry run:" + notices
 	}
 	pl.finish(p.repo, p.login, "reposetup/create-"+strings.Join(names, "-"), fmt.Sprintf("feat(repositories): declare %s for %s", strings.Join(names, ", "), team),
-		fmt.Sprintf("## Problem\n\nNew repositories of %s: `%s`.\n\n## Solution\n\nEntries added to `%s`. Once this merges, the reconciler creates the repositories as its App, pushes their scaffold (%s) and sets them up:%s%s\n\n%s\n\nOpened by giantswarm-repo-manager (`%s`) as @%s.",
-			team, strings.Join(names, "`, `"), tf.Path, FirstRelease, repos, notices, reasonLine(reason), ToolCreateRepository, p.login))
+		fmt.Sprintf("## Problem\n\nNew repositories of %s: `%s`.\n\n## Solution\n\nEntries added to `%s`. Once this merges, the reconciler creates the repositories as its App, pushes their scaffold and sets them up:%s%s\n\n%s\n\nOpened by giantswarm-repo-manager (`%s`) as @%s.",
+			team, strings.Join(names, "`, `"), tf.Path, repos, notices, reasonLine(reason), ToolCreateRepository, p.login))
 	return pl, nil
 }
 
@@ -361,7 +374,11 @@ func (t *tools) commitCreate(ctx context.Context, args map[string]any) (any, err
 		}
 		return nil, fmt.Errorf("the engine refuses the declaration: %s — fix it and run again (dryRun: true shows the rendered entries); no pull request was opened", strings.Join(refused, "; "))
 	}
-	pl, err := t.declaration(ctx, p, v, args)
+	entries, err := renderedEntries(v.Team, v.Entries)
+	if err != nil {
+		return nil, err
+	}
+	pl, err := t.declaration(ctx, p, v, entries, args)
 	if err != nil {
 		return nil, err
 	}
@@ -369,16 +386,68 @@ func (t *tools) commitCreate(ctx context.Context, args map[string]any) (any, err
 	if err != nil {
 		return nil, err
 	}
-	out := &Created{Committed: committed, FirstRelease: FirstRelease, Then: createdThen}
-	for _, e := range v.Entries {
-		name := t.org() + "/" + e.Name
+	out := &Created{Committed: committed, Then: createdThen}
+	for _, d := range entries {
+		name, first := t.org()+"/"+d.Name, firstRelease(d)
 		out.Repositories = append(out.Repositories, CreatedRepository{
-			Name:       e.Name,
-			Repository: "https://github.com/" + name,
-			PendingRun: t.expectRun(ctx, p, name, inventory.ChangeCreated, committed.PullRequest),
+			Name:         d.Name,
+			Repository:   "https://github.com/" + name,
+			FirstRelease: first,
+			PendingRun:   t.expectRun(ctx, p, name, inventory.ChangeCreated, committed.PullRequest),
 		})
+		switch out.FirstRelease {
+		case "", first:
+			out.FirstRelease = first
+		default:
+			out.FirstRelease = FirstReleasePerRepository
+		}
 	}
 	return out, nil
+}
+
+// renderedEntries are the entries as the dry run rendered them, the
+// creation defaults written out (gen.ci.generate: true): the pull request
+// commits what validate_repository showed and the engine accepted, and
+// align-files reads the file, not the dry run.
+func renderedEntries(team string, entries []reposetup.Entry) ([]reposetup.Declaration, error) {
+	var b strings.Builder
+	for _, e := range entries {
+		b.WriteString(e.Rendered)
+		if !strings.HasSuffix(e.Rendered, "\n") {
+			b.WriteByte('\n')
+		}
+	}
+	tf, err := reposetup.ParseTeamFile(team, strings.NewReader(b.String()))
+	if err != nil {
+		return nil, fmt.Errorf("parse the rendered entries: %w", err)
+	}
+	return tf.Entries, nil
+}
+
+// firstRelease says whether a created repository's v0.1.0 follows on its
+// own: its entry's release workflow is auto-release (autoReleases).
+func firstRelease(d reposetup.Declaration) string {
+	f, err := d.Fields()
+	if err == nil && autoReleases(&f) {
+		return FirstRelease
+	}
+	return NoFirstRelease
+}
+
+// autoReleases says whether an entry's release workflow, resolved as
+// align-files resolves it — gen.ci.releaseWorkflow when set, else
+// auto-release with generated CI — is auto-release. It is devctl's
+// releasewait.EntryReleaseModel, whose package the manager does not import
+// for its registry dependencies.
+func autoReleases(f *reposetup.Fields) bool {
+	if f.Gen == nil || f.Gen.CI == nil {
+		return false
+	}
+	ci := f.Gen.CI
+	if ci.ReleaseWorkflow != "" {
+		return ci.ReleaseWorkflow == releaseWorkflowAutoRelease
+	}
+	return ci.Generate != nil && *ci.Generate
 }
 
 // repositoryGetter adapts the App installation client to the engine's

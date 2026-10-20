@@ -61,6 +61,9 @@ type Declaration struct {
 	// generates the CircleCI pipeline that releases the repository; false,
 	// it is declared without CI; nil, the entry does not say.
 	CIGenerate *bool `json:"ciGenerate,omitempty"`
+	// ReleaseWorkflow is the entry's gen.ci.releaseWorkflow; empty when the
+	// entry does not say, and the release workflow follows from CIGenerate.
+	ReleaseWorkflow string `json:"releaseWorkflow,omitempty"`
 	// Entry is the declaration as the team file carries it (one-item YAML list).
 	Entry string `json:"entry"`
 	// Accepted is the verdict of the repositories schema the team file

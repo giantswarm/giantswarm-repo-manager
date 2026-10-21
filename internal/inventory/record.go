@@ -126,11 +126,18 @@ type Commit struct {
 type AlignFilesPullRequest struct {
 	Number int    `json:"number"`
 	URL    string `json:"url"`
-	// State is open, merged or closed.
+	// State is PullRequestOpen, PullRequestMerged or PullRequestClosed.
 	State     string     `json:"state"`
 	CreatedAt time.Time  `json:"createdAt"`
 	MergedAt  *time.Time `json:"mergedAt,omitempty"`
 }
+
+// The states of an AlignFilesPullRequest, GitHub's lower-cased.
+const (
+	PullRequestOpen   = "open"
+	PullRequestMerged = "merged"
+	PullRequestClosed = "closed"
+)
 
 // PullRequests splits the open pull requests into people and bots.
 type PullRequests struct {

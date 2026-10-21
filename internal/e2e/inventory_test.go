@@ -94,7 +94,7 @@ func TestSweepFillsOneRecordPerRepository(t *testing.T) {
 	}
 	// The latest align-files pull request, merged: when the generated files
 	// last changed, whatever else the open pull requests show.
-	if af := present.Reality.AlignFiles; af == nil || af.Number != 12 || af.State != "merged" || af.MergedAt == nil || !af.MergedAt.After(af.CreatedAt) ||
+	if af := present.Reality.AlignFiles; af == nil || af.Number != 12 || af.State != inventory.PullRequestMerged || af.MergedAt == nil || !af.MergedAt.After(af.CreatedAt) ||
 		af.URL != "https://github.com/"+org+"/"+repoPresent+"/pull/12" {
 		t.Errorf("present align-files pull request: %+v", af)
 	}

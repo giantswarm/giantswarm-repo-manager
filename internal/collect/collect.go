@@ -686,6 +686,10 @@ func (c *Collector) reality(n *repoNode, src *sources) (*inventory.Reality, inve
 	if n.DefaultBranchRef != nil {
 		r.DefaultBranch = n.DefaultBranchRef.Name
 	}
+	if ps := n.AlignFilesPRs.Nodes; len(ps) > 0 {
+		p := ps[0]
+		r.AlignFiles = &inventory.AlignFilesPullRequest{Number: p.Number, URL: p.URL, State: strings.ToLower(p.State), CreatedAt: p.CreatedAt, MergedAt: p.MergedAt}
+	}
 	r.Has = inventory.Presence{
 		Dependabot: n.Dependabot != nil, CircleCI: n.CIConfig != nil || n.CIWorkflows != nil, Dockerfile: n.Dockerfile != nil, Helm: n.Helm != nil, Readme: n.Readme != nil,
 		Workflows:  n.Workflows != nil && len(n.Workflows.Entries) > 0,
@@ -866,6 +870,9 @@ fragment RepoFields on Repository {
   openPRs: pullRequests(states: OPEN, first: 40, orderBy: {field: CREATED_AT, direction: ASC}) {
     totalCount nodes { number title createdAt headRefName author { login } }
   }
+  alignFilesPRs: pullRequests(headRefName: "teams-alignment-branch", first: 1, orderBy: {field: CREATED_AT, direction: DESC}) {
+    nodes { number url state createdAt mergedAt }
+  }
   defaultBranchRef { name target { ... on Commit { statusCheckRollup { state contexts(first: 100) {
     pageInfo { hasNextPage } nodes { ... on StatusContext { context state createdAt } }
   } } } } }
@@ -948,6 +955,15 @@ type repoNode struct {
 		TotalCount int      `json:"totalCount"`
 		Nodes      []prNode `json:"nodes"`
 	} `json:"openPRs"`
+	AlignFilesPRs struct {
+		Nodes []struct {
+			Number    int        `json:"number"`
+			URL       string     `json:"url"`
+			State     string     `json:"state"`
+			CreatedAt time.Time  `json:"createdAt"`
+			MergedAt  *time.Time `json:"mergedAt"`
+		} `json:"nodes"`
+	} `json:"alignFilesPRs"`
 	DefaultBranchRef *struct {
 		Name   string        `json:"name"`
 		Target *branchTarget `json:"target"`

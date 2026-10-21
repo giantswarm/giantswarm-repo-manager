@@ -112,6 +112,7 @@ the message to the team's standup channel is rendered from (README, "Asks and me
     "historySampled": 30, "botCommits": 12,
     "openPullRequests": {"total": 2, "people": 1, "bots": 1, "renovate": 1, "oldestBotAt": "…",
                          "onboarding": [{"number": 1, "title": "Configure Renovate", "author": "renovate", "createdAt": "…"}]},
+    "alignFiles": {"number": 12, "url": "…", "state": "merged", "createdAt": "…", "mergedAt": "…"},   // the latest pull request align-files opened (branch teams-alignment-branch), open, merged or closed: when the generated files last changed; absent when it never opened one
     "openIssues": 1,
     "latestRelease": {"tag": "v1.0.0", "publishedAt": "…",
                       "build": {"state": "success", "contexts": ["ci/circleci: push-to-registries-release"], "at": "…"}},  // the tag commit's ci/circleci: statuses: whether CircleCI built the release; failed and pending list the contexts in those states; buildTruncated when more contexts than read and none CircleCI's

@@ -19,6 +19,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 
 - The record's declaration carries `releaseWorkflow`, the entry's `gen.ci.releaseWorkflow`.
+- The record's reality carries `alignFiles`, the latest pull request align-files opened in the repository (open, merged or closed, with when it merged), so `get_repository` answers whether align-files already ran after a team-file change.
 
 ## [0.37.1-rc.1] - 2026-10-17
 

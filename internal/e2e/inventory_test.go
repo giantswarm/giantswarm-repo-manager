@@ -92,6 +92,12 @@ func TestSweepFillsOneRecordPerRepository(t *testing.T) {
 	if rl := present.Reality; rl.LastPersonCommit == nil || rl.LastPersonCommit.Author != alice || rl.BotCommits != 1 || rl.OpenPullRequests.People != 1 || rl.OpenPullRequests.Bots != 1 || rl.OpenPullRequests.Renovate != 1 || rl.LatestRelease == nil || !rl.Has.CircleCI || !rl.Has.Helm || len(rl.CodeownersTeams) != 1 || len(rl.UnknownCodeownersTeams) != 0 {
 		t.Errorf("present reality: %+v", rl)
 	}
+	// The latest align-files pull request, merged: when the generated files
+	// last changed, whatever else the open pull requests show.
+	if af := present.Reality.AlignFiles; af == nil || af.Number != 12 || af.State != "merged" || af.MergedAt == nil || !af.MergedAt.After(af.CreatedAt) ||
+		af.URL != "https://github.com/"+org+"/"+repoPresent+"/pull/12" {
+		t.Errorf("present align-files pull request: %+v", af)
+	}
 	if present.Source != inventory.SourceSweep || present.RefreshedAt.IsZero() {
 		t.Errorf("present source: %s refreshed %s", present.Source, present.RefreshedAt)
 	}
@@ -112,6 +118,9 @@ func TestSweepFillsOneRecordPerRepository(t *testing.T) {
 		t.Errorf("legacy circleci: %+v", ci)
 	}
 	stray := st.record(t, repoStray)
+	if stray.Reality.AlignFiles != nil {
+		t.Errorf("a repository align-files never touched has no align-files pull request: %+v", stray.Reality.AlignFiles)
+	}
 	if stray.Declaration != nil || !hasKind(stray, inventory.FindingUndeclaredOnGitHub) || stray.Renovate.Enabled || strings.Join(stray.Reality.UnknownCodeownersTeams, ",") != dissolvedTeam || len(stray.Reality.OpenPullRequests.Onboarding) != 1 {
 		t.Errorf("stray: %+v reality %+v", stray.Findings, stray.Reality)
 	}

@@ -101,9 +101,12 @@ type Reality struct {
 	HistorySampled   int          `json:"historySampled"`
 	BotCommits       int          `json:"botCommits"`
 	OpenPullRequests PullRequests `json:"openPullRequests"`
-	OpenIssues       int          `json:"openIssues"`
-	LatestRelease    *Release     `json:"latestRelease,omitempty"`
-	CodeownersTeams  []string     `json:"codeownersTeams,omitempty"`
+	// AlignFiles is the latest pull request align-files opened in the
+	// repository, open or merged: when the generated files last changed.
+	AlignFiles      *AlignFilesPullRequest `json:"alignFiles,omitempty"`
+	OpenIssues      int                    `json:"openIssues"`
+	LatestRelease   *Release               `json:"latestRelease,omitempty"`
+	CodeownersTeams []string               `json:"codeownersTeams,omitempty"`
 	// UnknownCodeownersTeams are the CODEOWNERS teams the org does not have
 	// (dissolved or misspelt).
 	UnknownCodeownersTeams []string `json:"unknownCodeownersTeams,omitempty"`
@@ -115,6 +118,18 @@ type Commit struct {
 	Date    time.Time `json:"date"`
 	Author  string    `json:"author"`
 	Message string    `json:"message"`
+}
+
+// AlignFilesPullRequest is a pull request of align-files, the workflow of
+// giantswarm/github that writes the generated files: it opens one from the
+// branch teams-alignment-branch when a run changes them and merges it itself.
+type AlignFilesPullRequest struct {
+	Number int    `json:"number"`
+	URL    string `json:"url"`
+	// State is open, merged or closed.
+	State     string     `json:"state"`
+	CreatedAt time.Time  `json:"createdAt"`
+	MergedAt  *time.Time `json:"mergedAt,omitempty"`
 }
 
 // PullRequests splits the open pull requests into people and bots.

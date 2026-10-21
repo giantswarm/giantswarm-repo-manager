@@ -687,8 +687,7 @@ func (c *Collector) reality(n *repoNode, src *sources) (*inventory.Reality, inve
 		r.DefaultBranch = n.DefaultBranchRef.Name
 	}
 	if ps := n.AlignFilesPRs.Nodes; len(ps) > 0 {
-		p := ps[0]
-		r.AlignFiles = &inventory.AlignFilesPullRequest{Number: p.Number, URL: p.URL, State: strings.ToLower(p.State), CreatedAt: p.CreatedAt, MergedAt: p.MergedAt}
+		r.AlignFiles = alignFilesPullRequest(ps[0])
 	}
 	r.Has = inventory.Presence{
 		Dependabot: n.Dependabot != nil, CircleCI: n.CIConfig != nil || n.CIWorkflows != nil, Dockerfile: n.Dockerfile != nil, Helm: n.Helm != nil, Readme: n.Readme != nil,
@@ -781,7 +780,60 @@ func (c *Collector) reality(n *repoNode, src *sources) (*inventory.Reality, inve
 func isOnboarding(head, title, login string) bool {
 	title = strings.ToLower(title)
 	return strings.HasPrefix(head, "reposetup/") || strings.HasPrefix(head, "renovate/configure") ||
-		(login == "giantswarm-align-files" && strings.Contains(title, "align")) || strings.Contains(title, "configure renovate")
+		(login == alignFilesLogin && (head == alignFilesBranch || strings.Contains(title, "align"))) || strings.Contains(title, "configure renovate")
+}
+
+// align-files opens its pull requests from one branch, as its App: a run
+// that changes the generated files force-pushes the branch, one that changes
+// nothing closes an open pull request and deletes the branch.
+const (
+	alignFilesBranch = "teams-alignment-branch"
+	alignFilesLogin  = "giantswarm-align-files"
+)
+
+// alignFilesNode is the latest pull request from alignFilesBranch.
+type alignFilesNode struct {
+	Number    int        `json:"number"`
+	URL       string     `json:"url"`
+	State     string     `json:"state"`
+	CreatedAt time.Time  `json:"createdAt"`
+	ClosedAt  *time.Time `json:"closedAt"`
+	MergedAt  *time.Time `json:"mergedAt"`
+	Author    *struct {
+		Login string `json:"login"`
+	} `json:"author"`
+	Commits struct {
+		Nodes []struct {
+			Commit struct {
+				CommittedDate time.Time `json:"committedDate"`
+			} `json:"commit"`
+		} `json:"nodes"`
+	} `json:"commits"`
+}
+
+// alignFilesPullRequest is the record's align-files pull request, nil for
+// one align-files did not open (a person's branch of the same name) or in a
+// state GitHub did not have when this was written.
+func alignFilesPullRequest(p alignFilesNode) *inventory.AlignFilesPullRequest {
+	if p.Author == nil || p.Author.Login != alignFilesLogin {
+		return nil
+	}
+	pr := &inventory.AlignFilesPullRequest{Number: p.Number, URL: p.URL, CreatedAt: p.CreatedAt, ClosedAt: p.ClosedAt, MergedAt: p.MergedAt}
+	switch p.State {
+	case "OPEN":
+		pr.State = inventory.PullRequestOpen
+	case "MERGED":
+		pr.State = inventory.PullRequestMerged
+	case "CLOSED":
+		pr.State = inventory.PullRequestClosed
+	default:
+		return nil
+	}
+	if cs := p.Commits.Nodes; len(cs) > 0 {
+		t := cs[0].Commit.CommittedDate
+		pr.LastCommitAt = &t
+	}
+	return pr
 }
 
 func blobText(b *blob) string {
@@ -870,8 +922,8 @@ fragment RepoFields on Repository {
   openPRs: pullRequests(states: OPEN, first: 40, orderBy: {field: CREATED_AT, direction: ASC}) {
     totalCount nodes { number title createdAt headRefName author { login } }
   }
-  alignFilesPRs: pullRequests(headRefName: "teams-alignment-branch", first: 1, orderBy: {field: CREATED_AT, direction: DESC}) {
-    nodes { number url state createdAt mergedAt }
+  alignFilesPRs: pullRequests(headRefName: "` + alignFilesBranch + `", first: 1, orderBy: {field: CREATED_AT, direction: DESC}) {
+    nodes { number url state createdAt closedAt mergedAt author { login } commits(last: 1) { nodes { commit { committedDate } } } }
   }
   defaultBranchRef { name target { ... on Commit { statusCheckRollup { state contexts(first: 100) {
     pageInfo { hasNextPage } nodes { ... on StatusContext { context state createdAt } }
@@ -956,13 +1008,7 @@ type repoNode struct {
 		Nodes      []prNode `json:"nodes"`
 	} `json:"openPRs"`
 	AlignFilesPRs struct {
-		Nodes []struct {
-			Number    int        `json:"number"`
-			URL       string     `json:"url"`
-			State     string     `json:"state"`
-			CreatedAt time.Time  `json:"createdAt"`
-			MergedAt  *time.Time `json:"mergedAt"`
-		} `json:"nodes"`
+		Nodes []alignFilesNode `json:"nodes"`
 	} `json:"alignFilesPRs"`
 	DefaultBranchRef *struct {
 		Name   string        `json:"name"`

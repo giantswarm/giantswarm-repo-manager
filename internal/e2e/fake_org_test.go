@@ -52,6 +52,7 @@ const (
 	lifecycleDeleted    = "deleted"
 	argConfirm          = "confirm"
 	renovateLogin       = "renovate"
+	alignFilesLogin     = "giantswarm-align-files"
 )
 
 const (
@@ -310,8 +311,10 @@ func (o *fakeOrg) node(name string) map[string]any {
 			{kNumber: 11, kTitle: "feat: something", kCreatedAt: o.now.AddDate(0, 0, -1).Format(time.RFC3339), kHeadRefName: "feat", kAuthor: map[string]any{kLogin: alice}},
 		}}
 		n["alignFilesPRs"] = map[string]any{kNodes: []map[string]any{
-			{kNumber: 12, "url": "https://github.com/" + org + "/" + repoPresent + "/pull/12", kState: "MERGED",
-				kCreatedAt: o.now.AddDate(0, 0, -1).Format(time.RFC3339), "mergedAt": o.now.AddDate(0, 0, -1).Add(10 * time.Minute).Format(time.RFC3339)},
+			{kNumber: 12, "url": "https://github.com/" + org + "/" + repoPresent + "/pull/12", kState: "MERGED", kAuthor: map[string]any{kLogin: alignFilesLogin},
+				kCreatedAt: o.now.AddDate(0, 0, -1).Format(time.RFC3339), "closedAt": o.now.AddDate(0, 0, -1).Add(10 * time.Minute).Format(time.RFC3339),
+				"mergedAt": o.now.AddDate(0, 0, -1).Add(10 * time.Minute).Format(time.RFC3339),
+				"commits":  map[string]any{kNodes: []map[string]any{{"commit": map[string]any{kCommittedDate: o.now.AddDate(0, 0, -1).Add(5 * time.Minute).Format(time.RFC3339)}}}}},
 		}}
 		n["codeowners"] = map[string]any{kText: "* @giantswarm/" + team + "\n"}
 		n["renovate0"] = map[string]any{kText: "{\n  // generated\n  \"extends\": [\"github>giantswarm/renovate-presets:default.json5\"],\n  packageRules: [{ enabled: false, matchPackageNames: [\"x\"] },],\n}\n"}
@@ -327,6 +330,11 @@ func (o *fakeOrg) node(name string) map[string]any {
 		n["renovate1"] = map[string]any{kText: "{\"enabled\": false}"}
 		n["openPRs"] = map[string]any{kTotalCount: 1, kNodes: []map[string]any{
 			{kNumber: 1, kTitle: "Configure Renovate", kCreatedAt: o.now.AddDate(-1, 0, 0).Format(time.RFC3339), kHeadRefName: "renovate/configure", kAuthor: map[string]any{kLogin: renovateLogin}},
+		}}
+		// A person's branch named like align-files': not align-files' pull request.
+		n["alignFilesPRs"] = map[string]any{kNodes: []map[string]any{
+			{kNumber: 2, "url": "https://github.com/" + org + "/" + repoStray + "/pull/2", kState: "OPEN", kAuthor: map[string]any{kLogin: alice},
+				kCreatedAt: o.now.AddDate(0, 0, -3).Format(time.RFC3339)},
 		}}
 		return n
 	case repoLegacy:

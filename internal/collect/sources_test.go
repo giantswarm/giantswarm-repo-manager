@@ -44,7 +44,8 @@ func TestCodeownersTeamsAndBots(t *testing.T) {
 			t.Errorf("isRenovate(%q,%q,%q)=%v", tc.login, tc.name, tc.email, got)
 		}
 	}
-	if !isOnboarding("reposetup/codeowners", "chore: CODEOWNERS", "giantswarm-align-files") || isOnboarding("feat/x", "feat: x", alice) {
+	if !isOnboarding("reposetup/codeowners", "chore: CODEOWNERS", "giantswarm-align-files") || isOnboarding("feat/x", "feat: x", alice) ||
+		!isOnboarding(alignFilesBranch, "chore: regenerate", alignFilesLogin) || isOnboarding(alignFilesBranch, "chore: x", alice) {
 		t.Error("onboarding detection")
 	}
 }

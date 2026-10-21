@@ -292,7 +292,7 @@ func contains(s, sub string) bool {
 func (o *fakeOrg) node(name string) map[string]any {
 	base := func(archived bool) map[string]any {
 		return map[string]any{
-			kName: name, "url": "https://github.com/" + org + "/" + name, kDescription: "", "visibility": "PUBLIC",
+			kName: name, kURL: "https://github.com/" + org + "/" + name, kDescription: "", "visibility": "PUBLIC",
 			"isArchived": archived, "isFork": false, "isTemplate": false, "isEmpty": false,
 			kCreatedAt: o.now.AddDate(-2, 0, 0).Format(time.RFC3339), "pushedAt": o.now.Format(time.RFC3339),
 			"primaryLanguage": map[string]any{kName: "Go"}, "repositoryTopics": map[string]any{kNodes: []any{}},
@@ -311,10 +311,10 @@ func (o *fakeOrg) node(name string) map[string]any {
 			{kNumber: 11, kTitle: "feat: something", kCreatedAt: o.now.AddDate(0, 0, -1).Format(time.RFC3339), kHeadRefName: "feat", kAuthor: map[string]any{kLogin: alice}},
 		}}
 		n["alignFilesPRs"] = map[string]any{kNodes: []map[string]any{
-			{kNumber: 12, "url": "https://github.com/" + org + "/" + repoPresent + "/pull/12", kState: "MERGED", kAuthor: map[string]any{kLogin: alignFilesLogin},
+			{kNumber: 12, kURL: "https://github.com/" + org + "/" + repoPresent + "/pull/12", kState: "MERGED", kAuthor: map[string]any{kLogin: alignFilesLogin},
 				kCreatedAt: o.now.AddDate(0, 0, -1).Format(time.RFC3339), "closedAt": o.now.AddDate(0, 0, -1).Add(10 * time.Minute).Format(time.RFC3339),
 				"mergedAt": o.now.AddDate(0, 0, -1).Add(10 * time.Minute).Format(time.RFC3339),
-				"commits":  map[string]any{kNodes: []map[string]any{{"commit": map[string]any{kCommittedDate: o.now.AddDate(0, 0, -1).Add(5 * time.Minute).Format(time.RFC3339)}}}}},
+				"commits":  map[string]any{kNodes: []map[string]any{{kCommit: map[string]any{kCommittedDate: o.now.AddDate(0, 0, -1).Add(5 * time.Minute).Format(time.RFC3339)}}}}},
 		}}
 		n["codeowners"] = map[string]any{kText: "* @giantswarm/" + team + "\n"}
 		n["renovate0"] = map[string]any{kText: "{\n  // generated\n  \"extends\": [\"github>giantswarm/renovate-presets:default.json5\"],\n  packageRules: [{ enabled: false, matchPackageNames: [\"x\"] },],\n}\n"}
@@ -333,7 +333,7 @@ func (o *fakeOrg) node(name string) map[string]any {
 		}}
 		// A person's branch named like align-files': not align-files' pull request.
 		n["alignFilesPRs"] = map[string]any{kNodes: []map[string]any{
-			{kNumber: 2, "url": "https://github.com/" + org + "/" + repoStray + "/pull/2", kState: "OPEN", kAuthor: map[string]any{kLogin: alice},
+			{kNumber: 2, kURL: "https://github.com/" + org + "/" + repoStray + "/pull/2", kState: "OPEN", kAuthor: map[string]any{kLogin: alice},
 				kCreatedAt: o.now.AddDate(0, 0, -3).Format(time.RFC3339)},
 		}}
 		return n

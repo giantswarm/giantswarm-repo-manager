@@ -228,7 +228,7 @@ func (f *fakeRepos) register(mux *http.ServeMux, g *fakeGitHub) {
 			ghMessage(w, http.StatusConflict, "Git Repository is empty.")
 			return
 		}
-		writeJSON(w, http.StatusOK, []map[string]any{{kSHA: repo.head, "commit": map[string]any{"committer": map[string]any{"date": repo.headAt.UTC().Format(time.RFC3339)}}}})
+		writeJSON(w, http.StatusOK, []map[string]any{{kSHA: repo.head, kCommit: map[string]any{"committer": map[string]any{"date": repo.headAt.UTC().Format(time.RFC3339)}}}})
 	}))
 	mux.HandleFunc("GET /api/v3/repos/{owner}/{repo}/releases/latest", withRepo(func(w http.ResponseWriter, _ *http.Request, repo *fakeRepo) {
 		if repo.release == nil {
@@ -299,7 +299,7 @@ func (f *fakeRepos) register(mux *http.ServeMux, g *fakeGitHub) {
 		repo.files[r.PathValue("path")] = string(data)
 		repo.empty = false
 		repo.head, repo.headAt = repo.next("c"), time.Now()
-		writeJSON(w, http.StatusCreated, map[string]any{"content": map[string]any{"path": r.PathValue("path")}, "commit": map[string]any{kSHA: repo.head}})
+		writeJSON(w, http.StatusCreated, map[string]any{"content": map[string]any{"path": r.PathValue("path")}, kCommit: map[string]any{kSHA: repo.head}})
 	}))
 	mux.HandleFunc("POST /api/v3/repos/{owner}/{repo}/git/blobs", withRepo(func(w http.ResponseWriter, r *http.Request, repo *fakeRepo) {
 		var in github.Blob

@@ -7,7 +7,7 @@ toolchain go1.27.3
 require (
 	github.com/alicebob/miniredis/v2 v2.40.0
 	github.com/bradleyfalzon/ghinstallation/v2 v2.19.0
-	github.com/giantswarm/devctl/v8 v8.149.1
+	github.com/giantswarm/devctl/v8 v8.151.1
 	github.com/giantswarm/mcp-toolkit v0.4.4
 	github.com/google/go-github/v93 v93.0.0
 	github.com/mark3labs/mcp-go v1.3.0
@@ -56,11 +56,11 @@ require (
 	github.com/fatih/structs v1.1.0 // indirect
 	github.com/fsnotify/fsnotify v1.9.0 // indirect
 	github.com/fxamacker/cbor/v2 v2.9.2 // indirect
-	github.com/giantswarm/go-selfupdate v1.6.5 // indirect
+	github.com/giantswarm/go-selfupdate v1.6.6 // indirect
 	github.com/giantswarm/microerror v0.4.1 // indirect
 	github.com/giantswarm/micrologger v1.1.2 // indirect
 	github.com/giantswarm/schemalint/v2 v2.6.3 // indirect
-	github.com/giantswarm/selfupdate-cosign v0.3.4 // indirect
+	github.com/giantswarm/selfupdate-cosign v0.3.10 // indirect
 	github.com/go-fed/httpsig v1.1.0 // indirect
 	github.com/go-git/gcfg v1.5.1-0.20230307220236-3a3c6141e376 // indirect
 	github.com/go-git/go-billy/v5 v5.9.2 // indirect

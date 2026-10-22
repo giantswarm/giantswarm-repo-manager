@@ -26,6 +26,7 @@ const (
 	installationToken = "installation-token"
 	// The release watch's fakes.
 	kURL           = "url"
+	kCommit        = "commit"
 	kItems         = "items"
 	kTagName       = "tagName"
 	kTagCommit     = "tagCommit"

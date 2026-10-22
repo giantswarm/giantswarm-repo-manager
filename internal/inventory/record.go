@@ -101,9 +101,12 @@ type Reality struct {
 	HistorySampled   int          `json:"historySampled"`
 	BotCommits       int          `json:"botCommits"`
 	OpenPullRequests PullRequests `json:"openPullRequests"`
-	OpenIssues       int          `json:"openIssues"`
-	LatestRelease    *Release     `json:"latestRelease,omitempty"`
-	CodeownersTeams  []string     `json:"codeownersTeams,omitempty"`
+	// AlignFiles is the latest pull request align-files opened in the
+	// repository (AlignFilesPullRequest says what each state tells).
+	AlignFiles      *AlignFilesPullRequest `json:"alignFiles,omitempty"`
+	OpenIssues      int                    `json:"openIssues"`
+	LatestRelease   *Release               `json:"latestRelease,omitempty"`
+	CodeownersTeams []string               `json:"codeownersTeams,omitempty"`
 	// UnknownCodeownersTeams are the CODEOWNERS teams the org does not have
 	// (dissolved or misspelt).
 	UnknownCodeownersTeams []string `json:"unknownCodeownersTeams,omitempty"`
@@ -116,6 +119,33 @@ type Commit struct {
 	Author  string    `json:"author"`
 	Message string    `json:"message"`
 }
+
+// AlignFilesPullRequest is a pull request of align-files, the workflow of
+// giantswarm/github that writes the generated files. It keeps one pull
+// request per repository on the branch teams-alignment-branch: a run that
+// changes the files force-pushes it (LastCommitAt), one that changes nothing
+// closes it unmerged, and align-files merges it once its checks pass. Merged,
+// it is when the generated files last changed; open, a change waiting to land;
+// closed, a later run found nothing left to change. A run that changes nothing
+// opens no pull request, so none of this says whether align-files ran.
+type AlignFilesPullRequest struct {
+	Number int    `json:"number"`
+	URL    string `json:"url"`
+	// State is PullRequestOpen, PullRequestMerged or PullRequestClosed.
+	State     string     `json:"state"`
+	CreatedAt time.Time  `json:"createdAt"`
+	ClosedAt  *time.Time `json:"closedAt,omitempty"`
+	MergedAt  *time.Time `json:"mergedAt,omitempty"`
+	// LastCommitAt is when align-files last pushed to the pull request.
+	LastCommitAt *time.Time `json:"lastCommitAt,omitempty"`
+}
+
+// The states of an AlignFilesPullRequest, GitHub's lower-cased.
+const (
+	PullRequestOpen   = "open"
+	PullRequestMerged = "merged"
+	PullRequestClosed = "closed"
+)
 
 // PullRequests splits the open pull requests into people and bots.
 type PullRequests struct {

@@ -11,6 +11,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- devctl v8.158.4: a multi-image entry's release step names GitHub's latest release when it skips without a
+  CircleCI client, so the clientless release step reads the release the inventory read instead of reporting
+  `not the latest release the inventory read` on agent-toolchains.
 - devctl v8.158.2: the engine knows `gen.flavours: multi-image` (no `entry-field-unknown` on agent-toolchains), the
   release step verifies the newest `<name>/vX.Y.Z` release of every image line, and a multi-image entry with
   generated CI passes the creation rules.

@@ -7,7 +7,7 @@ toolchain go1.27.3
 require (
 	github.com/alicebob/miniredis/v2 v2.40.0
 	github.com/bradleyfalzon/ghinstallation/v2 v2.19.0
-	github.com/giantswarm/devctl/v8 v8.158.12
+	github.com/giantswarm/devctl/v8 v8.158.16
 	github.com/giantswarm/mcp-toolkit v0.4.5
 	github.com/google/go-github/v93 v93.0.0
 	github.com/mark3labs/mcp-go v1.3.0
@@ -24,23 +24,23 @@ require (
 	github.com/Microsoft/go-winio v0.6.2 // indirect
 	github.com/ProtonMail/go-crypto v1.4.1 // indirect
 	github.com/asaskevich/govalidator v0.0.0-20230301143203-a9d515a09cc2 // indirect
-	github.com/aws/aws-sdk-go-v2 v1.47.3 // indirect
-	github.com/aws/aws-sdk-go-v2/aws/protocol/eventstream v1.7.23 // indirect
-	github.com/aws/aws-sdk-go-v2/config v1.33.9 // indirect
-	github.com/aws/aws-sdk-go-v2/credentials v1.20.9 // indirect
-	github.com/aws/aws-sdk-go-v2/feature/ec2/imds v1.20.3 // indirect
-	github.com/aws/aws-sdk-go-v2/internal/configsources v1.5.6 // indirect
-	github.com/aws/aws-sdk-go-v2/internal/endpoints/v2 v2.8.6 // indirect
-	github.com/aws/aws-sdk-go-v2/internal/v4a v1.5.6 // indirect
-	github.com/aws/aws-sdk-go-v2/service/internal/accept-encoding v1.13.21 // indirect
-	github.com/aws/aws-sdk-go-v2/service/internal/checksum v1.11.7 // indirect
-	github.com/aws/aws-sdk-go-v2/service/internal/presigned-url v1.14.6 // indirect
-	github.com/aws/aws-sdk-go-v2/service/internal/s3shared v1.20.6 // indirect
-	github.com/aws/aws-sdk-go-v2/service/s3 v1.114.4 // indirect
-	github.com/aws/aws-sdk-go-v2/service/signin v1.10.4 // indirect
-	github.com/aws/aws-sdk-go-v2/service/sso v1.38.4 // indirect
-	github.com/aws/aws-sdk-go-v2/service/ssooidc v1.43.4 // indirect
-	github.com/aws/aws-sdk-go-v2/service/sts v1.51.4 // indirect
+	github.com/aws/aws-sdk-go-v2 v1.47.4 // indirect
+	github.com/aws/aws-sdk-go-v2/aws/protocol/eventstream v1.7.24 // indirect
+	github.com/aws/aws-sdk-go-v2/config v1.33.10 // indirect
+	github.com/aws/aws-sdk-go-v2/credentials v1.20.10 // indirect
+	github.com/aws/aws-sdk-go-v2/feature/ec2/imds v1.20.4 // indirect
+	github.com/aws/aws-sdk-go-v2/internal/configsources v1.5.7 // indirect
+	github.com/aws/aws-sdk-go-v2/internal/endpoints/v2 v2.8.7 // indirect
+	github.com/aws/aws-sdk-go-v2/internal/v4a v1.5.7 // indirect
+	github.com/aws/aws-sdk-go-v2/service/internal/accept-encoding v1.13.22 // indirect
+	github.com/aws/aws-sdk-go-v2/service/internal/checksum v1.11.8 // indirect
+	github.com/aws/aws-sdk-go-v2/service/internal/presigned-url v1.14.7 // indirect
+	github.com/aws/aws-sdk-go-v2/service/internal/s3shared v1.20.7 // indirect
+	github.com/aws/aws-sdk-go-v2/service/s3 v1.114.5 // indirect
+	github.com/aws/aws-sdk-go-v2/service/signin v1.10.5 // indirect
+	github.com/aws/aws-sdk-go-v2/service/sso v1.38.5 // indirect
+	github.com/aws/aws-sdk-go-v2/service/ssooidc v1.43.5 // indirect
+	github.com/aws/aws-sdk-go-v2/service/sts v1.51.5 // indirect
 	github.com/aws/smithy-go v1.28.6 // indirect
 	github.com/blang/semver v3.5.1+incompatible // indirect
 	github.com/cenkalti/backoff/v5 v5.0.3 // indirect
@@ -60,7 +60,7 @@ require (
 	github.com/giantswarm/microerror v0.4.1 // indirect
 	github.com/giantswarm/micrologger v1.1.2 // indirect
 	github.com/giantswarm/schemalint/v2 v2.6.3 // indirect
-	github.com/giantswarm/selfupdate-cosign v0.3.13 // indirect
+	github.com/giantswarm/selfupdate-cosign v0.3.15 // indirect
 	github.com/go-fed/httpsig v1.1.0 // indirect
 	github.com/go-git/gcfg v1.5.1-0.20230307220236-3a3c6141e376 // indirect
 	github.com/go-git/go-billy/v5 v5.9.2 // indirect

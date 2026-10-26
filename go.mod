@@ -10,7 +10,7 @@ require (
 	github.com/giantswarm/devctl/v8 v8.158.16
 	github.com/giantswarm/mcp-toolkit v0.4.5
 	github.com/google/go-github/v93 v93.0.0
-	github.com/mark3labs/mcp-go v1.3.0
+	github.com/mark3labs/mcp-go v1.4.0
 	github.com/sirupsen/logrus v1.10.2
 	github.com/valkey-io/valkey-go v1.0.79
 	gopkg.in/yaml.v3 v3.0.1

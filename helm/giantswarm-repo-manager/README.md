@@ -38,7 +38,7 @@ its own app, not as a component of the `agent-platform` meta chart.
 
 | Repository | Name | Version |
 |------------|------|---------|
-| oci://gsoci.azurecr.io/charts/giantswarm | valkey | 0.4.10 |
+| oci://gsoci.azurecr.io/charts/giantswarm | valkey | 0.4.11 |
 
 ## Values
 

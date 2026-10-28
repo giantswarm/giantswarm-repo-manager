@@ -61,10 +61,12 @@ require (
 	github.com/giantswarm/micrologger v1.1.2 // indirect
 	github.com/giantswarm/schemalint/v2 v2.6.3 // indirect
 	github.com/giantswarm/selfupdate-cosign v0.3.15 // indirect
+	github.com/go-chi/chi/v5 v5.5.0 // indirect
 	github.com/go-fed/httpsig v1.1.0 // indirect
 	github.com/go-git/gcfg v1.5.1-0.20230307220236-3a3c6141e376 // indirect
 	github.com/go-git/go-billy/v5 v5.9.2 // indirect
 	github.com/go-git/go-git/v5 v5.19.3 // indirect
+	github.com/go-jose/go-jose/v4 v4.1.6 // indirect
 	github.com/go-kit/log v0.2.1 // indirect
 	github.com/go-logfmt/logfmt v0.6.1 // indirect
 	github.com/go-logr/logr v1.4.4 // indirect
@@ -142,6 +144,7 @@ require (
 	github.com/spf13/pflag v1.0.10 // indirect
 	github.com/stretchr/objx v0.5.3 // indirect
 	github.com/theupdateframework/go-tuf/v2 v2.4.2 // indirect
+	github.com/tink-crypto/tink-go/v2 v2.9.0 // indirect
 	github.com/titanous/json5 v1.0.0 // indirect
 	github.com/transparency-dev/formats v0.1.1 // indirect
 	github.com/transparency-dev/merkle v0.0.2 // indirect

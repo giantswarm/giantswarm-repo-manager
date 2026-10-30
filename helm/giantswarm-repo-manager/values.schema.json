@@ -49,6 +49,9 @@
         "clusterID": {
             "type": "string"
         },
+        "externalDNSIP": {
+            "type": "string"
+        },
         "extraArgs": {
             "type": "array",
             "description": "Extra container arguments."
@@ -105,6 +108,16 @@
         "global": {
             "type": "object",
             "description": "Platform-wide values an umbrella chart shares with every component and Helm forwards here; this chart reads none of them.",
+            "additionalProperties": true,
+            "properties": {
+                "podSecurityStandards": {
+                    "type": "object",
+                    "additionalProperties": true
+                }
+            }
+        },
+        "helm": {
+            "type": "object",
             "additionalProperties": true
         },
         "image": {
@@ -231,6 +244,9 @@
                     "description": "Address (`host:port`) of the Valkey the inventory lives in, passed to the server as `VALKEY_ADDR`. Empty derives the subchart's Service, `<valkey.valkey.fullnameOverride>.<namespace>.svc:6379`; required when `valkey.enabled` is false."
                 }
             }
+        },
+        "managementCluster": {
+            "type": "string"
         },
         "mcp": {
             "type": "object",

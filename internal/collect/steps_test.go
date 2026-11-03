@@ -66,9 +66,9 @@ func TestFillClientlessSteps(t *testing.T) {
 	both := &inventory.CircleCI{Followed: true, SetupWorkflows: &yes, Head: head, Source: inventory.CircleCISourceBoth}
 	present := &inventory.CircleCI{Followed: true, SetupWorkflows: &yes, Webhook: &yes, Head: head, Source: inventory.CircleCISourceBoth}
 	deaf := &inventory.CircleCI{Followed: true, SetupWorkflows: &yes, Webhook: &no, Head: head, Source: inventory.CircleCISourceBoth}
-	webhookMissing := finding(findingCircleCIWebhookMissing, "giantswarm/x is followed on CircleCI but carries no active CircleCI webhook",
+	webhookMissing := finding(reconcile.FindingCircleCIWebhookMissing, "giantswarm/x is followed on CircleCI but carries no active CircleCI webhook",
 		"follow the project as a GitHub admin of the repository whose CircleCI grant carries the hook scope")
-	missing := []reconcile.FindingKind{findingCircleCIWebhookMissing}
+	missing := []reconcile.FindingKind{reconcile.FindingCircleCIWebhookMissing}
 	green := &inventory.HeadStatus{State: stateSuccess, Contexts: []string{releaseJob}, At: built}
 	red := &inventory.HeadStatus{State: stateFailure, Contexts: []string{releaseJob}, At: built}
 	running := &inventory.HeadStatus{State: "pending", Contexts: []string{"ci/circleci: go-build", releaseJob}, At: built}

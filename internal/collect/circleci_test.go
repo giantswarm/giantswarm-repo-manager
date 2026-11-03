@@ -47,7 +47,7 @@ func TestCircleCIDerivation(t *testing.T) {
 		return step(mode, reconcile.StepResult{Verdict: verdict, Summary: "the step's summary", Changes: changes})
 	}
 	converged := convergedCircleCI + ", " + webhookPresent
-	missing := reconcile.Finding{Kind: findingCircleCIWebhookMissing, Message: "giantswarm/x is followed on CircleCI but carries no active CircleCI webhook"}
+	missing := reconcile.Finding{Kind: reconcile.FindingCircleCIWebhookMissing, Message: "giantswarm/x is followed on CircleCI but carries no active CircleCI webhook"}
 	unreadable := reconcile.Finding{Kind: reconcile.FindingUnchecked, Message: "the webhooks of giantswarm/x are not readable by this identity"}
 	keysUnreadable := reconcile.Finding{Kind: reconcile.FindingUnchecked, Message: "the deploy keys of giantswarm/x are not readable by this identity"}
 	const circleA, circleB = "ci/circleci: a", "ci/circleci: b"

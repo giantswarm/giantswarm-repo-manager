@@ -248,8 +248,8 @@ func TestReleaseWatchFindsGitHubAppPipelines(t *testing.T) {
 	}
 	now := st.now()
 	st.ghs.org.release(repoPresent, "v7.4.2", now.Add(-20*time.Minute), 41)
-	st.cc.appPipeline(repoPresent, circleciclient.PipelineVCS{Branch: "main", Revision: "d15c0b3f"}, now.Add(-19*time.Minute), "failed")
-	st.cc.appPipeline(repoPresent, circleciclient.PipelineVCS{Tag: "v7.4.2", Revision: "d15c0b3f"}, now.Add(-19*time.Minute), conclusionSuccess, circleciclient.Job{Name: jobPushRelease, Status: conclusionSuccess})
+	st.cc.appPipeline(repoPresent, circleciclient.PipelineVCS{Branch: "main", Revision: appCheckoutSHA}, now.Add(-19*time.Minute), "failed")
+	st.cc.appPipeline(repoPresent, circleciclient.PipelineVCS{Tag: "v7.4.2", Revision: appCheckoutSHA}, now.Add(-19*time.Minute), conclusionSuccess, circleciclient.Job{Name: jobPushRelease, Status: conclusionSuccess})
 	if p := st.watchReleases(t); p.Started != 1 || p.Settled != 1 || p.Told != 0 || p.Watching != 0 {
 		t.Fatalf("a tag the GitHub App built: %+v", p)
 	}

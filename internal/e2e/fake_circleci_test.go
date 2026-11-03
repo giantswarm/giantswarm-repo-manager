@@ -67,6 +67,9 @@ func (f *fakeCircleCI) pipeline(repo string, vcs circleciclient.PipelineVCS, cre
 	return f.seed(repo, vcs, createdAt, status, false, jobs...)
 }
 
+// appCheckoutSHA is the checkout of the GitHub App pipelines the tests seed.
+const appCheckoutSHA = "d15c0b3f"
+
 // appPipeline seeds a pipeline like pipeline does, one the CircleCI GitHub
 // App started: served without vcs, what it built in trigger_parameters.git.
 func (f *fakeCircleCI) appPipeline(repo string, vcs circleciclient.PipelineVCS, createdAt time.Time, status string, jobs ...circleciclient.Job) (wfID string) {

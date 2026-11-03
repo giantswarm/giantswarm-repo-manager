@@ -101,8 +101,9 @@ findings alone.
 (`inventory.releases.interval`, default 5m) follows the latest release of every declared repository from
 its tag to the end of the tag's own CircleCI pipeline: one GraphQL query per pass over the most recently
 pushed repositories (a tag follows the push of its commit within minutes), and for every release still
-running the tag's pipeline on CircleCI — found by its `vcs.tag`, never a branch pipeline at the same
-commit, which the commit's statuses cannot tell apart — its workflows (the newest run per name: a rerun
+running the tag's pipeline on CircleCI — found by its tag (`vcs.tag`, or the trigger's ref of a pipeline the
+CircleCI GitHub App started, which carries no `vcs`), never a branch pipeline at the same commit, which the
+commit's statuses cannot tell apart — its workflows (the newest run per name: a rerun
 from failed is a second run of the same name) and the jobs of a failed one. A red pipeline is one
 sentence to the team's `notices` channel, naming the tag, the pull request behind it, the failed jobs and
 how they failed, the rerun from failed as the fix and `devctl release wait` to confirm, linking the failed

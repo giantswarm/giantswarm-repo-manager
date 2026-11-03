@@ -87,6 +87,13 @@ func applyStep(out *inventory.CircleCI, mode reconcile.Mode, sr *reconcile.StepR
 // present".
 const webhookPresent = "webhook present"
 
+// findingCircleCIWebhookMissing is the finding of an engine that followed on
+// CircleCI itself (devctl before v8.162.0): the record keeps reading those
+// engines' run artifacts. Today's engine creates nothing on CircleCI and
+// reports circleci-pipeline-missing instead, which says nothing about the
+// webhook.
+const findingCircleCIWebhookMissing reconcile.FindingKind = "circleci-webhook-missing"
+
 // stepWebhook is CircleCI's webhook as the reconciler's circleci step
 // verified it: missing when the step reports it missing (finding
 // circleci-webhook-missing), present when a step without changes says so in
@@ -106,7 +113,7 @@ func stepWebhook(sr *reconcile.StepResult) *bool {
 	}
 	for _, f := range sr.Findings {
 		switch f.Kind {
-		case reconcile.FindingCircleCIWebhookMissing:
+		case findingCircleCIWebhookMissing:
 			return ptr(false)
 		case reconcile.FindingUnchecked:
 			return nil

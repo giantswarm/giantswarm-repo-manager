@@ -379,7 +379,9 @@ func isReleaseTag(tag string) bool {
 }
 
 // readRelease reads the tag's pipeline on CircleCI into w: the pipeline by
-// its vcs.tag, then its workflows by the rule of TagPipeline. A failed run
+// its tag (vcs.tag, or the trigger's ref of a pipeline the CircleCI GitHub
+// App started, which carries no vcs), then its workflows by the rule of
+// TagPipeline. A failed run
 // settles the release red at once; the watch keeps reading a red release,
 // and a rerun that goes green turns it built on a later pass, silently —
 // the team was told once, and hears nothing more about the tag. No pipeline within the

@@ -20,14 +20,17 @@ type fakeCircleCI struct {
 	pipelines map[string][]circleciclient.Pipeline // org/repo → newest first
 	workflows map[string][]circleciclient.Workflow // pipeline id
 	jobs      map[string][]circleciclient.Job      // workflow id
-	seq       int
+	// app marks the pipelines the CircleCI GitHub App started: served without
+	// vcs, what they built in trigger_parameters.git, as CircleCI serves them.
+	app map[string]bool
+	seq int
 	// reads counts the requests, the watch's CircleCI budget.
 	reads int
 }
 
 func newFakeCircleCI(t *testing.T) *fakeCircleCI {
 	t.Helper()
-	f := &fakeCircleCI{pipelines: map[string][]circleciclient.Pipeline{}, workflows: map[string][]circleciclient.Workflow{}, jobs: map[string][]circleciclient.Job{}}
+	f := &fakeCircleCI{pipelines: map[string][]circleciclient.Pipeline{}, workflows: map[string][]circleciclient.Workflow{}, jobs: map[string][]circleciclient.Job{}, app: map[string]bool{}}
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /api/v2/project/gh/{org}/{repo}/pipeline", func(w http.ResponseWriter, r *http.Request) {
 		f.mu.Lock()
@@ -38,7 +41,7 @@ func newFakeCircleCI(t *testing.T) *fakeCircleCI {
 			writeJSON(w, http.StatusNotFound, map[string]any{kMessage: "Project not found"})
 			return
 		}
-		writeJSON(w, http.StatusOK, map[string]any{kItems: items, "next_page_token": nil})
+		writeJSON(w, http.StatusOK, map[string]any{kItems: f.items(items), "next_page_token": nil})
 	})
 	mux.HandleFunc("GET /api/v2/pipeline/{id}/workflow", func(w http.ResponseWriter, r *http.Request) {
 		f.mu.Lock()
@@ -61,12 +64,28 @@ func newFakeCircleCI(t *testing.T) *fakeCircleCI {
 // workflow `build` of status whose jobs are jobs; it returns the workflow's
 // id. A red status with no jobs given gets the two image jobs timed out.
 func (f *fakeCircleCI) pipeline(repo string, vcs circleciclient.PipelineVCS, createdAt time.Time, status string, jobs ...circleciclient.Job) (wfID string) {
+	return f.seed(repo, vcs, createdAt, status, false, jobs...)
+}
+
+// appCheckoutSHA is the checkout of the GitHub App pipelines the tests seed.
+const appCheckoutSHA = "d15c0b3f"
+
+// appPipeline seeds a pipeline like pipeline does, one the CircleCI GitHub
+// App started: served without vcs, what it built in trigger_parameters.git.
+func (f *fakeCircleCI) appPipeline(repo string, vcs circleciclient.PipelineVCS, createdAt time.Time, status string, jobs ...circleciclient.Job) (wfID string) {
+	return f.seed(repo, vcs, createdAt, status, true, jobs...)
+}
+
+func (f *fakeCircleCI) seed(repo string, vcs circleciclient.PipelineVCS, createdAt time.Time, status string, app bool, jobs ...circleciclient.Job) (wfID string) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.seq++
 	id := "pipeline-" + itoa(f.seq)
 	p := circleciclient.Pipeline{ID: id, Number: int64(11500 + f.seq), State: "created", CreatedAt: createdAt, VCS: vcs}
 	f.pipelines[org+"/"+repo] = append([]circleciclient.Pipeline{p}, f.pipelines[org+"/"+repo]...)
+	if app {
+		f.app[id] = true
+	}
 	wfID = id + "-build"
 	f.workflows[id] = []circleciclient.Workflow{{ID: wfID, Name: "build", Status: status, PipelineNumber: p.Number, CreatedAt: createdAt}}
 	if len(jobs) == 0 && circleciclient.WorkflowFailed(status) {
@@ -74,6 +93,29 @@ func (f *fakeCircleCI) pipeline(repo string, vcs circleciclient.PipelineVCS, cre
 	}
 	f.jobs[wfID] = jobs
 	return wfID
+}
+
+// items is the pipeline page as CircleCI serves it: a pipeline the OAuth
+// integration built with its vcs, one the GitHub App started without it,
+// its checkout and ref under trigger_parameters.git (the shape of
+// cluster-aws pipeline 8329, 2026-10-28). The caller holds the lock.
+func (f *fakeCircleCI) items(pipelines []circleciclient.Pipeline) []map[string]any {
+	items := make([]map[string]any, 0, len(pipelines))
+	for _, p := range pipelines {
+		item := map[string]any{"id": p.ID, kNumber: p.Number, "state": p.State, "created_at": p.CreatedAt, "trigger": map[string]any{"type": "webhook"}}
+		if !f.app[p.ID] {
+			item["vcs"] = p.VCS
+			items = append(items, item)
+			continue
+		}
+		git := map[string]any{"checkout_sha": p.VCS.Revision, "ref": "refs/heads/" + p.VCS.Branch, "branch": p.VCS.Branch}
+		if p.VCS.Tag != "" {
+			git = map[string]any{"checkout_sha": p.VCS.Revision, "ref": "refs/tags/" + p.VCS.Tag, "tag": p.VCS.Tag}
+		}
+		item["trigger_parameters"] = map[string]any{"circleci": map[string]any{"trigger_type": "github_app"}, "git": git}
+		items = append(items, item)
+	}
+	return items
 }
 
 // rerun adds a newer run of the workflow `build` to repo's newest pipeline,

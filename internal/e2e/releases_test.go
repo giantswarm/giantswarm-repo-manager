@@ -233,3 +233,34 @@ func TestReleaseWatchTellsTheTeamOnce(t *testing.T) {
 		t.Errorf("undeclared: %+v", p)
 	}
 }
+
+// TestReleaseWatchFindsGitHubAppPipelines: a tag the CircleCI GitHub App
+// built (cluster-aws v10.6.0, 2026-10-28) carries no vcs in CircleCI's API,
+// its tag in the trigger's ref, and so does the branch pipeline beside it at
+// the same commit. The watch finds the tag's pipeline all the same: the
+// release is built, nothing is told. Read by vcs.tag alone, the tag went
+// unseen and the team heard of a missed build once the grace period passed.
+func TestReleaseWatchFindsGitHubAppPipelines(t *testing.T) {
+	st := newStack(t)
+	ctx := context.Background()
+	if _, err := st.col.Sweep(ctx); err != nil {
+		t.Fatalf("sweep: %v", err)
+	}
+	now := st.now()
+	st.ghs.org.release(repoPresent, "v7.4.2", now.Add(-20*time.Minute), 41)
+	st.cc.appPipeline(repoPresent, circleciclient.PipelineVCS{Branch: "main", Revision: appCheckoutSHA}, now.Add(-19*time.Minute), "failed")
+	st.cc.appPipeline(repoPresent, circleciclient.PipelineVCS{Tag: "v7.4.2", Revision: appCheckoutSHA}, now.Add(-19*time.Minute), conclusionSuccess, circleciclient.Job{Name: jobPushRelease, Status: conclusionSuccess})
+	if p := st.watchReleases(t); p.Started != 1 || p.Settled != 1 || p.Told != 0 || p.Watching != 0 {
+		t.Fatalf("a tag the GitHub App built: %+v", p)
+	}
+	rec, err := st.store.Get(ctx, org+"/"+repoPresent)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if w := rec.Setup.Release; w == nil || w.Tag != "v7.4.2" || w.State != inventory.ReleaseBuilt || w.Pipeline == nil || w.Pipeline.Number != 11502 {
+		t.Errorf("built on the GitHub App pipeline: %+v", rec.Setup.Release)
+	}
+	if _, n := st.gw.posted(); len(n) != 0 {
+		t.Errorf("a built release tells nothing: %v", n)
+	}
+}

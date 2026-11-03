@@ -11,6 +11,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- The release watch and `watch_repository` find the tag pipeline of a repository the CircleCI GitHub App builds,
+  which carries no `vcs` in CircleCI's API (devctl v8.161.3). Such a release was told as `has no CircleCI pipeline …
+  nothing was built or published` once the grace period passed, although it was built.
 - devctl v8.158.4: a multi-image entry's release step names GitHub's latest release when it skips without a
   CircleCI client, so the clientless release step reads the release the inventory read instead of reporting
   `not the latest release the inventory read` on agent-toolchains.

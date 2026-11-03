@@ -773,3 +773,27 @@ func TestWatchRepositoryReadsTheStatusesWhereNoTagPipelineIsRead(t *testing.T) {
 		t.Fatalf("private, settled: %+v", w)
 	}
 }
+
+// TestWatchRepositoryDecidesReleasedFromAGitHubAppTagPipeline: the same
+// release decided from a tag pipeline the CircleCI GitHub App started, which
+// CircleCI serves without vcs: the watch reads the tag from the trigger's ref
+// and follows the pipeline to green, as it does an OAuth follow's.
+func TestWatchRepositoryDecidesReleasedFromAGitHubAppTagPipeline(t *testing.T) {
+	st, c, pr := releasedWithTagPipelines(t, tools.TagPipelinesToken)
+	w := st.watch(t, c, pr, settling)
+	if w.Ready || w.Failure != nil || w.Pending != tools.PhaseReleased || names(w.Phases) != throughSetUp ||
+		w.PendingReason != "CircleCI has no pipeline for "+firstTag+" of "+org+"/"+shinyService+" yet" {
+		t.Fatalf("no tag pipeline yet: %+v", w)
+	}
+	st.cc.appPipeline(shinyService, circleciclient.PipelineVCS{Tag: firstTag, Revision: appCheckoutSHA}, time.Now(), workflowRunning)
+	st.cc.workflow(shinyService, workflowSetup, workflowRunning)
+	if w = st.watch(t, c, pr, settling); w.Ready || w.Failure != nil || w.Pending != tools.PhaseReleased ||
+		w.PendingReason != tagPipelineLine()+": build (running), setup (running) — waiting for the running workflows" {
+		t.Fatalf("setup and build running on the GitHub App pipeline: %+v", w)
+	}
+	st.cc.finish(shinyService, stateSuccess)
+	st.ghs.repos.report(shinyService, stateSuccess, greenRelease...)
+	if w = st.watch(t, c, pr, settling); !w.Ready || w.Failure != nil || w.Pending != "" || w.PendingReason != "" || names(w.Phases) != allPhases || w.Waited != 0 {
+		t.Fatalf("setup and build succeeded on the GitHub App pipeline: %+v", w)
+	}
+}

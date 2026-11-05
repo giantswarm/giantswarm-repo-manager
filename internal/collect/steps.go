@@ -51,14 +51,17 @@ func rewriteReleaseStep(rec *inventory.Record) {
 		return
 	}
 	checked := *rec.Setup.CheckedAt
+	// ours is a waiting step written here, which names the tag it waits
+	// for but is no read of the engine's.
 	ours := strings.HasSuffix(sr.Summary, waitingForPipeline)
-	sameTag, cutSince := verifies(sr, w.Tag) && !ours, w.CreatedAt.After(checked)
-	if !sameTag && !cutSince {
+	named, cutSince := verifies(sr, w.Tag), w.CreatedAt.After(checked)
+	sameTag := named && !ours
+	if !named && !cutSince {
 		return
 	}
 	done, ok := watchedReleaseStep(rec.Repository, w.Tag, w)
 	switch {
-	case !ok && w.State == inventory.ReleaseWatching && (!sameTag || reports(sr, reconcile.FindingMissedTagBuild)):
+	case !ok && w.State == inventory.ReleaseWatching && (ours || !sameTag || reports(sr, reconcile.FindingMissedTagBuild)):
 		done = reconcile.StepResult{Step: reconcile.StepRelease, Verdict: reconcile.VerdictOK,
 			Summary: "release " + w.Tag + waitingForPipeline}
 	case !ok && ours:

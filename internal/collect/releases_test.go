@@ -177,7 +177,7 @@ func TestReadReleaseDecidesFromTheTagPipeline(t *testing.T) {
 		{
 			name:  "unchecked: a project CircleCI does not know, with a token",
 			fake:  &fakeTagPipelines{project: org + "/other"},
-			want:  inventory.ReleaseWatch{State: inventory.ReleaseUnchecked, Reason: "CircleCI does not know the project"},
+			want:  inventory.ReleaseWatch{State: inventory.ReleaseUnchecked, Reason: reasonUnknownProject},
 			calls: 1,
 		},
 	}
@@ -260,8 +260,8 @@ func TestReleaseStepFromTheWatch(t *testing.T) {
 		fix     string
 	}{
 		{"built", watch(inventory.ReleaseBuilt), reconcile.VerdictOK, "release v1.2.0 built: the tag's pipeline 11508 succeeded", "", ""},
-		{"red", watch(inventory.ReleaseRed, "build-image-arm64 (timed out)"), reconcile.VerdictReported, "the tag's pipeline 11508 failed", reconcile.FindingRedRelease, "rerun the workflow from failed on CircleCI, then `devctl release wait giantswarm/x v1.2.0` confirms it"},
-		{"unbuilt", &inventory.ReleaseWatch{Tag: tag, State: inventory.ReleaseUnbuilt, CheckedAt: at}, reconcile.VerdictReported, "no CircleCI pipeline for the tag", reconcile.FindingMissedTagBuild, "`devctl repo follow-circleci giantswarm/x` as a member of the owning team"},
+		{"red", watch(inventory.ReleaseRed, "build-image-arm64 (timed out)"), reconcile.VerdictReported, redPipeline11508, reconcile.FindingRedRelease, "rerun the workflow from failed on CircleCI, then `devctl release wait giantswarm/x v1.2.0` confirms it"},
+		{"unbuilt", &inventory.ReleaseWatch{Tag: tag, State: inventory.ReleaseUnbuilt, CheckedAt: at}, reconcile.VerdictReported, noTagPipeline, reconcile.FindingMissedTagBuild, "`devctl repo follow-circleci giantswarm/x` as a member of the owning team"},
 		{"running", watch(inventory.ReleaseWatching), reconcile.VerdictOK, "the tag's pipeline 11508 is running", "", ""},
 	}
 	for _, tc := range cases {

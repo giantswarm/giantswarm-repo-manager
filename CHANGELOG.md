@@ -18,7 +18,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `github-app+oauth`, `none`) and replaces `setupWorkflows` and `webhook`, which no engine reads any more. The release
   watch's answer still decides the release step for the tag the engine read, except a tag it settled unbuilt that
   the engine has read since, and for a release published after the check; a step the engine skipped for the
-  repository (customer flavour, lifecycle, no pipeline) stays skipped.
+  repository (customer flavour, lifecycle, no pipeline) stays skipped. A missed tag build the engine reports while
+  the watch still waits within its longer grace reads `waiting for the tag's pipeline`, and one the watch can no
+  longer read reads `not checked` (finding `unchecked`) until the next check.
 - `watch_repository` waits in `released` while the reconciler's run finds no CircleCI pipeline, naming the fix
   (`devctl repo follow-circleci`, as a member of the owning team), instead of failing on the scaffold's unbuilt tag:
   the reconciler creates no pipeline, the person does, and that runs the tag. A missed tag build's fix, and the team
@@ -32,7 +34,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   does none of these.
 - The record's `circleci.pipeline` follows the engine's live check, so it says `github-app` once a person created the
   pipeline rather than after the next nightly run.
-
 - The chart README lists the `valkey` subchart without its version, which is pinned in `Chart.yaml`, so a
   Renovate bump of the subchart no longer changes the README and fails `pre-commit`.
 

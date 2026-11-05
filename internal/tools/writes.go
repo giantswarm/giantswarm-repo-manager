@@ -988,7 +988,7 @@ type Dispatch struct {
 const alignChanges = "merge settings (squash only, auto-merge, delete branch on merge, update branch), wiki and projects off, issues on, " +
 	"team permissions (employees admin, bots push), branch protection (one approving review, enforce_admins on, strict up-to-date, " +
 	"every reporting check required), a CODEOWNERS pull request, description and visibility, " +
-	"the owning team's issue label team/<team> (created when missing), lifecycle, catalog and mapping, and a missed release build"
+	"the owning team's issue label team/<team> (created when missing), lifecycle, catalog and mapping"
 
 // alignTrue is the field of an entry that opts the repository in to
 // alignment, as the answers spell it.
@@ -1001,7 +1001,7 @@ const runsAsYou = "It runs as you."
 // alignment changes on this repository, that it runs as them, and what this
 // run does — the entry's opt-in decides: applied, opted in first, or checked.
 func alignWarning(repository, team string, optedIn, declared bool) string {
-	head := fmt.Sprintf("Align now changes %s on GitHub and CircleCI to its declared set-up and the company baseline: %s. %s ",
+	head := fmt.Sprintf("Align now changes %s on GitHub to its declared set-up and the company baseline: %s. %s ",
 		repository, alignChanges, runsAsYou)
 	switch {
 	case !declared && team == "":

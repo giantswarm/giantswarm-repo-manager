@@ -195,12 +195,11 @@ engine's kinds pass through with `source: engine`:
 `circleci-oauth-follow` (advisory), `renovate-missing`, `archived-undeclared`, `pending-pull-request`, `unchecked`.
 `red-release` and `missed-tag-build` come from the release watch's read of the tag's own pipeline for the tag it
 followed (`setup.release`), else from the engine's release step, which reads the tag commit's statuses from the
-CircleCI GitHub App; a tag the watch settled unbuilt that the engine has read since is the engine's.
-A release cut after the record's last read of the repository is pending, not a finding: the release step reads
-`release <tag>: waiting for the inventory's read` and `converged` stays as it was. The release watch's page carries the
-latest release with its tag commit's statuses, and the watch writes them into `reality.latestRelease` in the same pass,
-so the step decides from current facts within one watch interval; a tag the watch still waits on without a status
-within its grace period reads `release <tag>: waiting for the tag's pipeline`.
+CircleCI GitHub App; a tag the watch settled unbuilt that the engine has read since is the engine's, and a watch of
+an older release than the engine's leaves the engine's step. A release published after the engine's checks is the
+watch's: its answer once it has read the tag's pipeline, `release <tag>: waiting for the tag's pipeline` until then
+— no finding, `converged` as it was. A watch that cannot read the pipeline (a private repository without a CircleCI
+token) leaves the engine's step until the next check reads the new release.
 
 ### Renovate state
 

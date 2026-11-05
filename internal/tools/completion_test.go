@@ -256,7 +256,7 @@ func TestCompletionsVerifyAgainstTheLiveCheck(t *testing.T) {
 			want: `bumblebee-repo: ruleset "protect-main" awaits its first evaluation — ` + testRulesetFix},
 		{name: "the live check skipped the step: the run's finding stands",
 			rec: checked(record(change(inventory.ChangeChanged), releaseFindingStep),
-				reconcile.StepResult{Step: reconcile.StepRelease, Verdict: reconcile.VerdictSkipped, Summary: "no CircleCI client to verify the pipeline"}),
+				reconcile.StepResult{Step: reconcile.StepRelease, Verdict: reconcile.VerdictSkipped, Summary: "release v0.2.9: built on an OAuth follow, not verified from statuses"}),
 			want: testMissedTagText},
 		{name: "the live check failed the step: the run's finding stands",
 			rec: checked(record(change(inventory.ChangeChanged), releaseFindingStep),

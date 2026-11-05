@@ -27,7 +27,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   keep a repository from converging, and `circleci-oauth-follow` is on every repository still built by an OAuth
   follow, which would post on every person-made change. They stay on the record and the Repositories page.
 - Archiving and deleting a repository no longer say the reconciler unfollows it on CircleCI, and Align now no longer
-  lists the CircleCI follow and setup workflows: the reconciler does neither.
+  says it changes CircleCI, sets up the follow and setup workflows or repairs a missed release build: the reconciler
+  does none of these.
+- The record's `circleci.pipeline` follows the engine's live check, so it says `github-app` once a person created the
+  pipeline rather than after the next nightly run.
 
 - The chart README lists the `valkey` subchart without its version, which is pinned in `Chart.yaml`, so a
   Renovate bump of the subchart no longer changes the README and fails `pre-commit`.

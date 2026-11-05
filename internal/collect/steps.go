@@ -30,29 +30,43 @@ func converge(res *reconcile.Result) {
 // since: a person may have run the tag on the GitHub App pipeline after the
 // watch settled (`devctl repo follow-circleci`), and the engine's read is
 // the newer. A tag published after the checks ran is the watch's alone: its
-// answer, or waiting while it has no pipeline yet. A watch without an
-// answer, or one about another tag published before the checks — an older
-// release, read again after the checks or carried over by keepRelease —
-// leaves the engine's step. Converged follows.
+// answer, or waiting while it has no pipeline yet. The engine gives up on a
+// tag after reconcile.TagBuildGrace, the watch only after its own longer
+// grace, so a missed build the engine reports while the watch still waits
+// for the pipeline is waiting too. A waiting step the watch can no longer
+// answer (it settled the tag unchecked) says the tag is out of reach until
+// the next check. A step the engine skipped for the repository (a flavour,
+// a lifecycle, no pipeline) is not the watch's to answer; one it skipped
+// naming the tag (built on an OAuth follow) is. A watch without an answer,
+// or one about another tag published before the checks — an older release,
+// read again after the checks or carried over by keepRelease — leaves the
+// engine's step. Converged follows.
 func rewriteReleaseStep(rec *inventory.Record) {
 	w := rec.Setup.Release
 	if w == nil || rec.Setup.Checks == nil || rec.Setup.CheckedAt == nil {
 		return
 	}
 	sr := rec.Setup.Checks.Step(reconcile.StepRelease)
-	if sr == nil {
+	if sr == nil || sr.Verdict == reconcile.VerdictSkipped && !strings.HasPrefix(sr.Summary, "release ") {
 		return
 	}
 	checked := *rec.Setup.CheckedAt
-	sameTag, cutSince := verifies(sr, w.Tag), w.CreatedAt.After(checked)
+	ours := strings.HasSuffix(sr.Summary, waitingForPipeline)
+	sameTag, cutSince := verifies(sr, w.Tag) && !ours, w.CreatedAt.After(checked)
 	if !sameTag && !cutSince {
 		return
 	}
 	done, ok := watchedReleaseStep(rec.Repository, w.Tag, w)
 	switch {
-	case !ok && !sameTag && w.State == inventory.ReleaseWatching:
+	case !ok && w.State == inventory.ReleaseWatching && (!sameTag || reports(sr, reconcile.FindingMissedTagBuild)):
 		done = reconcile.StepResult{Step: reconcile.StepRelease, Verdict: reconcile.VerdictOK,
-			Summary: fmt.Sprintf("release %s: waiting for the tag's pipeline", w.Tag)}
+			Summary: "release " + w.Tag + waitingForPipeline}
+	case !ok && ours:
+		done = reconcile.StepResult{Step: reconcile.StepRelease, Verdict: reconcile.VerdictReported,
+			Summary: fmt.Sprintf("release %s: not checked (%s)", w.Tag, w.Reason),
+			Findings: []reconcile.Finding{finding(reconcile.FindingUnchecked,
+				fmt.Sprintf("whether CircleCI built the tag %s of %s is out of the inventory's reach until its next check of the repository: %s", w.Tag, rec.Repository, w.Reason),
+				"refresh the repository")}}
 	case !ok:
 		return
 	case sameTag && w.State == inventory.ReleaseUnbuilt && !w.CheckedAt.After(checked):
@@ -60,6 +74,20 @@ func rewriteReleaseStep(rec *inventory.Record) {
 	}
 	*sr = done
 	converge(rec.Setup.Checks)
+}
+
+// waitingForPipeline ends the release step written while the watch waits
+// for a tag's pipeline; the engine never words a step so.
+const waitingForPipeline = ": waiting for the tag's pipeline"
+
+// reports says whether the step carries a finding of kind.
+func reports(sr *reconcile.StepResult, kind reconcile.FindingKind) bool {
+	for _, f := range sr.Findings {
+		if f.Kind == kind {
+			return true
+		}
+	}
+	return false
 }
 
 // verifies says whether the engine's release step is about tag: its

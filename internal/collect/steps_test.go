@@ -60,7 +60,18 @@ func TestRewriteReleaseStep(t *testing.T) {
 		{"the watch's older red tag re-read after the checks: the engine's built step stands", newer,
 			&inventory.ReleaseWatch{Tag: tag, State: inventory.ReleaseRed, Pipeline: pipe, FailedJobs: []string{"a"}, CreatedAt: published, CheckedAt: after}, newer.Summary, true},
 		{"unchecked: the engine's step stands", missed, &inventory.ReleaseWatch{Tag: tag, State: inventory.ReleaseUnchecked, CheckedAt: after}, missed.Summary, false},
-		{"watching without a pipeline, the same tag: the engine's step stands", missed, &inventory.ReleaseWatch{Tag: tag, State: inventory.ReleaseWatching, CheckedAt: after}, missed.Summary, false},
+		{"watching without a pipeline, the same tag built per the engine: the engine's step stands", built, &inventory.ReleaseWatch{Tag: tag, State: inventory.ReleaseWatching, CheckedAt: after}, built.Summary, true},
+		{"skipped for the repository (customer flavour), a tag published since: the engine's skip stands",
+			reconcile.StepResult{Step: reconcile.StepRelease, Verdict: reconcile.VerdictSkipped, Summary: "flavour customer"},
+			&inventory.ReleaseWatch{Tag: tag, State: inventory.ReleaseUnbuilt, CreatedAt: after, CheckedAt: after}, "flavour customer", true},
+		{"skipped naming the tag (built on an OAuth follow): the watch decides",
+			reconcile.StepResult{Step: reconcile.StepRelease, Verdict: reconcile.VerdictSkipped, Summary: "release v1.2.0: built on an OAuth follow (alice), not verified from statuses"},
+			&inventory.ReleaseWatch{Tag: tag, State: inventory.ReleaseBuilt, Pipeline: pipe, CreatedAt: published, CheckedAt: after}, "the tag's pipeline 11508 succeeded", true},
+		{"the engine's missed build within the watch's longer grace: waiting", missed,
+			&inventory.ReleaseWatch{Tag: tag, State: inventory.ReleaseWatching, CreatedAt: published, CheckedAt: after}, "release v1.2.0: waiting for the tag's pipeline", true},
+		{"our own waiting step, the watch settled the tag unchecked: out of reach",
+			reconcile.StepResult{Step: reconcile.StepRelease, Verdict: reconcile.VerdictOK, Summary: "release v1.2.0" + waitingForPipeline},
+			&inventory.ReleaseWatch{Tag: tag, State: inventory.ReleaseUnchecked, Reason: "CircleCI does not know the project", CreatedAt: after, CheckedAt: after}, "release v1.2.0: not checked (CircleCI does not know the project)", false},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

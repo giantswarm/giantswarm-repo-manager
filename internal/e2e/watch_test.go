@@ -679,6 +679,31 @@ func TestWatchRepositoryWaitsForTheGitHubAppPipeline(t *testing.T) {
 	}
 }
 
+// TestWatchRepositoryFinishesOnceThePersonCreatedThePipeline: the run that
+// set the repository up found no pipeline, and the watch keeps that run. Once
+// the person has created the GitHub App pipeline and it built the tag, the
+// commit's statuses decide, even where the declaration has no job only the
+// tag pipeline runs: the run's finding does not keep the phase waiting.
+func TestWatchRepositoryFinishesOnceThePersonCreatedThePipeline(t *testing.T) {
+	st := newStack(t)
+	c := st.as(t, aliceToken)
+	created, prURL := st.createShiny(t, c)
+	pr := created.PullRequest.Number
+	st.ghs.files.merge(pr)
+	follow := "`devctl repo follow-circleci " + org + "/" + shinyService + "`"
+	st.reported(t, pr, prURL,
+		reconcile.StepResult{Step: reconcile.StepCircleCI, Verdict: reconcile.VerdictReported, Summary: "no CircleCI status on main",
+			Findings: []reconcile.Finding{{Kind: reconcile.FindingCircleCIPipelineMissing, Message: "no CircleCI pipeline builds it", Fix: follow}}})
+	st.ghs.repos.publish(shinyService, firstTag)
+	if w := st.watch(t, c, pr, 0.3); w.Ready || w.Pending != tools.PhaseReleased || !strings.Contains(w.PendingReason, follow) {
+		t.Fatalf("before the pipeline: %+v", w)
+	}
+	st.ghs.repos.report(shinyService, stateSuccess, greenRelease...)
+	if w := st.watch(t, c, pr, 3); !w.Ready || w.Failure != nil || w.PendingReason != "" {
+		t.Fatalf("the tag built on the person's pipeline: %+v failure=%+v", w, w.Failure)
+	}
+}
+
 // TestWatchRepositoryReportsARefusedRead: the inventory App's installation
 // does not cover the repository: GitHub refuses the statuses read with 403,
 // and the watch reports the released phase pending with the refusal — a fact

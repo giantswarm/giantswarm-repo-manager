@@ -275,6 +275,10 @@ func failed(reason string) outcome { return outcome{failed: true, reason: reason
 // awaited — a fact about the phase, never the tool's error.
 func undecided(reason string) outcome { return outcome{reason: reason} }
 
+// decided says whether the outcome settles the phase for now: failed, or
+// pending with what is awaited named.
+func (o outcome) decided() bool { return o.failed || o.reason != "" }
+
 var pending = outcome{}
 
 // advance reads the phases after the ones done, in order, until one is
@@ -518,7 +522,7 @@ func (w *watcher) released(ctx context.Context) (outcome, error) {
 		return w.tagPipelineVerdict(ctx, tag), nil
 	}
 	if w.t.d.App == nil {
-		if o := w.releaseStepVerdict(tag); o.failed || o.reason != "" {
+		if o := w.releaseStepVerdict(tag); o.decided() {
 			return o, nil
 		}
 		return undecided(fmt.Sprintf("the CircleCI statuses on %s are not read — %v; the reconciler run's release step alone decides", tag, ErrNoApp)), nil
@@ -528,7 +532,9 @@ func (w *watcher) released(ctx context.Context) (outcome, error) {
 		return undecided(fmt.Sprintf("read the statuses of %s/%s@%s as the inventory App: %v", w.org(), w.name, tag, err)), nil
 	}
 	if !w.tagPipelineReported(tag, st) {
-		if o := w.releaseStepVerdict(tag); o.failed || o.reason != "" || st.GetTotalCount() == 0 {
+		// A commit CircleCI reported on is the statuses' to decide: the run
+		// that found no pipeline may predate the one the person created.
+		if o := w.releaseStepVerdict(tag); o.failed || st.GetTotalCount() == 0 {
 			return o, nil
 		}
 	}
@@ -559,7 +565,7 @@ func (w *watcher) tagPipelineVerdict(ctx context.Context, tag string) outcome {
 		case err != nil:
 			return undecided(fmt.Sprintf("read the pipelines of %s on CircleCI: %v", slug, err))
 		case p == nil:
-			if o := w.releaseStepVerdict(tag); o.failed || o.reason != "" {
+			if o := w.releaseStepVerdict(tag); o.decided() {
 				return o
 			}
 			return undecided(fmt.Sprintf("CircleCI has no pipeline for %s of %s yet", tag, slug))
@@ -680,21 +686,29 @@ func (w *watcher) hasDockerfile(ctx context.Context) (bool, error) {
 // the phase, so does a finding for tag that nothing will change by waiting —
 // the tag pipeline red (red-release), or no pipeline for the tag at all
 // (missed-tag-build) — with the finding's fix. While the run found no
-// GitHub App pipeline, the phase waits for one instead (awaitingPipeline):
-// creating it runs the tag.
+// GitHub App pipeline, a missed tag build waits for one instead
+// (awaitingPipeline): creating it runs the tag. A failed step or a red tag
+// pipeline fails the phase whatever the run found.
 func (w *watcher) releaseStepVerdict(tag string) outcome {
+	s := w.run.Result.Step(reconcile.StepRelease)
+	if s != nil && s.Verdict == reconcile.VerdictFailed {
+		return failed(fmt.Sprintf("the reconciler's release step failed: %s (%s)", s.Summary, w.run.RunURL))
+	}
+	if s != nil {
+		for _, f := range s.Findings {
+			if f.Kind == reconcile.FindingRedRelease && strings.Contains(f.Message, tag) {
+				return failed(fmt.Sprintf("%s — %s (%s)", f.Message, f.Fix, w.run.RunURL))
+			}
+		}
+	}
 	if reason := w.awaitingPipeline(); reason != "" {
 		return undecided(reason)
 	}
-	s := w.run.Result.Step(reconcile.StepRelease)
 	if s == nil {
 		return pending
 	}
-	if s.Verdict == reconcile.VerdictFailed {
-		return failed(fmt.Sprintf("the reconciler's release step failed: %s (%s)", s.Summary, w.run.RunURL))
-	}
 	for _, f := range s.Findings {
-		if (f.Kind == reconcile.FindingRedRelease || f.Kind == reconcile.FindingMissedTagBuild) && strings.Contains(f.Message, tag) {
+		if f.Kind == reconcile.FindingMissedTagBuild && strings.Contains(f.Message, tag) {
 			return failed(fmt.Sprintf("%s — %s (%s)", f.Message, f.Fix, w.run.RunURL))
 		}
 	}

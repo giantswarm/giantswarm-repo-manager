@@ -568,7 +568,7 @@ func (t *tools) setLifecycle() WriteTool {
 	return WriteTool{
 		Name:    ToolSetLifecycle,
 		Summary: "Deprecate, archive or delete a declared repository. Deleting wipes code and issues; the person must type the name.",
-		Details: "deprecated: security-only Renovate. archived: archived on GitHub, unfollowed on CircleCI. deleted: deleted on GitHub with " +
+		Details: "deprecated: security-only Renovate. archived: archived on GitHub. deleted: deleted on GitHub with " +
 			"code, issues, pull requests, releases and packages; an org owner can restore it for 90 days. The owning team approves. An entry without " +
 			alignTrue + " gets it, which opts the repository in to the company baseline: tell the person.",
 		Destructive: true,
@@ -672,9 +672,9 @@ func (t *tools) confirmed(name string, args map[string]any) error {
 func lifecycleEffect(lifecycle string) (effect, kind string) {
 	switch lifecycle {
 	case teamfiles.LifecycleArchived:
-		return "the reconciler archives the repository on GitHub and unfollows it on CircleCI; the entry stays in the team file as the record", inventory.ChangeArchived
+		return "the reconciler archives the repository on GitHub; the entry stays in the team file as the record", inventory.ChangeArchived
 	case teamfiles.LifecycleDeleted:
-		return "the reconciler unfollows the repository on CircleCI and deletes it on GitHub — code, issues, pull requests, releases and packages with it; " +
+		return "the reconciler deletes the repository on GitHub — code, issues, pull requests, releases and packages with it; " +
 			"an organization owner can restore it on GitHub for 90 days; the entry stays in the team file as the record of the deletion", inventory.ChangeDeleted
 	}
 	return "security-only Renovate updates and the catalog's deprecation flag", inventory.ChangeDeprecated
@@ -987,7 +987,7 @@ type Dispatch struct {
 // the engine's baseline in one sentence.
 const alignChanges = "merge settings (squash only, auto-merge, delete branch on merge, update branch), wiki and projects off, issues on, " +
 	"team permissions (employees admin, bots push), branch protection (one approving review, enforce_admins on, strict up-to-date, " +
-	"every reporting check required), the CircleCI follow and setup workflows, a CODEOWNERS pull request, description and visibility, " +
+	"every reporting check required), a CODEOWNERS pull request, description and visibility, " +
 	"the owning team's issue label team/<team> (created when missing), lifecycle, catalog and mapping, and a missed release build"
 
 // alignTrue is the field of an entry that opts the repository in to

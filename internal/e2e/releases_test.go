@@ -211,16 +211,14 @@ func TestReleaseWatchTellsTheTeamOnce(t *testing.T) {
 	if len(notices()) != 2 {
 		t.Errorf("a private repository without a token posts nothing: %v", notices())
 	}
-	// Its release step stands in with the tag commit's statuses, read
-	// against the declaration: the two failed legs of a branch pipeline at
-	// the commit are another pipeline's, the tag pipeline's four jobs are
-	// green, so the release reads built and no red-release is found.
+	// Its release step is the engine's, which reads the tag commit's
+	// statuses from the CircleCI GitHub App itself: an unchecked watch leaves
+	// it as the engine wrote it, and no red-release is found.
 	if legacy.Setup.Checks == nil {
 		t.Fatal("the private repository has no checks")
 	}
-	if sr := legacy.Setup.Checks.Step(reconcile.StepRelease); sr == nil || sr.Verdict != reconcile.VerdictOK ||
-		!strings.Contains(sr.Summary, "release "+legacyTag+" built: CircleCI success (4 jobs") || !strings.Contains(sr.Summary, "2 statuses of a branch pipeline at the commit ignored") {
-		t.Errorf("the private release from its commit's statuses: %+v", sr)
+	if sr := legacy.Setup.Checks.Step(reconcile.StepRelease); sr == nil || sr.Verdict != reconcile.VerdictOK || !strings.HasSuffix(sr.Summary, " built: "+engineReleaseJobs+" succeeded") {
+		t.Errorf("the private release from the engine: %+v", sr)
 	}
 	for _, f := range legacy.Findings {
 		if f.Kind == string(reconcile.FindingRedRelease) || f.Kind == string(reconcile.FindingMissedTagBuild) {

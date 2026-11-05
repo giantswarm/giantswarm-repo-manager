@@ -11,6 +11,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- devctl v8.163.1: the engine's `circleci` and `release` steps read the CircleCI statuses on GitHub instead of
+  skipping with `no CircleCI client`, so the inventory no longer writes those steps itself. The circleci step tells
+  the CircleCI GitHub App pipeline from an OAuth follow (`circleci-oauth-follow`, advisory) and reports a repository
+  nothing builds (`circleci-pipeline-missing`); the record's `circleci.pipeline` says which (`github-app`, `oauth`,
+  `github-app+oauth`, `none`) and replaces `setupWorkflows` and `webhook`, which no engine reads any more. The release
+  watch's answer still decides the release step for the tag it read, except a tag it settled unbuilt that the
+  engine has read since.
+- `watch_repository` waits in `released` while the reconciler's run finds no CircleCI pipeline, naming the fix
+  (`devctl repo follow-circleci`, as a member of the owning team), instead of failing on the scaffold's unbuilt tag:
+  the reconciler creates no pipeline, the person does, and that runs the tag. A missed tag build's fix names the same
+  command.
+- Archiving and deleting a repository no longer say the reconciler unfollows it on CircleCI, and Align now no longer
+  lists the CircleCI follow and setup workflows: the reconciler does neither.
+
 - The chart README lists the `valkey` subchart without its version, which is pinned in `Chart.yaml`, so a
   Renovate bump of the subchart no longer changes the README and fails `pre-commit`.
 

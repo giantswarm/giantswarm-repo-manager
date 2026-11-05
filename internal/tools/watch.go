@@ -132,7 +132,8 @@ func (t *tools) registerWatch(s *mcpserver.MCPServer) {
 		tooldesc.Describe("After create_repository, follow the new repository until ready or a phase fails. Call again while changed or pending.",
 			"Phases: declared, merged, created, scaffolded, setUp, released. Returns when ready, when a phase fails (failure says why; the watch ends), "+
 				"when a phase completes (changed: true — tell the person) or at timeout (pending names the phase); pendingReason says what is awaited. "+
-				"A repository without a release (withoutRelease: true) is ready once set up."),
+				"A repository without a release (withoutRelease: true) is ready once set up. "+
+				"Without a CircleCI GitHub App pipeline, released stays pending; pendingReason names the command that creates it."),
 		readOnly(),
 		mcp.WithString(argRepository, mcp.Required(), mcp.Description("Repository name, with or without the org.")),
 		mcp.WithNumber(argPullRequest, mcp.Required(), mcp.Description("The declaration pull request's number in the team files repository (create_repository's pullRequest.number).")),
@@ -492,12 +493,14 @@ func (w *watcher) withoutRelease() bool {
 // through the App giantswarm-repo-manager has no statuses permission. A
 // failing status fails the phase at once. Until the tag pipeline itself has
 // reported on the commit, the reconciler run's release step decides — the
-// run read the tag's own pipeline, and the first tag's commit is the default
-// branch head, which the pipeline the run's follow starts builds too: a
-// branch pipeline's green statuses there never make the release, and a tag
-// no pipeline built (missed-tag-build) is nobody's to wait for. Without the
-// inventory App the release step alone decides, and the pending phase says
-// so.
+// first tag's commit is the default branch head, which the branch pipeline
+// builds too: a branch pipeline's green statuses there never make the
+// release, and a tag no pipeline built (missed-tag-build) is nobody's to
+// wait for, unless no GitHub App pipeline exists yet: the reconciler creates
+// none, the person creates it with their own CircleCI login and it runs the
+// tag then, so the phase waits naming the command (awaitingPipeline).
+// Without the inventory App the release step alone decides, and the pending
+// phase says so.
 func (w *watcher) released(ctx context.Context) (outcome, error) {
 	rel, resp, err := w.p.gh.Repositories.GetLatestRelease(ctx, w.org(), w.name)
 	switch {
@@ -515,7 +518,7 @@ func (w *watcher) released(ctx context.Context) (outcome, error) {
 		return w.tagPipelineVerdict(ctx, tag), nil
 	}
 	if w.t.d.App == nil {
-		if o := w.releaseStepVerdict(tag); o.failed {
+		if o := w.releaseStepVerdict(tag); o.failed || o.reason != "" {
 			return o, nil
 		}
 		return undecided(fmt.Sprintf("the CircleCI statuses on %s are not read — %v; the reconciler run's release step alone decides", tag, ErrNoApp)), nil
@@ -525,7 +528,7 @@ func (w *watcher) released(ctx context.Context) (outcome, error) {
 		return undecided(fmt.Sprintf("read the statuses of %s/%s@%s as the inventory App: %v", w.org(), w.name, tag, err)), nil
 	}
 	if !w.tagPipelineReported(tag, st) {
-		if o := w.releaseStepVerdict(tag); o.failed || st.GetTotalCount() == 0 {
+		if o := w.releaseStepVerdict(tag); o.failed || o.reason != "" || st.GetTotalCount() == 0 {
 			return o, nil
 		}
 	}
@@ -556,7 +559,7 @@ func (w *watcher) tagPipelineVerdict(ctx context.Context, tag string) outcome {
 		case err != nil:
 			return undecided(fmt.Sprintf("read the pipelines of %s on CircleCI: %v", slug, err))
 		case p == nil:
-			if o := w.releaseStepVerdict(tag); o.failed {
+			if o := w.releaseStepVerdict(tag); o.failed || o.reason != "" {
 				return o
 			}
 			return undecided(fmt.Sprintf("CircleCI has no pipeline for %s of %s yet", tag, slug))
@@ -676,8 +679,13 @@ func (w *watcher) hasDockerfile(ctx context.Context) (bool, error) {
 // reported: the reconciler run's release step decides. A failed step fails
 // the phase, so does a finding for tag that nothing will change by waiting —
 // the tag pipeline red (red-release), or no pipeline for the tag at all
-// (missed-tag-build) — with the finding's fix.
+// (missed-tag-build) — with the finding's fix. While the run found no
+// GitHub App pipeline, the phase waits for one instead (awaitingPipeline):
+// creating it runs the tag.
 func (w *watcher) releaseStepVerdict(tag string) outcome {
+	if reason := w.awaitingPipeline(); reason != "" {
+		return undecided(reason)
+	}
 	s := w.run.Result.Step(reconcile.StepRelease)
 	if s == nil {
 		return pending
@@ -691,6 +699,23 @@ func (w *watcher) releaseStepVerdict(tag string) outcome {
 		}
 	}
 	return pending
+}
+
+// awaitingPipeline is the released phase's pending reason while the
+// reconciler run's circleci step found no CircleCI pipeline (the finding
+// circleci-pipeline-missing): the reconciler holds no CircleCI identity and
+// creates none, so the person does, with the finding's fix. Empty otherwise.
+func (w *watcher) awaitingPipeline() string {
+	s := w.run.Result.Step(reconcile.StepCircleCI)
+	if s == nil {
+		return ""
+	}
+	for _, f := range s.Findings {
+		if f.Kind == reconcile.FindingCircleCIPipelineMissing {
+			return fmt.Sprintf("no CircleCI GitHub App pipeline builds %s/%s yet, so nothing builds the release: %s (%s)", w.org(), w.name, f.Fix, w.run.RunURL)
+		}
+	}
+	return ""
 }
 
 // newestStatus is when the newest of the combined status' statuses was

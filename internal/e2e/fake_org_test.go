@@ -533,6 +533,13 @@ type fakeChecker struct {
 	release func(name string) string
 }
 
+// engineCircleCI and engineReleaseJobs are the fake engine's circleci step
+// summary and the jobs its release step names, as devctl words them.
+const (
+	engineCircleCI    = "CircleCI statuses on main from circleci-app[bot]: GitHub App pipeline"
+	engineReleaseJobs = "push-to-registries-release"
+)
+
 // latestTag is the repository's latest release as the engine would read it
 // on GitHub: the fake org's, when the stack wired it, else the present tag.
 func (c *fakeChecker) latestTag(name string) string {
@@ -574,16 +581,16 @@ func (c *fakeChecker) Check(_ context.Context, req reconcile.Request) (*reconcil
 		<-c.hold
 	}
 	now := time.Now()
-	// The engine here has no CircleCI client, so its circleci and release
-	// steps are skipped with these exact words (devctl's step_circleci.go);
-	// the collector writes both from the record's sources.
+	// The engine reads its circleci and release steps from the CircleCI
+	// statuses on GitHub (devctl's step_circleci.go): the GitHub App
+	// pipeline builds the repository, and built its latest release.
 	return &reconcile.Result{
 		Repository: org + "/" + entry.Name, Declared: org + "/" + entry.Name, Team: teamSlug, Mode: reconcile.ModeCheck, StartedAt: now, FinishedAt: now, Converged: true,
 		Steps: []reconcile.StepResult{
 			{Step: reconcile.StepScaffold, Verdict: reconcile.VerdictOK, Summary: "scaffold present",
 				Findings: []reconcile.Finding{{Kind: reconcile.FindingDefaultIcon, Advisory: true, Message: "the chart carries the template's icon", Fix: "replace helm/<chart>/icon.svg"}}},
-			{Step: reconcile.StepCircleCI, Verdict: reconcile.VerdictSkipped, Summary: "no CircleCI client"},
-			{Step: reconcile.StepRelease, Verdict: reconcile.VerdictSkipped, Summary: "release " + c.latestTag(entry.Name) + ": no CircleCI client to verify the pipeline"},
+			{Step: reconcile.StepCircleCI, Verdict: reconcile.VerdictOK, Summary: engineCircleCI},
+			{Step: reconcile.StepRelease, Verdict: reconcile.VerdictOK, Summary: "release " + c.latestTag(entry.Name) + " built: " + engineReleaseJobs + " succeeded"},
 		},
 	}, nil
 }

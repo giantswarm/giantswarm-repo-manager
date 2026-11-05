@@ -344,7 +344,7 @@ func TestSetLifecycleDeletedNeedsTheTypedName(t *testing.T) {
 	pr := st.ghs.files.pullRequests()[0]
 	file := string(pr.Files["repositories/"+team+".yaml"])
 	if !strings.Contains(file, "  lifecycle: deleted\n  align: true\n") || !strings.Contains(file, "- name: "+repoLegacy) ||
-		!strings.Contains(pr.Title, "delete "+repoPresent) || !strings.Contains(pr.Body, "deletes it on GitHub") || !strings.Contains(pr.Body, "record of the deletion") {
+		!strings.Contains(pr.Title, "delete "+repoPresent) || !strings.Contains(pr.Body, "deletes the repository on GitHub") || !strings.Contains(pr.Body, "record of the deletion") {
 		t.Errorf("delete pull request %q\n%s\n%s", pr.Title, pr.Body, file)
 	}
 	if p := out.PendingRun; p == nil || p.Kind != inventory.ChangeDeleted || !p.Follows(pr.Number) || p.By != alice {

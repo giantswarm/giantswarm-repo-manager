@@ -18,8 +18,8 @@ import (
 )
 
 // unknownWithoutRun is what the CircleCI state leaves unknown before a
-// reconciler run tells: the settings and the webhook only a run reads.
-const unknownWithoutRun = inventory.CircleCIFactSetupWorkflows + "," + inventory.CircleCIFactWebhook
+// reconciler run tells: which pipeline builds the repository.
+const unknownWithoutRun = inventory.CircleCIFactPipeline
 
 // TestSweepFillsOneRecordPerRepository: the full sweep over the fake org —
 // sources in one query, repositories in one page, histories in one aliased
@@ -50,17 +50,16 @@ func TestSweepFillsOneRecordPerRepository(t *testing.T) {
 	if present.Declaration == nil || present.Declaration.Team != team || !present.Declaration.Accepted || present.Declaration.Language != "go" || present.Reality == nil {
 		t.Errorf("present declaration: %+v", present.Declaration)
 	}
-	// The engine's findings pass through: the scaffold's default icon. The
-	// two steps the engine skipped for want of a CircleCI client are written
-	// from the record — CircleCI builds main by the head's statuses, the
-	// release by its tag commit's — and leave no finding.
+	// The engine's findings pass through: the scaffold's default icon. Its
+	// circleci and release steps, read from the CircleCI statuses on GitHub,
+	// stand as the engine wrote them and leave no finding.
 	if present.Setup.Checks == nil || !present.Setup.Checks.Converged || present.Setup.CheckedAt == nil || kinds(present) != string(reconcile.FindingDefaultIcon) || present.Findings[0].Source != inventory.FindingSourceEngine {
 		t.Errorf("present set-up state: %+v findings %+v", present.Setup, present.Findings)
 	}
-	if s := present.Setup.Checks.Step(reconcile.StepCircleCI); s == nil || s.Verdict != reconcile.VerdictOK || !strings.HasPrefix(s.Summary, "CircleCI builds main: pending (2 jobs, ") {
+	if s := present.Setup.Checks.Step(reconcile.StepCircleCI); s == nil || s.Verdict != reconcile.VerdictOK || s.Summary != engineCircleCI {
 		t.Errorf("present circleci step: %+v", s)
 	}
-	if s := present.Setup.Checks.Step(reconcile.StepRelease); s == nil || s.Verdict != reconcile.VerdictOK || !strings.HasPrefix(s.Summary, "release "+presentTag+" built: CircleCI success (2 jobs, ") {
+	if s := present.Setup.Checks.Step(reconcile.StepRelease); s == nil || s.Verdict != reconcile.VerdictOK || s.Summary != "release "+presentTag+" built: "+engineReleaseJobs+" succeeded" {
 		t.Errorf("present release step: %+v", s)
 	}
 	if b := present.Reality.LatestRelease.Build; b == nil || b.State != conclusionSuccess || len(b.Contexts) != 2 {
@@ -76,9 +75,9 @@ func TestSweepFillsOneRecordPerRepository(t *testing.T) {
 	}
 	// CircleCI without a token: the head's ci/circleci: statuses say it builds
 	// the repository (the other systems' contexts are ignored, the worst
-	// state counts), setup workflows and the webhook are unknown until a
-	// reconciler run tells.
-	if ci := present.CircleCI; ci == nil || !ci.Followed || ci.Source != inventory.CircleCISourceStatuses || ci.SetupWorkflows != nil || ci.Webhook != nil || ci.Error != "" ||
+	// state counts), which pipeline builds it is unknown until a reconciler
+	// run tells.
+	if ci := present.CircleCI; ci == nil || !ci.Followed || ci.Source != inventory.CircleCISourceStatuses || ci.Pipeline != "" || ci.Error != "" ||
 		ci.Head == nil || ci.Head.State != statePending || strings.Join(ci.Head.Contexts, ",") != circleBuild+","+circlePush || ci.Head.At.IsZero() ||
 		strings.Join(ci.Unknown, ",") != unknownWithoutRun {
 		t.Errorf("present circleci: %+v head=%+v", ci, ci.Head)
@@ -113,7 +112,7 @@ func TestSweepFillsOneRecordPerRepository(t *testing.T) {
 		t.Errorf("legacy: %+v setup %+v findings %+v", legacy.Declaration, legacy.Setup, legacy.Findings)
 	}
 	// No ci/circleci: status on the head and no run: CircleCI does not build
-	// it, setup workflows and the webhook unknown — nothing guessed.
+	// it, the pipeline unknown — nothing guessed.
 	if ci := legacy.CircleCI; ci == nil || ci.Followed || ci.Head != nil || ci.Source != inventory.CircleCISourceStatuses || strings.Join(ci.Unknown, ",") != unknownWithoutRun {
 		t.Errorf("legacy circleci: %+v", ci)
 	}
@@ -221,7 +220,7 @@ func TestInventoryToolsAndReconcilerRefresh(t *testing.T) {
 	finished := time.Now().UTC().Truncate(time.Second)
 	run := st.ghs.actions.addRun(t, runStatusCompleted, finished.Add(-time.Minute), artifactReport{name: repoPresent, finishedAt: finished,
 		result: reconcile.Result{Repository: org + "/" + repoPresent, Mode: reconcile.ModeRepair, Converged: true,
-			Steps: []reconcile.StepResult{{Step: reconcile.StepCircleCI, Verdict: reconcile.VerdictOK, Summary: "followed, setup workflows on, checkout key present, webhook present"}}}})
+			Steps: []reconcile.StepResult{{Step: reconcile.StepCircleCI, Verdict: reconcile.VerdictOK, Summary: engineCircleCI}}}})
 	if p := st.poll(t); p.Runs != 1 || p.Artifacts != 1 || p.Skipped != 0 || len(p.Errors) != 0 {
 		t.Fatalf("poll: %+v", p)
 	}
@@ -230,15 +229,10 @@ func TestInventoryToolsAndReconcilerRefresh(t *testing.T) {
 	}
 	rec := st.record(t, repoPresent)
 	// The run's circleci step is the second source of the CircleCI state:
-	// setup workflows and the webhook are known now, nothing is left unknown.
-	if ci := rec.CircleCI; ci == nil || !ci.Followed || ci.Source != inventory.CircleCISourceBoth || ci.SetupWorkflows == nil || !*ci.SetupWorkflows ||
-		ci.Webhook == nil || !*ci.Webhook || len(ci.Unknown) != 0 || ci.Head == nil {
+	// the GitHub App pipeline builds it, nothing is left unknown.
+	if ci := rec.CircleCI; ci == nil || !ci.Followed || ci.Source != inventory.CircleCISourceBoth || ci.Pipeline != inventory.CircleCIPipelineApp ||
+		len(ci.Unknown) != 0 || ci.Head == nil {
 		t.Errorf("circleci after the reconciler's run: %+v", ci)
-	}
-	// The refresh the run caused re-ran the engine's checks, and the circleci
-	// step now carries the run's verdict beside the head's statuses.
-	if s := rec.Setup.Checks.Step(reconcile.StepCircleCI); s == nil || s.Verdict != reconcile.VerdictOK || !strings.Contains(s.Summary, "checkout key present, webhook present (reconciler run of ") || !strings.Contains(s.Summary, "CircleCI builds main") {
-		t.Errorf("circleci step after the reconciler's run: %+v", s)
 	}
 	if kinds(rec) != string(reconcile.FindingDefaultIcon) {
 		t.Errorf("findings after the reconciler's run: %+v", rec.Findings)
@@ -252,8 +246,8 @@ func TestInventoryToolsAndReconcilerRefresh(t *testing.T) {
 	if again.Setup.LastRun == nil || again.Setup.LastRun.RunURL != runURL(run.ID) {
 		t.Errorf("the run did not survive the next refresh: %+v", again.Setup.LastRun)
 	}
-	if ci := again.CircleCI; ci == nil || ci.Webhook == nil || !*ci.Webhook {
-		t.Errorf("the tool's record lacks the webhook: %+v", ci)
+	if ci := again.CircleCI; ci == nil || ci.Pipeline != inventory.CircleCIPipelineApp {
+		t.Errorf("the tool's record lacks the pipeline: %+v", ci)
 	}
 	// A second poll, and a fresh collector over the same store (a restart),
 	// read no artifact again: the cursor names the run attempt.

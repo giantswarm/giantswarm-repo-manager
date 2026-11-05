@@ -664,10 +664,11 @@ func TestReconcileDispatchesAsThePersonAndTheCompletionMessageFollows(t *testing
 	// The run that followed alice's merged pull request creating the
 	// repository: one sentence about it in the team's standup channel,
 	// linking the pull request — and a finding as a second sentence linking
-	// the run.
+	// the run; the advisory default icon is not told.
 	prURL := "https://github.com/" + org + "/github/pull/4711"
 	created := reconcile.Result{Converged: true, Steps: []reconcile.StepResult{{Step: "release", Verdict: "ok", Summary: "v0.1.0 built"},
-		{Step: "metadata", Verdict: "reported", Findings: []reconcile.Finding{{Kind: "default-icon", Message: "the repository has the default icon", Fix: "upload one under Settings"}}}}}
+		{Step: "metadata", Verdict: "reported", Findings: []reconcile.Finding{{Kind: "default-icon", Advisory: true, Message: "the repository has the default icon", Fix: "upload one under Settings"}}},
+		{Step: "renovate", Verdict: "reported", Findings: []reconcile.Finding{{Kind: "renovate-not-scanned", Message: "Renovate has not scanned the repository", Fix: "add it to the Renovate App"}}}}}
 	later := finished.Add(time.Minute)
 	pushed := st.ghs.actions.addRun(t, runStatusCompleted, later, artifactReport{name: repoPresent, finishedAt: later, result: created,
 		change: &inventory.Change{Kind: inventory.ChangeCreated, By: alice, PullRequest: &inventory.ChangePullRequest{Number: 4711, URL: prURL}}})
@@ -677,7 +678,7 @@ func TestReconcileDispatchesAsThePersonAndTheCompletionMessageFollows(t *testing
 	_, notices := st.gw.posted()
 	if len(notices) != 2 || notices[0][kChannel] != bumblebeeStandup || notices[0]["team"] != team ||
 		notices[0]["text"] != alice+" created a new repo: "+repoPresent+" (app, go)" || notices[0]["link"] != prURL ||
-		notices[1][kChannel] != bumblebeeStandup || notices[1]["text"] != repoPresent+": the repository has the default icon — upload one under Settings" || notices[1]["link"] != runURL(pushed.ID) {
+		notices[1][kChannel] != bumblebeeStandup || notices[1]["text"] != repoPresent+": Renovate has not scanned the repository — add it to the Renovate App" || notices[1]["link"] != runURL(pushed.ID) {
 		t.Errorf("messages after the creating run: %v", notices)
 	}
 }

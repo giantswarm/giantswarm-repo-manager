@@ -22,6 +22,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   (`devctl repo follow-circleci`, as a member of the owning team), instead of failing on the scaffold's unbuilt tag:
   the reconciler creates no pipeline, the person does, and that runs the tag. A missed tag build's fix names the same
   command.
+- Advisory findings are no longer told to the team after a reconciler run (`default-icon`, `foreign-ruleset`,
+  `declared-ruleset-missing`, `rulesets-not-enabled`, `open-pull-requests`, `circleci-oauth-follow`): they do not
+  keep a repository from converging, and `circleci-oauth-follow` is on every repository still built by an OAuth
+  follow, which would post on every person-made change. They stay on the record and the Repositories page.
 - Archiving and deleting a repository no longer say the reconciler unfollows it on CircleCI, and Align now no longer
   lists the CircleCI follow and setup workflows: the reconciler does neither.
 

@@ -191,13 +191,11 @@ checks read past them, nothing in the entry is to fix). The
 engine's kinds pass through with `source: engine`:
 `entry-refused` and `gen-circleci-refused` (the engine refuses the entry — `setup.checks` is its `Refused` result, the
 `entry` step reported and no step run, one finding per problem naming the field to fix), `repository-missing`, `renamed`,
-`abs-prerequisite`, `default-icon`, `red-release`, `missed-tag-build`, `renovate-missing`, `archived-undeclared`,
-`pending-pull-request`, `unchecked`. `red-release` and `missed-tag-build` come from the release watch's read of the
-tag's own pipeline once it has followed the tag (`setup.release`), else from the tag commit's statuses read against
-`ci.jobs`: a status of a job the pipeline never runs on the tag is a branch pipeline's at the same commit and is
-ignored, a failed job that runs on the tag alone is the tag pipeline's failure, and a failed job that runs on branches
-too beside a branch pipeline's statuses cannot be attributed — the release reads `unchecked`, the CircleCI token
-(`circleci.existingSecret`) being the fix.
+`abs-prerequisite`, `default-icon`, `red-release`, `missed-tag-build`, `circleci-pipeline-missing`,
+`circleci-oauth-follow` (advisory), `renovate-missing`, `archived-undeclared`, `pending-pull-request`, `unchecked`.
+`red-release` and `missed-tag-build` come from the release watch's read of the tag's own pipeline for the tag it
+followed (`setup.release`), else from the engine's release step, which reads the tag commit's statuses from the
+CircleCI GitHub App; a tag the watch settled unbuilt that the engine has read since is the engine's.
 A release cut after the record's last read of the repository is pending, not a finding: the release step reads
 `release <tag>: waiting for the inventory's read` and `converged` stays as it was. The release watch's page carries the
 latest release with its tag commit's statuses, and the watch writes them into `reality.latestRelease` in the same pass,

@@ -27,7 +27,7 @@ const (
 	testPRURL       = "https://github.com/giantswarm/github/pull/4711"
 	testService     = "service"
 	testFlavourApp  = "app"
-	testDefaultIcon = "default-icon"
+	testNotScanned  = "renovate-not-scanned"
 )
 
 // record is a declared repository whose last run followed change with the
@@ -60,7 +60,7 @@ var (
 	okStep      = reconcile.StepResult{Step: reconcile.StepRelease, Verdict: reconcile.VerdictOK, Summary: "v0.1.0 built"}
 	failedStep  = reconcile.StepResult{Step: reconcile.StepCircleCI, Verdict: reconcile.VerdictFailed, Summary: "CircleCI answered 502"}
 	findingStep = reconcile.StepResult{Step: reconcile.StepMetadata, Verdict: reconcile.VerdictReported,
-		Findings: []reconcile.Finding{{Kind: testDefaultIcon, Message: "the repository has the default icon", Fix: "upload one under Settings"}}}
+		Findings: []reconcile.Finding{{Kind: testNotScanned, Message: "Renovate has not scanned the repository", Fix: "add it to the Renovate App"}}}
 	uncheckedStep = reconcile.StepResult{Step: reconcile.StepRenovate, Verdict: reconcile.VerdictReported,
 		Findings: []reconcile.Finding{{Kind: reconcile.FindingUnchecked, Message: "whether Renovate runs is out of this token's reach", Fix: "grant the App issues: read"}}}
 )
@@ -97,7 +97,7 @@ func TestCompletionText(t *testing.T) {
 		{name: "changed with a failed step: the failure alone", rec: record(change(inventory.ChangeChanged), okStep, failedStep),
 			want: "bumblebee-repo: the circleci step failed (CircleCI answered 502) — look at the run, fix the cause and reconcile again"},
 		{name: "created with a finding: two sentences", rec: record(change(inventory.ChangeCreated), okStep, findingStep),
-			want: "alice created a new repo: bumblebee-repo (app, go)\nbumblebee-repo: the repository has the default icon — upload one under Settings"},
+			want: "alice created a new repo: bumblebee-repo (app, go)\nbumblebee-repo: Renovate has not scanned the repository — add it to the Renovate App"},
 		{name: "created with an unchecked finding: the sentence alone, the token's reach is the platform's", rec: record(change(inventory.ChangeCreated), okStep, uncheckedStep),
 			want: "alice created a new repo: bumblebee-repo (app, go)"},
 		{name: "changed with an unchecked finding alone: silent", rec: record(change(inventory.ChangeChanged), okStep, uncheckedStep)},
@@ -187,7 +187,7 @@ func TestReconciledLogsWhyItStaysSilent(t *testing.T) {
 }
 
 const (
-	testForeignRuleset = "foreign-ruleset"
+	testRulesetPending = "ruleset-pending"
 	testMissedTagBuild = "missed-tag-build"
 	testRulesetFix     = "declare what it enforces in the entry and delete it, or keep it knowingly"
 	testMissedTagText  = "bumblebee-repo: release v0.2.9 has no pipeline — cut the next tag"
@@ -205,13 +205,13 @@ var (
 		Findings: []reconcile.Finding{{Kind: testMissedTagBuild, Message: "release v0.2.9 has no pipeline", Fix: "cut the next tag"}}}
 )
 
-// ruleset is the protection step reporting one advisory finding per foreign
-// ruleset it left alone.
+// ruleset is the protection step reporting one finding per ruleset still
+// pending.
 func ruleset(names ...string) reconcile.StepResult {
 	st := reconcile.StepResult{Step: reconcile.StepProtection, Verdict: reconcile.VerdictReported}
 	for _, n := range names {
-		st.Findings = append(st.Findings, reconcile.Finding{Kind: testForeignRuleset, Advisory: true,
-			Message: "ruleset " + strconv.Quote(n) + " is not the engine's and is left alone", Fix: testRulesetFix})
+		st.Findings = append(st.Findings, reconcile.Finding{Kind: testRulesetPending,
+			Message: "ruleset " + strconv.Quote(n) + " awaits its first evaluation", Fix: testRulesetFix})
 	}
 	return st
 }
@@ -230,7 +230,7 @@ func TestCompletionsSkipTheEnginesOwnPullRequest(t *testing.T) {
 	if got := CompletionText(record(change(inventory.ChangeChanged), okStep, pendingPRStep)); got != "" {
 		t.Errorf("the finding alone should be silent, got %q", got)
 	}
-	want := "alice created a new repo: bumblebee-repo (app, go)\nbumblebee-repo: the repository has the default icon — upload one under Settings"
+	want := "alice created a new repo: bumblebee-repo (app, go)\nbumblebee-repo: Renovate has not scanned the repository — add it to the Renovate App"
 	if got := CompletionText(record(change(inventory.ChangeCreated), pendingPRStep, findingStep)); got != want {
 		t.Errorf("beside another finding:\ngot  %q\nwant %q", got, want)
 	}
@@ -250,10 +250,10 @@ func TestCompletionsVerifyAgainstTheLiveCheck(t *testing.T) {
 			rec: checked(record(change(inventory.ChangeChanged), ruleset("protect-main")), protectionOK)},
 		{name: "the live check still reports it: told in the live check's words",
 			rec:  checked(record(change(inventory.ChangeChanged), ruleset("protect-main")), ruleset("protect-giantswarm")),
-			want: `bumblebee-repo: ruleset "protect-giantswarm" is not the engine's and is left alone — ` + testRulesetFix},
+			want: `bumblebee-repo: ruleset "protect-giantswarm" awaits its first evaluation — ` + testRulesetFix},
 		{name: "two reported, one gone: the one that stands",
 			rec:  checked(record(change(inventory.ChangeChanged), ruleset("protect-main", "protect-giantswarm")), ruleset("protect-main")),
-			want: `bumblebee-repo: ruleset "protect-main" is not the engine's and is left alone — ` + testRulesetFix},
+			want: `bumblebee-repo: ruleset "protect-main" awaits its first evaluation — ` + testRulesetFix},
 		{name: "the live check skipped the step: the run's finding stands",
 			rec: checked(record(change(inventory.ChangeChanged), releaseFindingStep),
 				reconcile.StepResult{Step: reconcile.StepRelease, Verdict: reconcile.VerdictSkipped, Summary: "no CircleCI client to verify the pipeline"}),
@@ -278,6 +278,24 @@ func TestCompletionsVerifyAgainstTheLiveCheck(t *testing.T) {
 				t.Errorf("got  %q\nwant %q", got, tc.want)
 			}
 		})
+	}
+}
+
+// TestCompletionsSkipAdvisoryFindings: an advisory finding does not keep the
+// repository from converging, and circleci-oauth-follow is on most of the
+// org at once: none is the team's news, whether the artifact marks it
+// advisory or only its kind says so.
+func TestCompletionsSkipAdvisoryFindings(t *testing.T) {
+	oauth := reconcile.StepResult{Step: reconcile.StepCircleCI, Verdict: reconcile.VerdictReported,
+		Findings: []reconcile.Finding{{Kind: reconcile.FindingCircleCIOAuthFollow, Advisory: true, Message: "builds on an OAuth follow", Fix: "devctl repo follow-circleci --migrate"}}}
+	icon := reconcile.StepResult{Step: reconcile.StepMetadata, Verdict: reconcile.VerdictReported,
+		Findings: []reconcile.Finding{{Kind: reconcile.FindingDefaultIcon, Message: "the repository has the default icon", Fix: "upload one under Settings"}}}
+	if got := CompletionText(record(change(inventory.ChangeChanged), oauth, icon)); got != "" {
+		t.Errorf("advisory findings alone should be silent, got %q", got)
+	}
+	want := "bumblebee-repo: Renovate has not scanned the repository — add it to the Renovate App"
+	if got := CompletionText(record(change(inventory.ChangeChanged), oauth, findingStep)); got != want {
+		t.Errorf("beside a finding that is news:\ngot  %q\nwant %q", got, want)
 	}
 }
 
@@ -351,8 +369,8 @@ func runs(t *testing.T, client *review.Client, posted *[]string, steps ...[]reco
 // again only after it has gone away and come back.
 func TestFindingsAreToldOnce(t *testing.T) {
 	client, posted := notices(t, nil)
-	main := `bumblebee-repo: ruleset "protect-main" is not the engine's and is left alone — ` + testRulesetFix
-	giantswarm := `bumblebee-repo: ruleset "protect-giantswarm" is not the engine's and is left alone — ` + testRulesetFix
+	main := `bumblebee-repo: ruleset "protect-main" awaits its first evaluation — ` + testRulesetFix
+	giantswarm := `bumblebee-repo: ruleset "protect-giantswarm" awaits its first evaluation — ` + testRulesetFix
 	got := runs(t, client, posted,
 		[]reconcile.StepResult{ruleset("protect-main")},                       // told
 		[]reconcile.StepResult{ruleset("protect-main")},                       // already told
@@ -369,7 +387,7 @@ func TestFindingsAreToldOnce(t *testing.T) {
 // TestAFindingThatDoesNotReachTheChannelStaysUntold: a finding is told when
 // it was posted, so a gateway that refuses it is retried by the next run.
 func TestAFindingThatDoesNotReachTheChannelStaysUntold(t *testing.T) {
-	main := `bumblebee-repo: ruleset "protect-main" is not the engine's and is left alone — ` + testRulesetFix
+	main := `bumblebee-repo: ruleset "protect-main" awaits its first evaluation — ` + testRulesetFix
 	client, posted := notices(t, map[string]bool{main: true})
 	rec := record(change(inventory.ChangeChanged), ruleset("protect-main"))
 	ts := &Tools{t: &tools{d: Deps{Log: slog.New(slog.NewTextHandler(new(bytes.Buffer), nil)), Review: client}}}

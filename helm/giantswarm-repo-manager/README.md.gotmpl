@@ -35,6 +35,14 @@ none sits beside it.
 Giant Swarm-specific: it manages the giantswarm org's repositories and ships as
 its own app, not as a component of the `agent-platform` meta chart.
 
-{{ template "chart.requirementsSection" . }}
+## Requirements
+
+The versions are pinned in `Chart.yaml`.
+
+| Repository | Name |
+|------------|------|
+{{- range .Dependencies }}
+| {{ .Repository }} | {{ if .Alias }}{{ .Alias }}({{ .Name }}){{ else }}{{ .Name }}{{ end }} |
+{{- end }}
 
 {{ template "chart.valuesSection" . }}

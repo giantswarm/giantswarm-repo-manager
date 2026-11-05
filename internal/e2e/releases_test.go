@@ -28,6 +28,9 @@ func TestReleaseWatchTellsTheTeamOnce(t *testing.T) {
 	if _, err := st.col.Sweep(ctx); err != nil {
 		t.Fatalf("sweep: %v", err)
 	}
+	// The releases below are published after the sweep's checks ran: a check
+	// reads the latest release there is.
+	st.advance(time.Hour)
 	o := st.ghs.org
 	sha := circleciclient.PipelineVCS{Revision: "a80db8ff"}
 	tag := func(v string) circleciclient.PipelineVCS {
@@ -126,8 +129,9 @@ func TestReleaseWatchTellsTheTeamOnce(t *testing.T) {
 		t.Errorf("a recovered release clears its finding and posts nothing: findings=%+v notices=%d", rec.Findings, len(notices()))
 	}
 
-	// A tag without a pipeline: watched within the grace period, a missed
-	// build after it, told once.
+	// A tag without a pipeline, published after the refresh's checks:
+	// watched within the grace period, a missed build after it, told once.
+	st.advance(5 * time.Minute)
 	o.release(repoPresent, "v1.3.0", st.now().Add(-2*time.Minute), 43)
 	if p := st.watchReleases(t); p.Started != 1 || p.Settled != 0 || p.Watching != 1 || p.Told != 0 {
 		t.Errorf("no pipeline yet: %+v", p)

@@ -29,10 +29,11 @@ func converge(res *reconcile.Result) {
 // decides — except a tag the watch settled unbuilt that the engine read
 // since: a person may have run the tag on the GitHub App pipeline after the
 // watch settled (`devctl repo follow-circleci`), and the engine's read is
-// the newer. A tag cut after the checks is the watch's alone: its answer,
-// or waiting while it has no pipeline yet. A watch without an answer, or one
-// about an older tag than the engine's, leaves the engine's step. Converged
-// follows.
+// the newer. A tag published after the checks ran is the watch's alone: its
+// answer, or waiting while it has no pipeline yet. A watch without an
+// answer, or one about another tag published before the checks — an older
+// release, read again after the checks or carried over by keepRelease —
+// leaves the engine's step. Converged follows.
 func rewriteReleaseStep(rec *inventory.Record) {
 	w := rec.Setup.Release
 	if w == nil || rec.Setup.Checks == nil || rec.Setup.CheckedAt == nil {
@@ -42,17 +43,19 @@ func rewriteReleaseStep(rec *inventory.Record) {
 	if sr == nil {
 		return
 	}
-	sameTag, newer := verifies(sr, w.Tag), w.CheckedAt.After(*rec.Setup.CheckedAt)
+	checked := *rec.Setup.CheckedAt
+	sameTag, cutSince := verifies(sr, w.Tag), w.CreatedAt.After(checked)
+	if !sameTag && !cutSince {
+		return
+	}
 	done, ok := watchedReleaseStep(rec.Repository, w.Tag, w)
 	switch {
-	case !ok && w.State == inventory.ReleaseWatching && !sameTag && newer:
+	case !ok && !sameTag && w.State == inventory.ReleaseWatching:
 		done = reconcile.StepResult{Step: reconcile.StepRelease, Verdict: reconcile.VerdictOK,
 			Summary: fmt.Sprintf("release %s: waiting for the tag's pipeline", w.Tag)}
 	case !ok:
 		return
-	case !sameTag && !newer:
-		return
-	case w.State == inventory.ReleaseUnbuilt && !newer:
+	case sameTag && w.State == inventory.ReleaseUnbuilt && !w.CheckedAt.After(checked):
 		return
 	}
 	*sr = done

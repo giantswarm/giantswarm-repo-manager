@@ -121,6 +121,9 @@ func TestRefineCircleCIFromTheLiveCheck(t *testing.T) {
 	fromRun := func() *inventory.CircleCI {
 		return &inventory.CircleCI{Pipeline: inventory.CircleCIPipelineNone, Source: inventory.CircleCISourceBoth}
 	}
+	failedRun := func() *inventory.CircleCI {
+		return &inventory.CircleCI{Source: inventory.CircleCISourceBoth, Unknown: []string{inventory.CircleCIFactPipeline}, Error: "the reconciler's circleci step failed: 502"}
+	}
 	noRun := func() *inventory.CircleCI {
 		return &inventory.CircleCI{Source: inventory.CircleCISourceStatuses, Unknown: []string{inventory.CircleCIFactPipeline, inventory.CircleCIFactFollowed}}
 	}
@@ -137,14 +140,38 @@ func TestRefineCircleCIFromTheLiveCheck(t *testing.T) {
 		{"the check could not read the statuses: the run's answer", fromRun(), checks(reconcile.VerdictReported, "not checked", reconcile.FindingUnchecked), inventory.CircleCIPipelineNone, false, ""},
 		{"the check skipped the step: the run's answer", fromRun(), checks(reconcile.VerdictSkipped, "no CircleCI pipeline"), inventory.CircleCIPipelineNone, false, ""},
 		{"the check failed the step: the run's answer", fromRun(), checks(reconcile.VerdictFailed, "GitHub answered 502"), inventory.CircleCIPipelineNone, false, ""},
+		{"the run failed, the check read the step: its answer, no error", failedRun(), checks(reconcile.VerdictOK, "CircleCI statuses on main from circleci-app[bot]: GitHub App pipeline"), inventory.CircleCIPipelineApp, true, ""},
 		{"no check", noRun(), nil, "", false, inventory.CircleCIFactPipeline + "," + inventory.CircleCIFactFollowed},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			refineCircleCI(tc.cc, tc.checks)
-			if tc.cc.Pipeline != tc.pipeline || tc.cc.Followed != tc.followed || strings.Join(tc.cc.Unknown, ",") != tc.unknown {
+			if tc.cc.Pipeline != tc.pipeline || tc.cc.Followed != tc.followed || strings.Join(tc.cc.Unknown, ",") != tc.unknown || tc.pipeline == inventory.CircleCIPipelineApp && tc.cc.Error != "" {
 				t.Errorf("got %+v, want pipeline %q followed %v unknown %q", tc.cc, tc.pipeline, tc.followed, tc.unknown)
 			}
 		})
+	}
+}
+
+// TestChecksAfterRun: kept checks refine the record's pipeline only when
+// they read the statuses after the reconciler's last run.
+func TestChecksAfterRun(t *testing.T) {
+	at := time.Date(2026, 11, 5, 8, 0, 0, 0, time.UTC)
+	checks := &reconcile.Result{}
+	run := func(ts time.Time) *inventory.LastRun { return &inventory.LastRun{Timestamp: ts} }
+	cases := []struct {
+		name string
+		s    inventory.Setup
+		want bool
+	}{
+		{"checks, no run", inventory.Setup{Checks: checks, CheckedAt: &at}, true},
+		{"checks after the run", inventory.Setup{Checks: checks, CheckedAt: &at, LastRun: run(at.Add(-time.Hour))}, true},
+		{"a run after the checks", inventory.Setup{Checks: checks, CheckedAt: &at, LastRun: run(at.Add(time.Hour))}, false},
+		{"no checks", inventory.Setup{LastRun: run(at)}, false},
+	}
+	for _, tc := range cases {
+		if got := checksAfterRun(tc.s); got != tc.want {
+			t.Errorf("%s: %v, want %v", tc.name, got, tc.want)
+		}
 	}
 }

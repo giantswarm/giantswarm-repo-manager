@@ -78,7 +78,9 @@ func applyStep(out *inventory.CircleCI, sr *reconcile.StepResult) {
 // same statuses the reconciler's run read, but now — after a person created
 // the GitHub App pipeline, the record says so before the next nightly run.
 // A step the check skipped, failed or could not read (finding unchecked)
-// leaves what the run said.
+// leaves what the run said; a step it read clears the run's failure, which
+// the check's answer supersedes. The source stays the statuses the check
+// read, beside the run's artifact when there is one.
 func refineCircleCI(cc *inventory.CircleCI, checks *reconcile.Result) {
 	if cc == nil || checks == nil {
 		return
@@ -94,6 +96,7 @@ func refineCircleCI(cc *inventory.CircleCI, checks *reconcile.Result) {
 	}
 	cc.Pipeline = live.Pipeline
 	cc.Followed = cc.Head != nil || live.Followed
+	cc.Error = ""
 	unknown := cc.Unknown[:0]
 	for _, u := range cc.Unknown {
 		if u != inventory.CircleCIFactPipeline && u != inventory.CircleCIFactFollowed {
@@ -104,6 +107,13 @@ func refineCircleCI(cc *inventory.CircleCI, checks *reconcile.Result) {
 	if len(cc.Unknown) == 0 {
 		cc.Unknown = nil
 	}
+}
+
+// checksAfterRun says whether the set-up state's checks read the statuses
+// after the reconciler's last run did: checks and no run, or checks newer
+// than the run.
+func checksAfterRun(s inventory.Setup) bool {
+	return s.Checks != nil && s.CheckedAt != nil && (s.LastRun == nil || s.CheckedAt.After(s.LastRun.Timestamp))
 }
 
 // oauthOnly is how the engine's circleci step starts its summary when an

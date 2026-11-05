@@ -664,6 +664,12 @@ func (c *Collector) build(name string, node *repoNode, src *sources, old *invent
 	}
 	if node != nil {
 		rec.CircleCI = circleCI(node, rec.Setup.LastRun)
+		// Checks kept from an earlier sweep or refresh read the statuses
+		// after the run did: they stand until a newer run, whether or not
+		// this pass checks again.
+		if checksAfterRun(rec.Setup) {
+			refineCircleCI(rec.CircleCI, rec.Setup.Checks)
+		}
 	}
 	return rec
 }

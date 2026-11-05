@@ -9,6 +9,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- The chart README lists the `valkey` subchart without its version, which is pinned in `Chart.yaml`, so a
+  Renovate bump of the subchart no longer changes the README and fails `pre-commit`.
+
 ### Fixed
 
 - The release watch and `watch_repository` find the tag pipeline of a repository the CircleCI GitHub App builds,

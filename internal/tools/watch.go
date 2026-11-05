@@ -532,13 +532,25 @@ func (w *watcher) released(ctx context.Context) (outcome, error) {
 		return undecided(fmt.Sprintf("read the statuses of %s/%s@%s as the inventory App: %v", w.org(), w.name, tag, err)), nil
 	}
 	if !w.tagPipelineReported(tag, st) {
-		// A commit CircleCI reported on is the statuses' to decide: the run
-		// that found no pipeline may predate the one the person created.
-		if o := w.releaseStepVerdict(tag); o.failed || st.GetTotalCount() == 0 {
+		// While the run found no pipeline, only a CircleCI status hands the
+		// commit to the statuses — the run may predate the pipeline the
+		// person created; another system's status says nothing of it.
+		o := w.releaseStepVerdict(tag)
+		if o.failed || st.GetTotalCount() == 0 || o.reason != "" && !circleCIReported(st) {
 			return o, nil
 		}
 	}
 	return w.statusesVerdict(ctx, tag, st)
+}
+
+// circleCIReported says whether CircleCI posted a status on the commit.
+func circleCIReported(st *github.CombinedStatus) bool {
+	for _, s := range st.Statuses {
+		if strings.HasPrefix(s.GetContext(), inventory.CircleCIContext) {
+			return true
+		}
+	}
+	return false
 }
 
 // readsTagPipeline says whether the manager reads the repository's tag

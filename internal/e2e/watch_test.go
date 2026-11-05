@@ -698,6 +698,12 @@ func TestWatchRepositoryFinishesOnceThePersonCreatedThePipeline(t *testing.T) {
 	if w := st.watch(t, c, pr, 0.3); w.Ready || w.Pending != tools.PhaseReleased || !strings.Contains(w.PendingReason, follow) {
 		t.Fatalf("before the pipeline: %+v", w)
 	}
+	// Another system's status on the commit says nothing of CircleCI: the
+	// phase still waits for the pipeline.
+	st.ghs.repos.report(shinyService, stateSuccess, "license/cla")
+	if w := st.watch(t, c, pr, 0.3); w.Ready || w.Pending != tools.PhaseReleased || !strings.Contains(w.PendingReason, follow) {
+		t.Fatalf("a non-CircleCI status before the pipeline: %+v", w)
+	}
 	st.ghs.repos.report(shinyService, stateSuccess, greenRelease...)
 	if w := st.watch(t, c, pr, 3); !w.Ready || w.Failure != nil || w.PendingReason != "" {
 		t.Fatalf("the tag built on the person's pipeline: %+v failure=%+v", w, w.Failure)

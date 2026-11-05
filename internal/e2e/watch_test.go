@@ -672,8 +672,16 @@ func TestWatchRepositoryWaitsForTheGitHubAppPipeline(t *testing.T) {
 		!strings.Contains(w.PendingReason, "no CircleCI GitHub App pipeline builds "+org+"/"+shinyService+" yet") || !strings.Contains(w.PendingReason, follow) {
 		t.Fatalf("no GitHub App pipeline yet: %+v failure=%+v", w, w.Failure)
 	}
+	// An OAuth follow built the tag, its chart jobs (which only the tag
+	// pipeline runs) among the statuses: still no GitHub App pipeline.
+	oauth := []string{circleSetup, circleBuild, circleChart, circlePushChart}
+	st.ghs.repos.report(shinyService, stateSuccess, oauth...)
+	st.ghs.repos.postedBy(shinyService, alice, 0, oauth...)
+	if w = st.watch(t, c, pr, 0.3); w.Ready || w.Pending != tools.PhaseReleased || !strings.Contains(w.PendingReason, follow) {
+		t.Fatalf("an OAuth follow's tag build: %+v failure=%+v", w, w.Failure)
+	}
+	st.ghs.repos.postedBy(shinyService, reconcile.CircleCIAppLogin, 0, oauth...)
 
-	st.ghs.repos.report(shinyService, stateSuccess, circleSetup, circleBuild, circleChart, circlePushChart)
 	if w = st.watch(t, c, pr, 3); !w.Ready || w.Failure != nil || w.PendingReason != "" || names(w.Phases) != allPhases {
 		t.Fatalf("the person created the pipeline, the tag built: %+v failure=%+v", w, w.Failure)
 	}

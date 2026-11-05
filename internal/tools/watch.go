@@ -532,25 +532,37 @@ func (w *watcher) released(ctx context.Context) (outcome, error) {
 	if err != nil {
 		return undecided(fmt.Sprintf("read the statuses of %s/%s@%s as the inventory App: %v", w.org(), w.name, tag, err)), nil
 	}
-	if !w.tagPipelineReported(tag, st) {
+	// While the run found no pipeline — it may predate the one the person
+	// created — only a build of the tag on the GitHub App pipeline hands the
+	// commit to the statuses, by the engine's rule, whatever jobs reported:
+	// an OAuth follow posts the tag pipeline's own jobs too.
+	if w.awaitingPipeline() != "" {
 		o := w.releaseStepVerdict(tag)
 		if o.failed || st.GetTotalCount() == 0 {
 			return o, nil
 		}
-		if o.reason != "" {
-			// The run found no pipeline, and may predate the one the person
-			// created: only a build of the tag on the GitHub App pipeline
-			// hands the commit to the statuses, by the engine's rule.
-			built, err := w.appBuiltTag(ctx, tag, rel.GetPublishedAt().Time)
-			switch {
-			case err != nil:
-				return undecided(fmt.Sprintf("read the CircleCI statuses of %s/%s@%s as the inventory App: %v", w.org(), w.name, tag, err)), nil
-			case !built:
-				return o, nil
-			}
+		built, err := w.appBuiltTag(ctx, tag, releasedAt(rel))
+		switch {
+		case err != nil:
+			return undecided(fmt.Sprintf("read the CircleCI statuses of %s/%s@%s as the inventory App: %v", w.org(), w.name, tag, err)), nil
+		case !built:
+			return o, nil
+		}
+	} else if !w.tagPipelineReported(tag, st) {
+		if o := w.releaseStepVerdict(tag); o.failed || st.GetTotalCount() == 0 {
+			return o, nil
 		}
 	}
 	return w.statusesVerdict(ctx, tag, st)
+}
+
+// releasedAt is when the release was published, else created, as the
+// engine reads it.
+func releasedAt(rel *github.RepositoryRelease) time.Time {
+	if at := rel.GetPublishedAt(); !at.IsZero() {
+		return at.Time
+	}
+	return rel.GetCreatedAt().Time
 }
 
 // appBuiltTag says whether the CircleCI GitHub App posted a status of a

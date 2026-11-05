@@ -538,6 +538,9 @@ type fakeChecker struct {
 const (
 	engineCircleCI    = "CircleCI statuses on main from circleci-app[bot]: GitHub App pipeline"
 	engineReleaseJobs = "push-to-registries-release"
+	// engineNoPipeline is the circleci step's summary when nothing builds the
+	// repository.
+	engineNoPipeline = "no CircleCI status on main"
 )
 
 // latestTag is the repository's latest release as the engine would read it
@@ -581,15 +584,22 @@ func (c *fakeChecker) Check(_ context.Context, req reconcile.Request) (*reconcil
 		<-c.hold
 	}
 	now := time.Now()
+	circle := reconcile.StepResult{Step: reconcile.StepCircleCI, Verdict: reconcile.VerdictOK, Summary: engineCircleCI}
+	if entry.Name == repoLegacy {
+		// The fake org's legacy repository carries no CircleCI status.
+		circle = reconcile.StepResult{Step: reconcile.StepCircleCI, Verdict: reconcile.VerdictReported, Summary: engineNoPipeline,
+			Findings: []reconcile.Finding{{Kind: reconcile.FindingCircleCIPipelineMissing, Message: "no CircleCI status on " + org + "/" + entry.Name, Fix: "devctl repo follow-circleci " + org + "/" + entry.Name}}}
+	}
 	// The engine reads its circleci and release steps from the CircleCI
 	// statuses on GitHub (devctl's step_circleci.go): the GitHub App
-	// pipeline builds the repository, and built its latest release.
+	// pipeline builds the repository (the legacy one: nothing does), and
+	// built its latest release.
 	return &reconcile.Result{
-		Repository: org + "/" + entry.Name, Declared: org + "/" + entry.Name, Team: teamSlug, Mode: reconcile.ModeCheck, StartedAt: now, FinishedAt: now, Converged: true,
+		Repository: org + "/" + entry.Name, Declared: org + "/" + entry.Name, Team: teamSlug, Mode: reconcile.ModeCheck, StartedAt: now, FinishedAt: now, Converged: circle.Converges(),
 		Steps: []reconcile.StepResult{
 			{Step: reconcile.StepScaffold, Verdict: reconcile.VerdictOK, Summary: "scaffold present",
 				Findings: []reconcile.Finding{{Kind: reconcile.FindingDefaultIcon, Advisory: true, Message: "the chart carries the template's icon", Fix: "replace helm/<chart>/icon.svg"}}},
-			{Step: reconcile.StepCircleCI, Verdict: reconcile.VerdictOK, Summary: engineCircleCI},
+			circle,
 			{Step: reconcile.StepRelease, Verdict: reconcile.VerdictOK, Summary: "release " + c.latestTag(entry.Name) + " built: " + engineReleaseJobs + " succeeded"},
 		},
 	}, nil

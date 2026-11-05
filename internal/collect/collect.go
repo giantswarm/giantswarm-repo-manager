@@ -598,6 +598,8 @@ func (c *Collector) check(ctx context.Context, r *inventory.Record, src *sources
 	}
 	at := c.now()
 	r.Setup.Checks, r.Setup.CheckedAt, r.Setup.CheckError = res, &at, ""
+	// The check read the CircleCI statuses now, after the reconciler's run.
+	refineCircleCI(r.CircleCI, res)
 	// The release watch read the tag's own pipeline: its answer decides the
 	// release step where it is the finer one.
 	rewriteReleaseStep(r)

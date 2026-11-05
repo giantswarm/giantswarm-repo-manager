@@ -17,10 +17,6 @@ import (
 	"github.com/giantswarm/giantswarm-repo-manager/internal/tools"
 )
 
-// unknownWithoutRun is what the CircleCI state leaves unknown before a
-// reconciler run tells: which pipeline builds the repository.
-const unknownWithoutRun = inventory.CircleCIFactPipeline
-
 // TestSweepFillsOneRecordPerRepository: the full sweep over the fake org —
 // sources in one query, repositories in one page, histories in one aliased
 // batch — leaves one record per repository (declared and present, declared
@@ -75,11 +71,11 @@ func TestSweepFillsOneRecordPerRepository(t *testing.T) {
 	}
 	// CircleCI without a token: the head's ci/circleci: statuses say it builds
 	// the repository (the other systems' contexts are ignored, the worst
-	// state counts), which pipeline builds it is unknown until a reconciler
-	// run tells.
-	if ci := present.CircleCI; ci == nil || !ci.Followed || ci.Source != inventory.CircleCISourceStatuses || ci.Pipeline != "" || ci.Error != "" ||
+	// state counts), and the engine's live check says the GitHub App pipeline
+	// builds it before any reconciler run tells.
+	if ci := present.CircleCI; ci == nil || !ci.Followed || ci.Source != inventory.CircleCISourceStatuses || ci.Pipeline != inventory.CircleCIPipelineApp || ci.Error != "" ||
 		ci.Head == nil || ci.Head.State != statePending || strings.Join(ci.Head.Contexts, ",") != circleBuild+","+circlePush || ci.Head.At.IsZero() ||
-		strings.Join(ci.Unknown, ",") != unknownWithoutRun {
+		len(ci.Unknown) != 0 {
 		t.Errorf("present circleci: %+v head=%+v", ci, ci.Head)
 	}
 	if !present.Catalog.Present || present.Mapping.Team != "bumblebee" {
@@ -112,8 +108,8 @@ func TestSweepFillsOneRecordPerRepository(t *testing.T) {
 		t.Errorf("legacy: %+v setup %+v findings %+v", legacy.Declaration, legacy.Setup, legacy.Findings)
 	}
 	// No ci/circleci: status on the head and no run: CircleCI does not build
-	// it, the pipeline unknown — nothing guessed.
-	if ci := legacy.CircleCI; ci == nil || ci.Followed || ci.Head != nil || ci.Source != inventory.CircleCISourceStatuses || strings.Join(ci.Unknown, ",") != unknownWithoutRun {
+	// it, and the engine's live check finds no pipeline.
+	if ci := legacy.CircleCI; ci == nil || ci.Followed || ci.Head != nil || ci.Source != inventory.CircleCISourceStatuses || ci.Pipeline != inventory.CircleCIPipelineNone || len(ci.Unknown) != 0 {
 		t.Errorf("legacy circleci: %+v", ci)
 	}
 	stray := st.record(t, repoStray)

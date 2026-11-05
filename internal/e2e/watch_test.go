@@ -661,7 +661,7 @@ func TestWatchRepositoryWaitsForTheGitHubAppPipeline(t *testing.T) {
 	st.declared(pr, "- name: "+shinyService+"\n  componentType: service\n  gen:\n    language: go\n    flavours: [app]\n    ci:\n      generate: true\n")
 	follow := "`devctl repo follow-circleci " + org + "/" + shinyService + "` as a member of the owning team"
 	st.reported(t, pr, prURL,
-		reconcile.StepResult{Step: reconcile.StepCircleCI, Verdict: reconcile.VerdictReported, Summary: "no CircleCI status on main",
+		reconcile.StepResult{Step: reconcile.StepCircleCI, Verdict: reconcile.VerdictReported, Summary: engineNoPipeline,
 			Findings: []reconcile.Finding{{Kind: reconcile.FindingCircleCIPipelineMissing, Message: "no CircleCI pipeline builds it", Fix: follow}}},
 		reconcile.StepResult{Step: reconcile.StepRelease, Verdict: reconcile.VerdictReported, Summary: "release " + firstTag + ": no tag build",
 			Findings: []reconcile.Finding{{Kind: reconcile.FindingMissedTagBuild, Message: "release " + firstTag + " carries no CircleCI status", Fix: follow}}})
@@ -692,7 +692,7 @@ func TestWatchRepositoryFinishesOnceThePersonCreatedThePipeline(t *testing.T) {
 	st.ghs.files.merge(pr)
 	follow := "`devctl repo follow-circleci " + org + "/" + shinyService + "`"
 	st.reported(t, pr, prURL,
-		reconcile.StepResult{Step: reconcile.StepCircleCI, Verdict: reconcile.VerdictReported, Summary: "no CircleCI status on main",
+		reconcile.StepResult{Step: reconcile.StepCircleCI, Verdict: reconcile.VerdictReported, Summary: engineNoPipeline,
 			Findings: []reconcile.Finding{{Kind: reconcile.FindingCircleCIPipelineMissing, Message: "no CircleCI pipeline builds it", Fix: follow}}})
 	st.ghs.repos.publish(shinyService, firstTag)
 	if w := st.watch(t, c, pr, 0.3); w.Ready || w.Pending != tools.PhaseReleased || !strings.Contains(w.PendingReason, follow) {

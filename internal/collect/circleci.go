@@ -73,6 +73,39 @@ func applyStep(out *inventory.CircleCI, sr *reconcile.StepResult) {
 	}
 }
 
+// refineCircleCI re-derives the record's pipeline from the live check's
+// circleci step: the engine ran it in this refresh or sweep, reading the
+// same statuses the reconciler's run read, but now — after a person created
+// the GitHub App pipeline, the record says so before the next nightly run.
+// A step the check skipped, failed or could not read (finding unchecked)
+// leaves what the run said.
+func refineCircleCI(cc *inventory.CircleCI, checks *reconcile.Result) {
+	if cc == nil || checks == nil {
+		return
+	}
+	sr := checks.Step(reconcile.StepCircleCI)
+	if sr == nil || sr.Verdict == reconcile.VerdictSkipped || sr.Verdict == reconcile.VerdictFailed {
+		return
+	}
+	live := &inventory.CircleCI{}
+	applyStep(live, sr)
+	if live.Pipeline == "" {
+		return
+	}
+	cc.Pipeline = live.Pipeline
+	cc.Followed = cc.Head != nil || live.Followed
+	unknown := cc.Unknown[:0]
+	for _, u := range cc.Unknown {
+		if u != inventory.CircleCIFactPipeline && u != inventory.CircleCIFactFollowed {
+			unknown = append(unknown, u)
+		}
+	}
+	cc.Unknown = unknown
+	if len(cc.Unknown) == 0 {
+		cc.Unknown = nil
+	}
+}
+
 // oauthOnly is how the engine's circleci step starts its summary when an
 // OAuth follow builds the repository and no GitHub App pipeline does (devctl
 // pkg/reposetup/reconcile, step_circleci.go).

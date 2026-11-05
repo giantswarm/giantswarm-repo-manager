@@ -106,3 +106,45 @@ func sameHead(a, b *inventory.HeadStatus) bool {
 	}
 	return a == nil || (a.State == b.State && a.At.Equal(b.At) && strings.Join(a.Contexts, ",") == strings.Join(b.Contexts, ","))
 }
+
+// TestRefineCircleCIFromTheLiveCheck: the live check's circleci step is
+// newer than the reconciler's run and decides the pipeline; a step it
+// skipped, failed or could not read leaves the run's answer.
+func TestRefineCircleCIFromTheLiveCheck(t *testing.T) {
+	checks := func(verdict reconcile.Verdict, summary string, kinds ...reconcile.FindingKind) *reconcile.Result {
+		sr := reconcile.StepResult{Step: reconcile.StepCircleCI, Verdict: verdict, Summary: summary}
+		for _, k := range kinds {
+			sr.Findings = append(sr.Findings, reconcile.Finding{Kind: k})
+		}
+		return &reconcile.Result{Steps: []reconcile.StepResult{sr}}
+	}
+	fromRun := func() *inventory.CircleCI {
+		return &inventory.CircleCI{Pipeline: inventory.CircleCIPipelineNone, Source: inventory.CircleCISourceBoth}
+	}
+	noRun := func() *inventory.CircleCI {
+		return &inventory.CircleCI{Source: inventory.CircleCISourceStatuses, Unknown: []string{inventory.CircleCIFactPipeline, inventory.CircleCIFactFollowed}}
+	}
+	cases := []struct {
+		name     string
+		cc       *inventory.CircleCI
+		checks   *reconcile.Result
+		pipeline string
+		followed bool
+		unknown  string
+	}{
+		{"the person created the pipeline since the run", fromRun(), checks(reconcile.VerdictOK, "CircleCI statuses on main from circleci-app[bot]: GitHub App pipeline"), inventory.CircleCIPipelineApp, true, ""},
+		{"no run, the check tells", noRun(), checks(reconcile.VerdictReported, oauthOnly, reconcile.FindingCircleCIOAuthFollow), inventory.CircleCIPipelineOAuth, true, ""},
+		{"the check could not read the statuses: the run's answer", fromRun(), checks(reconcile.VerdictReported, "not checked", reconcile.FindingUnchecked), inventory.CircleCIPipelineNone, false, ""},
+		{"the check skipped the step: the run's answer", fromRun(), checks(reconcile.VerdictSkipped, "no CircleCI pipeline"), inventory.CircleCIPipelineNone, false, ""},
+		{"the check failed the step: the run's answer", fromRun(), checks(reconcile.VerdictFailed, "GitHub answered 502"), inventory.CircleCIPipelineNone, false, ""},
+		{"no check", noRun(), nil, "", false, inventory.CircleCIFactPipeline + "," + inventory.CircleCIFactFollowed},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			refineCircleCI(tc.cc, tc.checks)
+			if tc.cc.Pipeline != tc.pipeline || tc.cc.Followed != tc.followed || strings.Join(tc.cc.Unknown, ",") != tc.unknown {
+				t.Errorf("got %+v, want pipeline %q followed %v unknown %q", tc.cc, tc.pipeline, tc.followed, tc.unknown)
+			}
+		})
+	}
+}

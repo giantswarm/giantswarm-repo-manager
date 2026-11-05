@@ -147,7 +147,7 @@ func TestReleaseWatchTellsTheTeamOnce(t *testing.T) {
 		t.Errorf("missed build: %+v", p)
 	}
 	n = notices()
-	if len(n) != 2 || !strings.HasPrefix(n[1]["text"].(string), repoPresent+": release v1.3.0 (pull request #43) has no CircleCI pipeline 12 minutes after the tag, nothing was built or published — trigger the tag's pipeline by hand on CircleCI, then devctl release wait "+key+" v1.3.0 confirms it") || n[1]["link"] != "https://app.circleci.com/pipelines/github/"+key {
+	if len(n) != 2 || !strings.HasPrefix(n[1]["text"].(string), repoPresent+": release v1.3.0 (pull request #43) has no CircleCI pipeline 12 minutes after the tag, nothing was built or published — devctl repo follow-circleci "+key+" as a member of the team runs it on the GitHub App pipeline with your CircleCI login, then devctl release wait "+key+" v1.3.0 confirms it") || n[1]["link"] != "https://app.circleci.com/pipelines/github/"+key {
 		t.Fatalf("the missed build's notice: %v", n)
 	}
 	if p := st.watchReleases(t); p.Told != 0 || p.Watching != 0 {

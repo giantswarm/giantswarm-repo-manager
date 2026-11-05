@@ -16,12 +16,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   the CircleCI GitHub App pipeline from an OAuth follow (`circleci-oauth-follow`, advisory) and reports a repository
   nothing builds (`circleci-pipeline-missing`); the record's `circleci.pipeline` says which (`github-app`, `oauth`,
   `github-app+oauth`, `none`) and replaces `setupWorkflows` and `webhook`, which no engine reads any more. The release
-  watch's answer still decides the release step for the tag it read, except a tag it settled unbuilt that the
-  engine has read since.
+  watch's answer still decides the release step for the tag the engine read, except a tag it settled unbuilt that
+  the engine has read since, and for a release published after the check; a step the engine skipped for the
+  repository (customer flavour, lifecycle, no pipeline) stays skipped.
 - `watch_repository` waits in `released` while the reconciler's run finds no CircleCI pipeline, naming the fix
   (`devctl repo follow-circleci`, as a member of the owning team), instead of failing on the scaffold's unbuilt tag:
-  the reconciler creates no pipeline, the person does, and that runs the tag. A missed tag build's fix names the same
-  command.
+  the reconciler creates no pipeline, the person does, and that runs the tag. A missed tag build's fix, and the team
+  notice for a release nothing built, name the same command.
 - Advisory findings are no longer told to the team after a reconciler run (`default-icon`, `foreign-ruleset`,
   `declared-ruleset-missing`, `rulesets-not-enabled`, `open-pull-requests`, `circleci-oauth-follow`): they do not
   keep a repository from converging, and `circleci-oauth-follow` is on every repository still built by an OAuth

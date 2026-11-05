@@ -539,8 +539,9 @@ const (
 	engineCircleCI    = "CircleCI statuses on main from circleci-app[bot]: GitHub App pipeline"
 	engineReleaseJobs = "push-to-registries-release"
 	// engineNoPipeline is the circleci step's summary when nothing builds the
-	// repository.
+	// repository, engineOAuthOnly when an OAuth follow alone does.
 	engineNoPipeline = "no CircleCI status on main"
+	engineOAuthOnly  = "OAuth follow, no GitHub App pipeline"
 )
 
 // latestTag is the repository's latest release as the engine would read it
@@ -584,23 +585,30 @@ func (c *fakeChecker) Check(_ context.Context, req reconcile.Request) (*reconcil
 		<-c.hold
 	}
 	now := time.Now()
+	tag := c.latestTag(entry.Name)
 	circle := reconcile.StepResult{Step: reconcile.StepCircleCI, Verdict: reconcile.VerdictOK, Summary: engineCircleCI}
+	release := reconcile.StepResult{Step: reconcile.StepRelease, Verdict: reconcile.VerdictOK, Summary: "release " + tag + " built: " + engineReleaseJobs + " succeeded"}
 	if entry.Name == repoLegacy {
-		// The fake org's legacy repository carries no CircleCI status.
-		circle = reconcile.StepResult{Step: reconcile.StepCircleCI, Verdict: reconcile.VerdictReported, Summary: engineNoPipeline,
-			Findings: []reconcile.Finding{{Kind: reconcile.FindingCircleCIPipelineMissing, Message: "no CircleCI status on " + org + "/" + entry.Name, Fix: "devctl repo follow-circleci " + org + "/" + entry.Name}}}
+		// The legacy repository builds on an OAuth follow, as most did: its
+		// statuses come from a person, and the release step does not verify
+		// a tag such statuses cannot attribute.
+		circle = reconcile.StepResult{Step: reconcile.StepCircleCI, Verdict: reconcile.VerdictReported, Summary: engineOAuthOnly,
+			Findings: []reconcile.Finding{{Kind: reconcile.FindingCircleCIOAuthFollow, Advisory: true, Message: "the CircleCI statuses of " + org + "/" + entry.Name + " come from alice: an OAuth follow",
+				Fix: "devctl repo follow-circleci " + org + "/" + entry.Name + " --migrate"}}}
+		release = reconcile.StepResult{Step: reconcile.StepRelease, Verdict: reconcile.VerdictSkipped,
+			Summary: "release " + tag + ": built on an OAuth follow (alice), not verified from statuses"}
 	}
 	// The engine reads its circleci and release steps from the CircleCI
 	// statuses on GitHub (devctl's step_circleci.go): the GitHub App
-	// pipeline builds the repository (the legacy one: nothing does), and
-	// built its latest release.
+	// pipeline builds the repository and built its latest release; the
+	// legacy one is an OAuth follow's.
 	return &reconcile.Result{
 		Repository: org + "/" + entry.Name, Declared: org + "/" + entry.Name, Team: teamSlug, Mode: reconcile.ModeCheck, StartedAt: now, FinishedAt: now, Converged: circle.Converges(),
 		Steps: []reconcile.StepResult{
 			{Step: reconcile.StepScaffold, Verdict: reconcile.VerdictOK, Summary: "scaffold present",
 				Findings: []reconcile.Finding{{Kind: reconcile.FindingDefaultIcon, Advisory: true, Message: "the chart carries the template's icon", Fix: "replace helm/<chart>/icon.svg"}}},
 			circle,
-			{Step: reconcile.StepRelease, Verdict: reconcile.VerdictOK, Summary: "release " + c.latestTag(entry.Name) + " built: " + engineReleaseJobs + " succeeded"},
+			release,
 		},
 	}, nil
 }

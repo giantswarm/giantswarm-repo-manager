@@ -167,13 +167,15 @@ No CircleCI token. The inventory's CircleCI facts come from GitHub and the recon
 a repository from the `ci/circleci:` commit statuses on its default branch head (read with the repository, as
 the inventory App — CircleCI posts them for the projects it builds) together with the `.circleci/config.yml`
 blob; which pipeline builds it — the CircleCI GitHub App's, an OAuth follow's, both, or none (`circleci.pipeline`) —
-from the reconciler's run artifact, read from GitHub after every run (its `circleci` step). What neither source
+from the reconciler's run artifact, read from GitHub after every run (its `circleci` step), and from the engine's
+read-mode check of the same step whenever that ran after the run. What neither source
 yields, the record names as `unknown` — the last pipeline is not derivable and is not part of the record.
 `get_info` reports `circleci.source: statuses+artifact`. The engine's read-mode checks need no CircleCI client
 either: their `circleci` step reads who posted the CircleCI statuses of the default branch's recent commits
 (`circleci-app[bot]` is the GitHub App pipeline; a person is an OAuth follow, the advisory finding
 `circleci-oauth-follow`; none is `circleci-pipeline-missing`), their `release` step the tag commit's statuses from the
-GitHub App. Where the release watch read the tag's own pipeline, its answer replaces the release step for that tag.
+GitHub App. Where the release watch read the tag's own pipeline, its answer replaces the release step for that tag,
+and for a release published after the check (waiting until it has found the pipeline).
 CircleCI has no service accounts, so neither the reconciler nor this server creates a pipeline: the person does,
 with their own CircleCI login (`devctl repo follow-circleci`), and `watch_repository` waits for it naming the
 command. The record's `ci`

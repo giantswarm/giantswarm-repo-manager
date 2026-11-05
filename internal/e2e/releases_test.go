@@ -215,13 +215,14 @@ func TestReleaseWatchTellsTheTeamOnce(t *testing.T) {
 	if len(notices()) != 2 {
 		t.Errorf("a private repository without a token posts nothing: %v", notices())
 	}
-	// Its release step is the engine's, which reads the tag commit's
-	// statuses from the CircleCI GitHub App itself: an unchecked watch leaves
-	// it as the engine wrote it, and no red-release is found.
+	// Its release step is the engine's: an OAuth follow builds it, whose
+	// statuses cannot say the tag's build from a branch's, so the engine
+	// skips naming the tag; an unchecked watch has no answer to put there,
+	// and no red-release is found.
 	if legacy.Setup.Checks == nil {
 		t.Fatal("the private repository has no checks")
 	}
-	if sr := legacy.Setup.Checks.Step(reconcile.StepRelease); sr == nil || sr.Verdict != reconcile.VerdictOK || !strings.HasSuffix(sr.Summary, " built: "+engineReleaseJobs+" succeeded") {
+	if sr := legacy.Setup.Checks.Step(reconcile.StepRelease); sr == nil || sr.Verdict != reconcile.VerdictSkipped || !strings.Contains(sr.Summary, ": built on an OAuth follow") {
 		t.Errorf("the private release from the engine: %+v", sr)
 	}
 	for _, f := range legacy.Findings {

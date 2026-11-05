@@ -107,9 +107,9 @@ func TestSweepFillsOneRecordPerRepository(t *testing.T) {
 	if legacy.Declaration == nil || !legacy.Declaration.Accepted || hasKind(legacy, string(reconcile.FindingEntryRefused)) || legacy.Setup.CheckError != "" {
 		t.Errorf("legacy: %+v setup %+v findings %+v", legacy.Declaration, legacy.Setup, legacy.Findings)
 	}
-	// No ci/circleci: status on the head and no run: CircleCI does not build
-	// it, and the engine's live check finds no pipeline.
-	if ci := legacy.CircleCI; ci == nil || ci.Followed || ci.Head != nil || ci.Source != inventory.CircleCISourceStatuses || ci.Pipeline != inventory.CircleCIPipelineNone || len(ci.Unknown) != 0 {
+	// No ci/circleci: status on main's head and no run: the engine's live
+	// check reads an OAuth follow's statuses on the recent commits.
+	if ci := legacy.CircleCI; ci == nil || !ci.Followed || ci.Head != nil || ci.Source != inventory.CircleCISourceStatuses || ci.Pipeline != inventory.CircleCIPipelineOAuth || len(ci.Unknown) != 0 {
 		t.Errorf("legacy circleci: %+v", ci)
 	}
 	stray := st.record(t, repoStray)

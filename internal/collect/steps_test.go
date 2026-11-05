@@ -78,6 +78,9 @@ func TestRewriteReleaseStep(t *testing.T) {
 		{"our own waiting step, the watch settled the tag unchecked: out of reach",
 			reconcile.StepResult{Step: reconcile.StepRelease, Verdict: reconcile.VerdictOK, Summary: "release v1.2.0" + waitingForPipeline},
 			&inventory.ReleaseWatch{Tag: tag, State: inventory.ReleaseUnchecked, Reason: reasonUnknownProject, CreatedAt: after, CheckedAt: after}, "release v1.2.0: not checked (CircleCI does not know the project)", false},
+		{"skipped as not a vX.Y.Z tag: the engine's skip stands",
+			reconcile.StepResult{Step: reconcile.StepRelease, Verdict: reconcile.VerdictSkipped, Summary: "release v1.2.0: not a vX.Y.Z tag, not verified"},
+			&inventory.ReleaseWatch{Tag: tag, State: inventory.ReleaseBuilt, Pipeline: pipe, CreatedAt: published, CheckedAt: after}, "not a vX.Y.Z tag", true},
 		// Our own waiting step for a tag published before the checks (the
 		// engine's missed build within the watch's grace): the watch's
 		// later answer replaces it.

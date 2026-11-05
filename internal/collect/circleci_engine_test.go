@@ -6,6 +6,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/giantswarm/devctl/v8/pkg/reposetup"
@@ -45,9 +46,32 @@ func TestApplyStepReadsTheEnginesCircleCIStep(t *testing.T) {
 	}
 }
 
+// TestTheEnginesOAuthReleaseSkip: rewriteReleaseStep lets the release
+// watch answer a release step the engine skipped for an OAuth follow's
+// build, and no other skip, by the engine's words (builtOnOAuth). devctl's
+// own release step for a tag an OAuth follow built carries them.
+func TestTheEnginesOAuthReleaseSkip(t *testing.T) {
+	sr := engineStep(t, reconcile.StepRelease, []string{alice})
+	if sr.Verdict != reconcile.VerdictSkipped || !strings.Contains(sr.Summary, builtOnOAuth) {
+		t.Errorf("the engine's release step of an OAuth-built tag: %+v, want skipped containing %q", sr, builtOnOAuth)
+	}
+}
+
 // engineCircleCIStep runs devctl's circleci step for giantswarm/x, whose
 // commits carry one CircleCI status per poster, and returns it.
 func engineCircleCIStep(t *testing.T, posters []string) *reconcile.StepResult {
+	t.Helper()
+	sr := engineStep(t, reconcile.StepCircleCI, posters)
+	if sr.Verdict == reconcile.VerdictSkipped {
+		t.Fatalf("the engine did not read the statuses: %+v", sr)
+	}
+	return sr
+}
+
+// engineStep runs one of devctl's steps for giantswarm/x, whose commits and
+// latest release v1.0.0 carry one CircleCI status per poster, and returns
+// it.
+func engineStep(t *testing.T, step reconcile.Step, posters []string) *reconcile.StepResult {
 	t.Helper()
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
@@ -56,10 +80,13 @@ func engineCircleCIStep(t *testing.T, posters []string) *reconcile.StepResult {
 			_ = json.NewEncoder(w).Encode(map[string]any{"name": "x", "full_name": "giantswarm/x", "default_branch": mainBranch, "size": 10})
 		case "/repos/giantswarm/x/commits":
 			_ = json.NewEncoder(w).Encode([]map[string]any{{"sha": "head"}})
-		case "/repos/giantswarm/x/commits/" + mainBranch + "/statuses", "/repos/giantswarm/x/commits/head/statuses":
+		case "/repos/giantswarm/x/releases/latest":
+			_ = json.NewEncoder(w).Encode(map[string]any{"tag_name": "v1.0.0", "published_at": "2026-11-01T10:00:00Z", "created_at": "2026-11-01T10:00:00Z"})
+		case "/repos/giantswarm/x/commits/" + mainBranch + "/statuses", "/repos/giantswarm/x/commits/head/statuses", "/repos/giantswarm/x/commits/v1.0.0/statuses":
 			statuses := []map[string]any{}
 			for _, p := range posters {
-				statuses = append(statuses, map[string]any{"context": "ci/circleci: go-build", "state": "success", "creator": map[string]any{"login": p}})
+				statuses = append(statuses, map[string]any{"context": "ci/circleci: go-build", "state": "success", "creator": map[string]any{"login": p},
+					"created_at": "2026-11-01T10:05:00Z"})
 			}
 			_ = json.NewEncoder(w).Encode(statuses)
 		case "/repos/giantswarm/x/pulls":
@@ -79,13 +106,13 @@ func engineCircleCIStep(t *testing.T, posters []string) *reconcile.StepResult {
 		Rendered: "- name: x\n  componentType: service\n  gen:\n    language: go\n    flavours: [app]\n    ci:\n      generate: true\n"}
 	runner := &reconcile.Runner{GitHub: gh, Log: io.Discard}
 	res, err := runner.Run(context.Background(), reconcile.Request{Owner: "giantswarm", Team: teamBumblebee, Entry: entry,
-		Mode: reconcile.ModeCheck, Steps: []reconcile.Step{reconcile.StepCircleCI}})
+		Mode: reconcile.ModeCheck, Steps: []reconcile.Step{step}})
 	if err != nil {
 		t.Fatal(err)
 	}
-	sr := res.Step(reconcile.StepCircleCI)
-	if sr == nil || sr.Verdict == reconcile.VerdictSkipped || sr.Verdict == reconcile.VerdictFailed {
-		t.Fatalf("the engine did not read the statuses: %+v", res.Steps)
+	sr := res.Step(step)
+	if sr == nil || sr.Verdict == reconcile.VerdictFailed {
+		t.Fatalf("the engine's %s step: %+v", step, res.Steps)
 	}
 	return sr
 }

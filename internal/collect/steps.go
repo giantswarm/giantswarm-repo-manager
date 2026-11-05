@@ -36,8 +36,8 @@ func converge(res *reconcile.Result) {
 // for the pipeline is waiting too. A waiting step the watch can no longer
 // answer (it settled the tag unchecked) says the tag is out of reach until
 // the next check. A step the engine skipped for the repository (a flavour,
-// a lifecycle, no pipeline) is not the watch's to answer; one it skipped
-// naming the tag (built on an OAuth follow) is. A watch without an answer,
+// a lifecycle, no pipeline) or for the tag (not vX.Y.Z) is not the watch's
+// to answer; one it skipped for an OAuth follow's build is. A watch without an answer,
 // or one about another tag published before the checks — an older release,
 // read again after the checks or carried over by keepRelease — leaves the
 // engine's step. Converged follows.
@@ -47,7 +47,7 @@ func rewriteReleaseStep(rec *inventory.Record) {
 		return
 	}
 	sr := rec.Setup.Checks.Step(reconcile.StepRelease)
-	if sr == nil || sr.Verdict == reconcile.VerdictSkipped && !strings.HasPrefix(sr.Summary, "release ") {
+	if sr == nil || sr.Verdict == reconcile.VerdictSkipped && !strings.Contains(sr.Summary, builtOnOAuth) {
 		return
 	}
 	checked := *rec.Setup.CheckedAt
@@ -78,6 +78,12 @@ func rewriteReleaseStep(rec *inventory.Record) {
 	*sr = done
 	converge(rec.Setup.Checks)
 }
+
+// builtOnOAuth is in the engine's release step skipped for a tag an OAuth
+// follow built, which its statuses cannot attribute (devctl
+// pkg/reposetup/reconcile, verifyRelease): "release <tag>: built on an OAuth
+// follow (…), not verified from statuses; …".
+const builtOnOAuth = ": built on an OAuth follow"
 
 // waitingForPipeline ends the release step written while the watch waits
 // for a tag's pipeline; the engine never words a step so.

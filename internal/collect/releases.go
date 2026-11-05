@@ -288,7 +288,8 @@ func (c *Collector) watchRelease(ctx context.Context, name string, node *release
 	}
 	w := rec.Setup.Release
 	// The page read the release with its tag commit's statuses: the record
-	// takes them, so its release step decides from current facts.
+	// takes them for the reader (reality.latestRelease.build); the release
+	// step is the engine's or the watch's.
 	read := readLatestRelease(rec, node)
 	var out watched
 	switch {

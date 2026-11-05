@@ -22,12 +22,12 @@ import (
 )
 
 const (
-	testRepository  = "giantswarm/bumblebee-repo"
-	testRunURL      = "https://github.com/giantswarm/github/actions/runs/123"
-	testPRURL       = "https://github.com/giantswarm/github/pull/4711"
-	testService     = "service"
-	testFlavourApp  = "app"
-	testNotScanned  = "renovate-not-scanned"
+	testRepository = "giantswarm/bumblebee-repo"
+	testRunURL     = "https://github.com/giantswarm/github/actions/runs/123"
+	testPRURL      = "https://github.com/giantswarm/github/pull/4711"
+	testService    = "service"
+	testFlavourApp = "app"
+	testNotScanned = "renovate-not-scanned"
 )
 
 // record is a declared repository whose last run followed change with the

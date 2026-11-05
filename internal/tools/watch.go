@@ -502,7 +502,8 @@ func (w *watcher) withoutRelease() bool {
 // release, and a tag no pipeline built (missed-tag-build) is nobody's to
 // wait for, unless no GitHub App pipeline exists yet: the reconciler creates
 // none, the person creates it with their own CircleCI login and it runs the
-// tag then, so the phase waits naming the command (awaitingPipeline).
+// tag then, so the phase waits naming the command (awaitingPipeline) until
+// the GitHub App pipeline has built the tag (appBuiltTag).
 // Without the inventory App the release step alone decides, and the pending
 // phase says so.
 func (w *watcher) released(ctx context.Context) (outcome, error) {
@@ -532,25 +533,39 @@ func (w *watcher) released(ctx context.Context) (outcome, error) {
 		return undecided(fmt.Sprintf("read the statuses of %s/%s@%s as the inventory App: %v", w.org(), w.name, tag, err)), nil
 	}
 	if !w.tagPipelineReported(tag, st) {
-		// While the run found no pipeline, only a CircleCI status hands the
-		// commit to the statuses — the run may predate the pipeline the
-		// person created; another system's status says nothing of it.
 		o := w.releaseStepVerdict(tag)
-		if o.failed || st.GetTotalCount() == 0 || o.reason != "" && !circleCIReported(st) {
+		if o.failed || st.GetTotalCount() == 0 {
 			return o, nil
+		}
+		if o.reason != "" {
+			// The run found no pipeline, and may predate the one the person
+			// created: only a build of the tag on the GitHub App pipeline
+			// hands the commit to the statuses, by the engine's rule.
+			built, err := w.appBuiltTag(ctx, tag, rel.GetPublishedAt().Time)
+			switch {
+			case err != nil:
+				return undecided(fmt.Sprintf("read the CircleCI statuses of %s/%s@%s as the inventory App: %v", w.org(), w.name, tag, err)), nil
+			case !built:
+				return o, nil
+			}
 		}
 	}
 	return w.statusesVerdict(ctx, tag, st)
 }
 
-// circleCIReported says whether CircleCI posted a status on the commit.
-func circleCIReported(st *github.CombinedStatus) bool {
-	for _, s := range st.Statuses {
-		if strings.HasPrefix(s.GetContext(), inventory.CircleCIContext) {
-			return true
-		}
+// appBuiltTag says whether the CircleCI GitHub App posted a status of a
+// build of the tag on its commit, by the engine's rule (devctl
+// reconcile.TagBuildStatuses): a workflow started after the release.
+// Another system's status, an OAuth follow's, and the branch build of the
+// commit that started before the release are not one. A branch build
+// started after the release is, as for the engine: statuses do not name
+// the ref.
+func (w *watcher) appBuiltTag(ctx context.Context, tag string, published time.Time) (bool, error) {
+	statuses, err := reconcile.ListCircleCIStatuses(ctx, w.t.d.App.Installation(), w.org(), w.name, tag)
+	if err != nil {
+		return false, err
 	}
-	return false
+	return len(reconcile.TagBuildStatuses(reconcile.AppStatuses(statuses), published)) > 0, nil
 }
 
 // readsTagPipeline says whether the manager reads the repository's tag

@@ -698,13 +698,24 @@ func TestWatchRepositoryFinishesOnceThePersonCreatedThePipeline(t *testing.T) {
 	if w := st.watch(t, c, pr, 0.3); w.Ready || w.Pending != tools.PhaseReleased || !strings.Contains(w.PendingReason, follow) {
 		t.Fatalf("before the pipeline: %+v", w)
 	}
-	// Another system's status on the commit says nothing of CircleCI: the
-	// phase still waits for the pipeline.
+	// Another system's status on the commit, an OAuth follow's CircleCI
+	// statuses, the GitHub App's branch build that started before the
+	// release: none is a build of the tag on the GitHub App pipeline, and the
+	// phase still waits for it.
 	st.ghs.repos.report(shinyService, stateSuccess, "license/cla")
 	if w := st.watch(t, c, pr, 0.3); w.Ready || w.Pending != tools.PhaseReleased || !strings.Contains(w.PendingReason, follow) {
 		t.Fatalf("a non-CircleCI status before the pipeline: %+v", w)
 	}
 	st.ghs.repos.report(shinyService, stateSuccess, greenRelease...)
+	st.ghs.repos.postedBy(shinyService, alice, 0, greenRelease...)
+	if w := st.watch(t, c, pr, 0.3); w.Ready || w.Pending != tools.PhaseReleased || !strings.Contains(w.PendingReason, follow) {
+		t.Fatalf("an OAuth follow's statuses: %+v", w)
+	}
+	st.ghs.repos.postedBy(shinyService, reconcile.CircleCIAppLogin, time.Hour, greenRelease...)
+	if w := st.watch(t, c, pr, 0.3); w.Ready || w.Pending != tools.PhaseReleased || !strings.Contains(w.PendingReason, follow) {
+		t.Fatalf("the App's branch build from before the release: %+v", w)
+	}
+	st.ghs.repos.postedBy(shinyService, reconcile.CircleCIAppLogin, -time.Hour, greenRelease...)
 	if w := st.watch(t, c, pr, 3); !w.Ready || w.Failure != nil || w.PendingReason != "" {
 		t.Fatalf("the tag built on the person's pipeline: %+v failure=%+v", w, w.Failure)
 	}

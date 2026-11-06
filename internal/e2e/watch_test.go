@@ -648,10 +648,11 @@ func TestWatchRepositoryReportsATagNoPipelineBuilt(t *testing.T) {
 // TestWatchRepositoryWaitsForTheGitHubAppPipeline: the reconciler holds no
 // CircleCI identity and creates no pipeline, so the run after the creation
 // finds none (circleci-pipeline-missing) and the scaffold's tag unbuilt
-// (missed-tag-build). The released phase waits instead of failing, naming
-// the finding's fix: the person creates the GitHub App pipeline with their
-// own CircleCI login, which runs the tag. Once the tag pipeline's own jobs
-// report, the release is ready.
+// (missed-tag-build). The released phase waits instead of failing, saying
+// that a member of the owning team creates the GitHub App pipeline with
+// their own CircleCI login, `devctl repo follow-circleci` at once or their
+// devctl on a later command; creating it runs the tag. Once the tag
+// pipeline's own jobs report, the release is ready.
 func TestWatchRepositoryWaitsForTheGitHubAppPipeline(t *testing.T) {
 	st := newStack(t)
 	c := st.as(t, aliceToken)
@@ -659,7 +660,12 @@ func TestWatchRepositoryWaitsForTheGitHubAppPipeline(t *testing.T) {
 	pr := created.PullRequest.Number
 	st.ghs.repos.put(shinyService, ".circleci/workflows.yml", fakeCIChartWorkflows)
 	st.declared(pr, "- name: "+shinyService+"\n  componentType: service\n  gen:\n    language: go\n    flavours: [app]\n    ci:\n      generate: true\n")
-	follow := "`devctl repo follow-circleci " + org + "/" + shinyService + "` as a member of the owning team"
+	cmd := "`devctl repo follow-circleci " + org + "/" + shinyService + "`"
+	follow := cmd + " as a member of the owning team: it creates the GitHub App pipeline with your CircleCI login"
+	automatic := cmd + " sets it up now, run by a member of the owning team with their CircleCI login " +
+		"(`devctl auth login --circleci-only`, Write access); otherwise devctl v8.164.0 or later sets it up on such a " +
+		"member's next devctl command once they are signed in to muster (`devctl auth login --muster-only`), " +
+		"trying at most once every six hours"
 	st.reported(t, pr, prURL,
 		reconcile.StepResult{Step: reconcile.StepCircleCI, Verdict: reconcile.VerdictReported, Summary: engineNoPipeline,
 			Findings: []reconcile.Finding{{Kind: reconcile.FindingCircleCIPipelineMissing, Message: "no CircleCI pipeline builds it", Fix: follow}}},
@@ -669,7 +675,7 @@ func TestWatchRepositoryWaitsForTheGitHubAppPipeline(t *testing.T) {
 
 	w := st.watch(t, c, pr, 0.3)
 	if w.Ready || w.Failure != nil || w.Pending != tools.PhaseReleased || names(w.Phases) != throughSetUp ||
-		!strings.Contains(w.PendingReason, "no CircleCI GitHub App pipeline builds "+org+"/"+shinyService+" yet") || !strings.Contains(w.PendingReason, follow) {
+		!strings.Contains(w.PendingReason, "no CircleCI GitHub App pipeline builds "+org+"/"+shinyService+" yet") || !strings.Contains(w.PendingReason, automatic) {
 		t.Fatalf("no GitHub App pipeline yet: %+v failure=%+v", w, w.Failure)
 	}
 	// An OAuth follow built the tag, its chart jobs (which only the tag
@@ -677,7 +683,7 @@ func TestWatchRepositoryWaitsForTheGitHubAppPipeline(t *testing.T) {
 	oauth := []string{circleSetup, circleBuild, circleChart, circlePushChart}
 	st.ghs.repos.report(shinyService, stateSuccess, oauth...)
 	st.ghs.repos.postedBy(shinyService, alice, 0, oauth...)
-	if w = st.watch(t, c, pr, 0.3); w.Ready || w.Pending != tools.PhaseReleased || !strings.Contains(w.PendingReason, follow) {
+	if w = st.watch(t, c, pr, 0.3); w.Ready || w.Pending != tools.PhaseReleased || !strings.Contains(w.PendingReason, automatic) {
 		t.Fatalf("an OAuth follow's tag build: %+v failure=%+v", w, w.Failure)
 	}
 	st.ghs.repos.postedBy(shinyService, reconcile.CircleCIAppLogin, 0, oauth...)

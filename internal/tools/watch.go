@@ -785,7 +785,7 @@ func (w *watcher) awaitingPipeline() string {
 			"`devctl repo follow-circleci %s` sets it up now, run by a member of the owning team with their CircleCI login "+
 			"(`devctl auth login --circleci-only`, Write access; a repository admin where CircleCI refuses the write)", slug, slug)
 		if w.listedPending {
-			reason += "; otherwise devctl v8.164.0 or later sets it up on such a member's next devctl command once they are " +
+			reason += "; otherwise devctl v8.164.0 or later sets it up on such a member's later devctl command once they are " +
 				"signed in to muster (`devctl auth login --muster-only`), at most once every six hours, " +
 				"unless CI or DEVCTL_NO_CIRCLECI_PENDING is set"
 		}
@@ -794,13 +794,27 @@ func (w *watcher) awaitingPipeline() string {
 	return ""
 }
 
-// readListedPending reads whether the repository's inventory record carries
-// circleci-pipeline-missing: the records devctl's pending pass picks. A read
-// that fails promises nothing.
+// readListedPending reads whether devctl's pending pass picks the
+// repository: its inventory record carries circleci-pipeline-missing, and
+// its list_repositories row is one the pass keeps (pendingRow). A read that
+// fails promises nothing.
 func (w *watcher) readListedPending(ctx context.Context) {
 	rec, err := w.t.d.Inventory.Get(ctx, w.org()+"/"+w.name)
-	w.listedPending = err == nil && hasFinding(rec, string(reconcile.FindingCircleCIPipelineMissing))
+	w.listedPending = err == nil && hasFinding(rec, string(reconcile.FindingCircleCIPipelineMissing)) &&
+		pendingRow(row(rec, 0, time.Now()))
 }
+
+// pendingRow says whether devctl v8.164.0's pending pass keeps a
+// list_repositories row (devctl cmd/repo/followcircleci, pending.go): one
+// with a team, on GitHub and not archived, whose lifecycle is production or
+// unset. A deprecated repository, for one, is left alone.
+func pendingRow(r Row) bool {
+	return r.Team != "" && !r.Gone && !r.Archived && (r.Lifecycle == "" || r.Lifecycle == lifecycleProduction)
+}
+
+// lifecycleProduction is an entry's lifecycle in production, as devctl's
+// pending pass compares it.
+const lifecycleProduction = "production"
 
 // newestStatus is when the newest of the combined status' statuses was
 // posted.

@@ -25,7 +25,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   on the scaffold's unbuilt tag: the reconciler creates no pipeline, a member of the owning team does with their
   CircleCI login (Write access; a repository admin where CircleCI refuses the write), and that runs the tag. The wait
   names `devctl repo follow-circleci` to do it at once and, while the repository's record carries
-  `circleci-pipeline-missing`, says devctl v8.164.0 and later sets it up on the member's next devctl command once they
+  `circleci-pipeline-missing`, says devctl v8.164.0 and later sets it up on the member's later devctl command once they
   are signed in to muster, at most once every six hours, unless `CI` or `DEVCTL_NO_CIRCLECI_PENDING` is set. A missed
   tag build's fix, and the team notice for a release nothing built, name the same command.
 - Advisory findings are no longer told to the team after a reconciler run (`default-icon`, `foreign-ruleset`,

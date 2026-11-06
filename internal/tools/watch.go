@@ -255,9 +255,9 @@ type watcher struct {
 	// pipeline is the release's tag pipeline on CircleCI once found; later
 	// reads list its workflows alone.
 	pipeline *circleciclient.Pipeline
-	// listedPending says the repository's inventory record carries
-	// circleci-pipeline-missing, read on every released read: devctl's
-	// pending pass sets up the repositories whose records do.
+	// listedPending says devctl's pending pass picks the repository, read on
+	// every released read (readListedPending): its record carries
+	// circleci-pipeline-missing and its row passes pendingRow.
 	listedPending bool
 }
 
@@ -767,10 +767,12 @@ func (w *watcher) releaseStepVerdict(tag string) outcome {
 // login (Write access; a repository admin where CircleCI refuses the
 // write): `devctl repo follow-circleci` at once. devctl v8.164.0 and later
 // also sets up the pending pipelines of its person's teams on a later
-// command, picking them from the inventory records that carry the finding;
-// the reason promises that only while this repository's record does
-// (listedPending), so it never names a set-up that will not come. The
-// command comes first: it is what the person can do now. Empty otherwise.
+// command, picking the repositories whose records carry the finding and
+// whose rows it keeps (pendingRow: a team, on GitHub, not archived, in
+// production or without a lifecycle); the reason promises that only for a
+// repository the pass picks (listedPending), so it never names a set-up
+// that will not come. The command comes first: it is what the person can
+// do now. Empty otherwise.
 func (w *watcher) awaitingPipeline() string {
 	s := w.run.Result.Step(reconcile.StepCircleCI)
 	if s == nil {

@@ -21,10 +21,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   repository (customer flavour, lifecycle, no pipeline) stays skipped. A missed tag build the engine reports while
   the watch still waits within its longer grace reads `waiting for the tag's pipeline`, and one the watch can no
   longer read reads `not checked` (finding `unchecked`) until the next check.
-- `watch_repository` waits in `released` while the reconciler's run finds no CircleCI pipeline, naming the fix
-  (`devctl repo follow-circleci`, as a member of the owning team), instead of failing on the scaffold's unbuilt tag:
-  the reconciler creates no pipeline, the person does, and that runs the tag. A missed tag build's fix, and the team
-  notice for a release nothing built, name the same command.
+- `watch_repository` waits in `released` while the reconciler's run finds no CircleCI pipeline, instead of failing
+  on the scaffold's unbuilt tag: the reconciler creates no pipeline, a member of the owning team does with their
+  CircleCI login (Write access), and that runs the tag. The wait names `devctl repo follow-circleci` to do it at
+  once, and says devctl v8.164.0 and later sets it up on the member's next devctl command once they are signed in to
+  muster, at most once every six hours. A missed tag build's fix, and the team notice for a release nothing built,
+  name the same command.
 - Advisory findings are no longer told to the team after a reconciler run (`default-icon`, `foreign-ruleset`,
   `declared-ruleset-missing`, `rulesets-not-enabled`, `open-pull-requests`, `circleci-oauth-follow`): they do not
   keep a repository from converging, and `circleci-oauth-follow` is on every repository still built by an OAuth

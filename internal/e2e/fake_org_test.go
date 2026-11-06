@@ -531,6 +531,19 @@ type fakeChecker struct {
 	// release answers a repository's latest release tag, as the engine's
 	// release step would read it; nil is the present tag.
 	release func(name string) string
+	// unbuilt are the repositories no CircleCI pipeline builds: the circleci
+	// step reports circleci-pipeline-missing for them (unbuild).
+	unbuilt map[string]bool
+}
+
+// unbuild makes the engine's circleci step find no pipeline for name.
+func (c *fakeChecker) unbuild(name string) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.unbuilt == nil {
+		c.unbuilt = map[string]bool{}
+	}
+	c.unbuilt[name] = true
 }
 
 // engineCircleCI and engineReleaseJobs are the fake engine's circleci step
@@ -580,6 +593,7 @@ func (c *fakeChecker) Check(_ context.Context, req reconcile.Request) (*reconcil
 		c.overrides = map[string][]byte{}
 	}
 	c.overrides[entry.Name] = req.CodeownersOverride
+	unbuilt := c.unbuilt[entry.Name]
 	c.mu.Unlock()
 	if c.hold != nil {
 		<-c.hold
@@ -588,6 +602,11 @@ func (c *fakeChecker) Check(_ context.Context, req reconcile.Request) (*reconcil
 	tag := c.latestTag(entry.Name)
 	circle := reconcile.StepResult{Step: reconcile.StepCircleCI, Verdict: reconcile.VerdictOK, Summary: engineCircleCI}
 	release := reconcile.StepResult{Step: reconcile.StepRelease, Verdict: reconcile.VerdictOK, Summary: "release " + tag + " built: " + engineReleaseJobs + " succeeded"}
+	if unbuilt {
+		circle = reconcile.StepResult{Step: reconcile.StepCircleCI, Verdict: reconcile.VerdictReported, Summary: engineNoPipeline,
+			Findings: []reconcile.Finding{{Kind: reconcile.FindingCircleCIPipelineMissing, Message: "no CircleCI status on " + org + "/" + entry.Name,
+				Fix: "devctl repo follow-circleci " + org + "/" + entry.Name}}}
+	}
 	if entry.Name == repoLegacy {
 		// The legacy repository builds on an OAuth follow, as most did: its
 		// statuses come from a person, and the release step does not verify

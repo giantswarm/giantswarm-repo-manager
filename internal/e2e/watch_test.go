@@ -663,9 +663,13 @@ func TestWatchRepositoryWaitsForTheGitHubAppPipeline(t *testing.T) {
 	cmd := "`devctl repo follow-circleci " + org + "/" + shinyService + "`"
 	follow := cmd + " as a member of the owning team: it creates the GitHub App pipeline with your CircleCI login"
 	automatic := cmd + " sets it up now, run by a member of the owning team with their CircleCI login " +
-		"(`devctl auth login --circleci-only`, Write access); otherwise devctl v8.164.0 or later sets it up on such a " +
-		"member's next devctl command once they are signed in to muster (`devctl auth login --muster-only`), " +
-		"trying at most once every six hours"
+		"(`devctl auth login --circleci-only`, Write access; a repository admin where CircleCI refuses the write); " +
+		"otherwise devctl v8.164.0 or later sets it up on such a member's next devctl command once they are signed in " +
+		"to muster (`devctl auth login --muster-only`), at most once every six hours, unless CI or " +
+		"DEVCTL_NO_CIRCLECI_PENDING is set"
+	// The engine's live check finds no pipeline either: the record carries
+	// circleci-pipeline-missing, which devctl's pending pass reads.
+	st.checker.unbuild(shinyService)
 	st.reported(t, pr, prURL,
 		reconcile.StepResult{Step: reconcile.StepCircleCI, Verdict: reconcile.VerdictReported, Summary: engineNoPipeline,
 			Findings: []reconcile.Finding{{Kind: reconcile.FindingCircleCIPipelineMissing, Message: "no CircleCI pipeline builds it", Fix: follow}}},
@@ -709,7 +713,10 @@ func TestWatchRepositoryFinishesOnceThePersonCreatedThePipeline(t *testing.T) {
 		reconcile.StepResult{Step: reconcile.StepCircleCI, Verdict: reconcile.VerdictReported, Summary: engineNoPipeline,
 			Findings: []reconcile.Finding{{Kind: reconcile.FindingCircleCIPipelineMissing, Message: "no CircleCI pipeline builds it", Fix: follow}}})
 	st.ghs.repos.publish(shinyService, firstTag)
-	if w := st.watch(t, c, pr, 0.3); w.Ready || w.Pending != tools.PhaseReleased || !strings.Contains(w.PendingReason, follow) {
+	// The record's live check found the pipeline already (the run predates
+	// it): no automatic set-up is promised, the command is named.
+	if w := st.watch(t, c, pr, 0.3); w.Ready || w.Pending != tools.PhaseReleased || !strings.Contains(w.PendingReason, follow) ||
+		strings.Contains(w.PendingReason, "next devctl command") {
 		t.Fatalf("before the pipeline: %+v", w)
 	}
 	// Another system's status on the commit, an OAuth follow's CircleCI

@@ -255,6 +255,10 @@ type watcher struct {
 	// pipeline is the release's tag pipeline on CircleCI once found; later
 	// reads list its workflows alone.
 	pipeline *circleciclient.Pipeline
+	// listedPending says the repository's inventory record carries
+	// circleci-pipeline-missing, read on every released read: devctl's
+	// pending pass sets up the repositories whose records do.
+	listedPending bool
 }
 
 // outcome is what one read of a phase found: done at a time, failed for a
@@ -502,12 +506,13 @@ func (w *watcher) withoutRelease() bool {
 // release, and a tag no pipeline built (missed-tag-build) is nobody's to
 // wait for, unless no GitHub App pipeline exists yet: the reconciler creates
 // none, a member of the owning team creates it with their own CircleCI login
-// (`devctl repo follow-circleci`, or the member's devctl on a later command)
+// (`devctl repo follow-circleci`, or their devctl on a later command)
 // and it runs the tag then, so the phase waits saying so (awaitingPipeline)
 // until the GitHub App pipeline has built the tag (appBuiltTag).
 // Without the inventory App the release step alone decides, and the pending
 // phase says so.
 func (w *watcher) released(ctx context.Context) (outcome, error) {
+	w.readListedPending(ctx)
 	rel, resp, err := w.p.gh.Repositories.GetLatestRelease(ctx, w.org(), w.name)
 	switch {
 	case notFound(resp, err):
@@ -759,28 +764,42 @@ func (w *watcher) releaseStepVerdict(tag string) outcome {
 // reconciler run's circleci step found no CircleCI pipeline (the finding
 // circleci-pipeline-missing): the reconciler holds no CircleCI identity and
 // creates none, so a member of the owning team does with their CircleCI
-// login (Write access): `devctl repo follow-circleci` at once, else devctl
-// v8.164.0 and later, signed in to muster too, sets up the member's teams'
-// pending pipelines on a later command, trying at most once every six hours.
-// The command comes first: it is what the person can do now. Empty
-// otherwise.
+// login (Write access; a repository admin where CircleCI refuses the
+// write): `devctl repo follow-circleci` at once. devctl v8.164.0 and later
+// also sets up the pending pipelines of its person's teams on a later
+// command, picking them from the inventory records that carry the finding;
+// the reason promises that only while this repository's record does
+// (listedPending), so it never names a set-up that will not come. The
+// command comes first: it is what the person can do now. Empty otherwise.
 func (w *watcher) awaitingPipeline() string {
 	s := w.run.Result.Step(reconcile.StepCircleCI)
 	if s == nil {
 		return ""
 	}
 	for _, f := range s.Findings {
-		if f.Kind == reconcile.FindingCircleCIPipelineMissing {
-			slug := w.org() + "/" + w.name
-			return fmt.Sprintf("no CircleCI GitHub App pipeline builds %s yet, so nothing builds the release: "+
-				"`devctl repo follow-circleci %s` sets it up now, run by a member of the owning team with their CircleCI login "+
-				"(`devctl auth login --circleci-only`, Write access); otherwise devctl v8.164.0 or later sets it up on such a "+
-				"member's next devctl command once they are signed in to muster (`devctl auth login --muster-only`), "+
-				"trying at most once every six hours (%s)",
-				slug, slug, w.run.RunURL)
+		if f.Kind != reconcile.FindingCircleCIPipelineMissing {
+			continue
 		}
+		slug := w.org() + "/" + w.name
+		reason := fmt.Sprintf("no CircleCI GitHub App pipeline builds %s yet, so nothing builds the release: "+
+			"`devctl repo follow-circleci %s` sets it up now, run by a member of the owning team with their CircleCI login "+
+			"(`devctl auth login --circleci-only`, Write access; a repository admin where CircleCI refuses the write)", slug, slug)
+		if w.listedPending {
+			reason += "; otherwise devctl v8.164.0 or later sets it up on such a member's next devctl command once they are " +
+				"signed in to muster (`devctl auth login --muster-only`), at most once every six hours, " +
+				"unless CI or DEVCTL_NO_CIRCLECI_PENDING is set"
+		}
+		return reason + " (" + w.run.RunURL + ")"
 	}
 	return ""
+}
+
+// readListedPending reads whether the repository's inventory record carries
+// circleci-pipeline-missing: the records devctl's pending pass picks. A read
+// that fails promises nothing.
+func (w *watcher) readListedPending(ctx context.Context) {
+	rec, err := w.t.d.Inventory.Get(ctx, w.org()+"/"+w.name)
+	w.listedPending = err == nil && hasFinding(rec, string(reconcile.FindingCircleCIPipelineMissing))
 }
 
 // newestStatus is when the newest of the combined status' statuses was

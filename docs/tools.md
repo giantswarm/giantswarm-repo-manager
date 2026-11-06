@@ -566,7 +566,7 @@ Also the review notices a person sees before the pull request exists. Run it wit
 ```text
 After create_repository, follow the new repository until ready or a phase fails. Call again while changed or pending.
 
-Phases: declared, merged, created, scaffolded, setUp, released. Returns when ready, when a phase fails (failure says why; the watch ends), when a phase completes (changed: true — tell the person) or at timeout (pending names the phase); pendingReason says what is awaited. A repository without a release (withoutRelease: true) is ready once set up. Without a CircleCI GitHub App pipeline, released stays pending; pendingReason names the command that creates it.
+Phases: declared, merged, created, scaffolded, setUp, released. Returns when ready, when a phase fails (failure says why; the watch ends), when a phase completes (changed: true — tell the person) or at timeout (pending names the phase); pendingReason says what is awaited. A repository without a release (withoutRelease: true) is ready once set up. Without a CircleCI GitHub App pipeline, released stays pending; pendingReason says how it gets set up.
 ```
 
 ```json

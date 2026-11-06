@@ -133,7 +133,7 @@ func (t *tools) registerWatch(s *mcpserver.MCPServer) {
 			"Phases: declared, merged, created, scaffolded, setUp, released. Returns when ready, when a phase fails (failure says why; the watch ends), "+
 				"when a phase completes (changed: true — tell the person) or at timeout (pending names the phase); pendingReason says what is awaited. "+
 				"A repository without a release (withoutRelease: true) is ready once set up. "+
-				"Without a CircleCI GitHub App pipeline, released stays pending; pendingReason names the command that creates it."),
+				"Without a CircleCI GitHub App pipeline, released stays pending; pendingReason says how it gets set up."),
 		readOnly(),
 		mcp.WithString(argRepository, mcp.Required(), mcp.Description("Repository name, with or without the org.")),
 		mcp.WithNumber(argPullRequest, mcp.Required(), mcp.Description("The declaration pull request's number in the team files repository (create_repository's pullRequest.number).")),
@@ -501,9 +501,10 @@ func (w *watcher) withoutRelease() bool {
 // builds too: a branch pipeline's green statuses there never make the
 // release, and a tag no pipeline built (missed-tag-build) is nobody's to
 // wait for, unless no GitHub App pipeline exists yet: the reconciler creates
-// none, the person creates it with their own CircleCI login and it runs the
-// tag then, so the phase waits naming the command (awaitingPipeline) until
-// the GitHub App pipeline has built the tag (appBuiltTag).
+// none, a member of the owning team creates it with their own CircleCI login
+// (`devctl repo follow-circleci`, or the member's devctl on a later command)
+// and it runs the tag then, so the phase waits saying so (awaitingPipeline)
+// until the GitHub App pipeline has built the tag (appBuiltTag).
 // Without the inventory App the release step alone decides, and the pending
 // phase says so.
 func (w *watcher) released(ctx context.Context) (outcome, error) {
@@ -757,7 +758,12 @@ func (w *watcher) releaseStepVerdict(tag string) outcome {
 // awaitingPipeline is the released phase's pending reason while the
 // reconciler run's circleci step found no CircleCI pipeline (the finding
 // circleci-pipeline-missing): the reconciler holds no CircleCI identity and
-// creates none, so the person does, with the finding's fix. Empty otherwise.
+// creates none, so a member of the owning team does with their CircleCI
+// login (Write access): `devctl repo follow-circleci` at once, else devctl
+// v8.164.0 and later, signed in to muster too, sets up the member's teams'
+// pending pipelines on a later command, trying at most once every six hours.
+// The command comes first: it is what the person can do now. Empty
+// otherwise.
 func (w *watcher) awaitingPipeline() string {
 	s := w.run.Result.Step(reconcile.StepCircleCI)
 	if s == nil {
@@ -765,7 +771,13 @@ func (w *watcher) awaitingPipeline() string {
 	}
 	for _, f := range s.Findings {
 		if f.Kind == reconcile.FindingCircleCIPipelineMissing {
-			return fmt.Sprintf("no CircleCI GitHub App pipeline builds %s/%s yet, so nothing builds the release: %s (%s)", w.org(), w.name, f.Fix, w.run.RunURL)
+			slug := w.org() + "/" + w.name
+			return fmt.Sprintf("no CircleCI GitHub App pipeline builds %s yet, so nothing builds the release: "+
+				"`devctl repo follow-circleci %s` sets it up now, run by a member of the owning team with their CircleCI login "+
+				"(`devctl auth login --circleci-only`, Write access); otherwise devctl v8.164.0 or later sets it up on such a "+
+				"member's next devctl command once they are signed in to muster (`devctl auth login --muster-only`), "+
+				"trying at most once every six hours (%s)",
+				slug, slug, w.run.RunURL)
 		}
 	}
 	return ""

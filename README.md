@@ -23,10 +23,10 @@ exposes it, with the repository lifecycle, as MCP tools with the prefix `giantsw
 | `refresh_repository` | rebuild one record now — writes the inventory cache, nothing on GitHub |
 | `validate_repository` | the dry run of one or more new declarations: the engine's rendered entries with defaults, the implied template and options, the name check through the App, the creation rules' refusals as data, and the guard notices a person sees before any pull request exists (`team-review` for an author outside the owning team and team-planeteers, `batch-review` above three entries); every entry is rendered with `align: true` (the creation is the repository's opt-in to alignment), `align: false` is refused |
 | `create_repository` | the declaration pull request adding the entries — each with `align: true`, the repository's opt-in to alignment — to `repositories/<team>.yaml` as the caller, reviewed by the owning team; once it merges, the reconciler creates each repository as its App, pushes the scaffold and sets it up, so no owner role is needed. The pull request commits the entry `validate_repository` rendered, the creation defaults (`gen.ci.generate: true`) written out, and each repository's `firstRelease` says whether v0.1.0 follows on its own. The record expects the reconciler run of that pull request (`setup.pendingRun`, as after an Align now), so the inventory reads its artifact within the pending interval |
-| `watch_repository` | follows a new repository to readiness after `create_repository`, blocking up to `timeout` seconds (default 120, at most 150): the phases `declared`, `merged`, `created`, `scaffolded`, `setUp` (the reconciler run of the pull request, or a later run that finished after the merge, its failed steps and findings) and `released` (the first release with green CircleCI statuses; while CircleCI is silent the run's release step decides), each with its timestamp and duration — a repository whose release workflow is not auto-release (`gen.ci.releaseWorkflow`, else auto-release with `gen.ci.generate: true`) is ready once set up, with `withoutRelease`, and one without CI (`gen.ci.generate` false or absent, `withoutCI`) that auto-release still releases is released once its release exists; `ready`, `pending` (what is still waited for) and `failure` (the phase and why) — the data an agent narrates instead of reporting the link minutes early |
+| `watch_repository` | follows a new repository to readiness after `create_repository`, blocking up to `timeout` seconds (default 120, at most 150): the phases `declared`, `merged`, `created`, `scaffolded`, `setUp` (the reconciler run of the pull request, or a later run that finished after the merge, its failed steps and findings) and `released` (the first release with green CircleCI statuses; while CircleCI is silent the run's release step decides, and while the run found no CircleCI pipeline the phase waits until a member of the owning team sets it up with their CircleCI login, `devctl repo follow-circleci` at once or, for a repository devctl's pending pass picks, devctl v8.164.0 or later on a later command of theirs), each with its timestamp and duration — a repository whose release workflow is not auto-release (`gen.ci.releaseWorkflow`, else auto-release with `gen.ci.generate: true`) is ready once set up, with `withoutRelease`, and one without CI (`gen.ci.generate` false or absent, `withoutCI`) that auto-release still releases is released once its release exists; `ready`, `pending` (what is still waited for) and `failure` (the phase and why) — the data an agent narrates instead of reporting the link minutes early |
 | `update_repository` | the entry replaced by the one passed (held to the schema, not the creation rules), one pull request as the caller |
 | `transfer_repository` | the entry moved between two team files in one pull request naming the giving and the receiving team; the ask to the receiving team's channel, a notice to the giving team's |
-| `set_lifecycle` | `deprecated`, `archived` or `deleted` set on the entry, with `align: true` beside it when the entry lacks it (the reconciler applies a lifecycle to an opted-in entry only); the ask to the owning team's channel says so. `deleted` needs `confirm`, the repository's name as the person typed it, and is refused without it: the reconciler unfollows the repository on CircleCI and deletes it on GitHub, the entry stays as the record |
+| `set_lifecycle` | `deprecated`, `archived` or `deleted` set on the entry, with `align: true` beside it when the entry lacks it (the reconciler applies a lifecycle to an opted-in entry only); the ask to the owning team's channel says so. `deleted` needs `confirm`, the repository's name as the person typed it, and is refused without it: the reconciler deletes it on GitHub, the entry stays as the record |
 | `approve_change` | the caller's GitHub team membership checked (the team named in the pull request), then the approving review submitted as the caller — what the Slack ask's Approve button calls as the clicking member; a pull request GitHub reports conflicting with its base (a neighbouring entry changed first) is re-rendered on the current base as the caller before the review, so it merges |
 | `align_repository` | *Align now* for one repository, in the mode its team-file entry decides: `align` — the repository has opted in (`align: true` in its entry) and the reconciler workflow (`reconcile-repositories.yaml` in giantswarm/github) is dispatched for it as the caller, changing it to its declared set-up and the company baseline; `opt-in` — the repository is declared without the field: nothing is dispatched, the pull request that sets `align: true` in its entry (nothing else changes) is opened as the caller with auto-merge armed, the ask goes to the team's channel, and the reconciler's run of the merge aligns the repository; `check` — the repository has no entry and the workflow checks from the team alone, changing nothing; the answer carries the mode, the opt-in, whether the repository is declared, the planned changes of the last check, a warning paragraph and, for an opt-in, the plan and the opened pull request; the record shows `setup.pendingRun` until the inventory has read the run's artifact as `setup.lastRun` (with the run's `change` block); the team's standup channel hears nothing about a dispatch -- an Align now is the caller's, and its failed steps and findings are on the record and in the run |
 
@@ -74,8 +74,12 @@ transferred the repo … (app, go) from team-planeteers to team-bumblebee`, `ali
 `alice deprecated the repo …` — linking the pull request, plus one sentence per failed step or finding
 of that person's run with what to do, linking the run.
 
-Four rules decide which of a run's findings is news for the team; the others stay on the record, in the
-run's summary per team and on the Repositories page, which is where what is open is read. A finding of
+Five rules decide which of a run's findings is news for the team; the others stay on the record, in the
+run's summary per team and on the Repositories page, which is where what is open is read. An advisory
+finding (`default-icon`, `foreign-ruleset`, `declared-ruleset-missing`, `rulesets-not-enabled`,
+`open-pull-requests`, `circleci-oauth-follow`) does not keep the repository from converging, and some are on
+most of the org at once — every repository still built by an OAuth follow carries `circleci-oauth-follow` —
+so it is not told. A finding of
 kind `unchecked` — a check the reconciler's own token could not run — is the platform's to fix, not the
 team's. A finding of kind `pending-pull-request` is the engine's own repair in flight: the `codeowners`
 step opened that pull request in the run that reports it and the bot-PR sweep merges it, so telling the
@@ -84,8 +88,7 @@ fixed between the run and the poll — the poller reads a run's artifact minutes
 the collector runs the engine's read-mode checks in the same refresh, and those checks are the state now:
 per kind the step reported, the live check's findings are the ones posted, in its words, and none when it
 found the step clean; a step the live check skipped, failed or has no result for leaves the run's
-findings standing (a manager without a CircleCI client skips the `release` step, and silence about a
-missed tag build would be worse than a sentence from minutes ago). And a finding the team has already
+findings standing (silence about a missed tag build would be worse than a sentence from minutes ago). And a finding the team has already
 been told about is not told again: `setup.told` holds the sentences posted, so a decision or chore that
 stands is heard once rather than on every merged change of the entry, and again only after it has gone
 away and come back. A failed step is always posted — it is a property of that run under the reconciler's
@@ -163,16 +166,26 @@ write tool takes `dryRun` and `mode`.
 No CircleCI token. The inventory's CircleCI facts come from GitHub and the reconciler: whether CircleCI builds
 a repository from the `ci/circleci:` commit statuses on its default branch head (read with the repository, as
 the inventory App — CircleCI posts them for the projects it builds) together with the `.circleci/config.yml`
-blob; whether the project is followed and setup workflows are on from the reconciler's run artifact, read from
-GitHub after every run (its `circleci` step). What neither source yields, the record names as
-`unknown` — the last pipeline is not derivable and is not part of the record. `get_info` reports
-`circleci.source: statuses+artifact`. The engine's read-mode checks run without a CircleCI client, which skips
-their `circleci` and `release` steps; the inventory writes those two steps as the answers a person reading them wants —
-does CircleCI build this repository (the head's statuses: `ok`, or the engine's follow plan as `drift` when the head
-carries none), did the latest release build (the tag commit's statuses: `ok`, `red-release`, or the missed tag build
-as the finding `missed-tag-build`) — and the reconciler's last run adds the settings only its token reaches when it ran. The record's `ci`
-block answers the rest from the configuration on the default branch (`.circleci/config.yml`, `workflows.yml`,
-`custom.yml`, read with the repository): the architect orb version, whether the images include arm64, how they reach
+blob; which pipeline builds it — the CircleCI GitHub App's, an OAuth follow's, both, or none (`circleci.pipeline`) —
+from the reconciler's run artifact, read from GitHub after every run (its `circleci` step), and from the engine's
+read-mode check of the same step whenever that ran after the run. What neither source
+yields, the record names as `unknown` — the last pipeline is not derivable and is not part of the record.
+`get_info` reports `circleci.source: statuses+artifact`. The engine's read-mode checks need no CircleCI client
+either: their `circleci` step reads who posted the CircleCI statuses of the default branch's recent commits
+(`circleci-app[bot]` is the GitHub App pipeline; a person is an OAuth follow, the advisory finding
+`circleci-oauth-follow`; none is `circleci-pipeline-missing`), their `release` step the tag commit's statuses from the
+GitHub App. Where the release watch read the tag's own pipeline, its answer replaces the release step for that tag,
+and for a release published after the check (waiting until it has found the pipeline).
+CircleCI has no service accounts, so neither the reconciler nor this server creates a pipeline: a member of the
+owning team does, with their own CircleCI login (`devctl auth login --circleci-only`, Write access; a repository
+admin where CircleCI refuses the write). `devctl repo follow-circleci` does it at once. devctl v8.164.0 and later,
+signed in to muster too (`devctl auth login --muster-only`), also sets up the pending pipelines of its person's
+teams on a later command, at most once every six hours and not under `CI` or `DEVCTL_NO_CIRCLECI_PENDING`: it
+picks the repositories whose records carry `circleci-pipeline-missing` and that have a team, are on GitHub, not
+archived, and in production or without a lifecycle. `watch_repository` waits for the pipeline naming the command,
+and promises the automatic set-up only for a repository devctl picks.
+The record's `ci` block answers the rest from the configuration on the default branch (`.circleci/config.yml`,
+`workflows.yml`, `custom.yml`, read with the repository): the architect orb version, whether the images include arm64, how they reach
 the China registry (`split`, `inline`, `custom`, `none`) and whether images and charts are signed with cosign
 (`signed`, `unsigned` with the reason, `unknown`, `none`); `list_repositories` rows carry and filter by them.
 

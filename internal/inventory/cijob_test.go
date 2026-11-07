@@ -22,25 +22,24 @@ func TestCIJobRuns(t *testing.T) {
 	broken := CIJob{Name: "odd", TagsOnly: []string{"/(/"}}
 
 	cases := []struct {
-		name          string
-		job           CIJob
-		branch, tag   string
-		onBranch      bool
-		onTag         bool
-		onAnyBranches bool
+		name        string
+		job         CIJob
+		branch, tag string
+		onBranch    bool
+		onTag       bool
 	}{
-		{"no filters: every branch, no tag", plain, "feature/x", release, true, false, true},
-		{"tags.only opens the tag, branches stay", shared, mainBranch, release, true, true, true},
-		{"tags.only misses a foreign tag", shared, mainBranch, "api/v1.0.0", true, false, true},
-		{"tag-only job: the tag, no branch", tagOnly, mainBranch, release, false, true, false},
-		{"branch job on a feature branch", branchOnly, "changesets-ghcommit-temp/changeset-release/main", release, true, false, true},
-		{"branch job ignores main", branchOnly, mainBranch, "", false, false, true},
-		{"branches.only by name", mainOnly, mainBranch, "", true, false, true},
-		{"branches.only by pattern", mainOnly, "release-1.x", "", true, false, true},
-		{"branches.only misses the rest", mainOnly, "feature/x", "", false, false, true},
-		{"tags.ignore takes the rc out", rcFree, "", "v1.0.0-rc.1", true, false, true},
-		{"tags.ignore leaves the release", rcFree, "", release, true, true, true},
-		{"a pattern that does not compile matches nothing", broken, mainBranch, release, true, false, true},
+		{"no filters: every branch, no tag", plain, "feature/x", release, true, false},
+		{"tags.only opens the tag, branches stay", shared, mainBranch, release, true, true},
+		{"tags.only misses a foreign tag", shared, mainBranch, "api/v1.0.0", true, false},
+		{"tag-only job: the tag, no branch", tagOnly, mainBranch, release, false, true},
+		{"branch job on a feature branch", branchOnly, "changesets-ghcommit-temp/changeset-release/main", release, true, false},
+		{"branch job ignores main", branchOnly, mainBranch, "", false, false},
+		{"branches.only by name", mainOnly, mainBranch, "", true, false},
+		{"branches.only by pattern", mainOnly, "release-1.x", "", true, false},
+		{"branches.only misses the rest", mainOnly, "feature/x", "", false, false},
+		{"tags.ignore takes the rc out", rcFree, "", "v1.0.0-rc.1", true, false},
+		{"tags.ignore leaves the release", rcFree, "", release, true, true},
+		{"a pattern that does not compile matches nothing", broken, mainBranch, release, true, false},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -49,9 +48,6 @@ func TestCIJobRuns(t *testing.T) {
 			}
 			if got := tc.job.RunsOnTag(tc.tag); got != tc.onTag {
 				t.Errorf("RunsOnTag(%q) = %v, want %v", tc.tag, got, tc.onTag)
-			}
-			if got := tc.job.RunsOnBranches(); got != tc.onAnyBranches {
-				t.Errorf("RunsOnBranches() = %v, want %v", got, tc.onAnyBranches)
 			}
 		})
 	}

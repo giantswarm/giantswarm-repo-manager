@@ -132,7 +132,8 @@ func (t *tools) registerWatch(s *mcpserver.MCPServer) {
 		tooldesc.Describe("After create_repository, follow the new repository until ready or a phase fails. Call again while changed or pending.",
 			"Phases: declared, merged, created, scaffolded, setUp, released. Returns when ready, when a phase fails (failure says why; the watch ends), "+
 				"when a phase completes (changed: true — tell the person) or at timeout (pending names the phase); pendingReason says what is awaited. "+
-				"A repository without a release (withoutRelease: true) is ready once set up."),
+				"A repository without a release (withoutRelease: true) is ready once set up. "+
+				"Without a CircleCI GitHub App pipeline, released stays pending; pendingReason says how it gets set up."),
 		readOnly(),
 		mcp.WithString(argRepository, mcp.Required(), mcp.Description("Repository name, with or without the org.")),
 		mcp.WithNumber(argPullRequest, mcp.Required(), mcp.Description("The declaration pull request's number in the team files repository (create_repository's pullRequest.number).")),
@@ -254,6 +255,10 @@ type watcher struct {
 	// pipeline is the release's tag pipeline on CircleCI once found; later
 	// reads list its workflows alone.
 	pipeline *circleciclient.Pipeline
+	// listedPending says devctl's pending pass picks the repository, read on
+	// every released read (readListedPending): its record carries
+	// circleci-pipeline-missing and its row passes pendingRow.
+	listedPending bool
 }
 
 // outcome is what one read of a phase found: done at a time, failed for a
@@ -273,6 +278,10 @@ func failed(reason string) outcome { return outcome{failed: true, reason: reason
 // refused, no identity that makes it, or the release's statuses still
 // awaited — a fact about the phase, never the tool's error.
 func undecided(reason string) outcome { return outcome{reason: reason} }
+
+// decided says whether the outcome settles the phase for now: failed, or
+// pending with what is awaited named.
+func (o outcome) decided() bool { return o.failed || o.reason != "" }
 
 var pending = outcome{}
 
@@ -492,13 +501,18 @@ func (w *watcher) withoutRelease() bool {
 // through the App giantswarm-repo-manager has no statuses permission. A
 // failing status fails the phase at once. Until the tag pipeline itself has
 // reported on the commit, the reconciler run's release step decides — the
-// run read the tag's own pipeline, and the first tag's commit is the default
-// branch head, which the pipeline the run's follow starts builds too: a
-// branch pipeline's green statuses there never make the release, and a tag
-// no pipeline built (missed-tag-build) is nobody's to wait for. Without the
-// inventory App the release step alone decides, and the pending phase says
-// so.
+// first tag's commit is the default branch head, which the branch pipeline
+// builds too: a branch pipeline's green statuses there never make the
+// release, and a tag no pipeline built (missed-tag-build) is nobody's to
+// wait for, unless no GitHub App pipeline exists yet: the reconciler creates
+// none, a member of the owning team creates it with their own CircleCI login
+// (`devctl repo follow-circleci`, or their devctl on a later command)
+// and it runs the tag then, so the phase waits saying so (awaitingPipeline)
+// until the GitHub App pipeline has built the tag (appBuiltTag).
+// Without the inventory App the release step alone decides, and the pending
+// phase says so.
 func (w *watcher) released(ctx context.Context) (outcome, error) {
+	w.readListedPending(ctx)
 	rel, resp, err := w.p.gh.Repositories.GetLatestRelease(ctx, w.org(), w.name)
 	switch {
 	case notFound(resp, err):
@@ -515,7 +529,7 @@ func (w *watcher) released(ctx context.Context) (outcome, error) {
 		return w.tagPipelineVerdict(ctx, tag), nil
 	}
 	if w.t.d.App == nil {
-		if o := w.releaseStepVerdict(tag); o.failed {
+		if o := w.releaseStepVerdict(tag); o.decided() {
 			return o, nil
 		}
 		return undecided(fmt.Sprintf("the CircleCI statuses on %s are not read — %v; the reconciler run's release step alone decides", tag, ErrNoApp)), nil
@@ -524,12 +538,52 @@ func (w *watcher) released(ctx context.Context) (outcome, error) {
 	if err != nil {
 		return undecided(fmt.Sprintf("read the statuses of %s/%s@%s as the inventory App: %v", w.org(), w.name, tag, err)), nil
 	}
-	if !w.tagPipelineReported(tag, st) {
+	// While the run found no pipeline — it may predate the one the person
+	// created — only a build of the tag on the GitHub App pipeline hands the
+	// commit to the statuses, by the engine's rule, whatever jobs reported:
+	// an OAuth follow posts the tag pipeline's own jobs too.
+	if w.awaitingPipeline() != "" {
+		o := w.releaseStepVerdict(tag)
+		if o.failed || st.GetTotalCount() == 0 {
+			return o, nil
+		}
+		built, err := w.appBuiltTag(ctx, tag, releasedAt(rel))
+		switch {
+		case err != nil:
+			return undecided(fmt.Sprintf("read the CircleCI statuses of %s/%s@%s as the inventory App: %v", w.org(), w.name, tag, err)), nil
+		case !built:
+			return o, nil
+		}
+	} else if !w.tagPipelineReported(tag, st) {
 		if o := w.releaseStepVerdict(tag); o.failed || st.GetTotalCount() == 0 {
 			return o, nil
 		}
 	}
 	return w.statusesVerdict(ctx, tag, st)
+}
+
+// releasedAt is when the release was published, else created, as the
+// engine reads it.
+func releasedAt(rel *github.RepositoryRelease) time.Time {
+	if at := rel.GetPublishedAt(); !at.IsZero() {
+		return at.Time
+	}
+	return rel.GetCreatedAt().Time
+}
+
+// appBuiltTag says whether the CircleCI GitHub App posted a status of a
+// build of the tag on its commit, by the engine's rule (devctl
+// reconcile.TagBuildStatuses): a workflow started after the release.
+// Another system's status, an OAuth follow's, and the branch build of the
+// commit that started before the release are not one. A branch build
+// started after the release is, as for the engine: statuses do not name
+// the ref.
+func (w *watcher) appBuiltTag(ctx context.Context, tag string, published time.Time) (bool, error) {
+	statuses, err := reconcile.ListCircleCIStatuses(ctx, w.t.d.App.Installation(), w.org(), w.name, tag)
+	if err != nil {
+		return false, err
+	}
+	return len(reconcile.TagBuildStatuses(reconcile.AppStatuses(statuses), published)) > 0, nil
 }
 
 // readsTagPipeline says whether the manager reads the repository's tag
@@ -556,7 +610,7 @@ func (w *watcher) tagPipelineVerdict(ctx context.Context, tag string) outcome {
 		case err != nil:
 			return undecided(fmt.Sprintf("read the pipelines of %s on CircleCI: %v", slug, err))
 		case p == nil:
-			if o := w.releaseStepVerdict(tag); o.failed {
+			if o := w.releaseStepVerdict(tag); o.decided() {
 				return o
 			}
 			return undecided(fmt.Sprintf("CircleCI has no pipeline for %s of %s yet", tag, slug))
@@ -676,22 +730,93 @@ func (w *watcher) hasDockerfile(ctx context.Context) (bool, error) {
 // reported: the reconciler run's release step decides. A failed step fails
 // the phase, so does a finding for tag that nothing will change by waiting —
 // the tag pipeline red (red-release), or no pipeline for the tag at all
-// (missed-tag-build) — with the finding's fix.
+// (missed-tag-build) — with the finding's fix. While the run found no
+// GitHub App pipeline, a missed tag build waits for one instead
+// (awaitingPipeline): creating it runs the tag. A failed step or a red tag
+// pipeline fails the phase whatever the run found.
 func (w *watcher) releaseStepVerdict(tag string) outcome {
 	s := w.run.Result.Step(reconcile.StepRelease)
+	if s != nil && s.Verdict == reconcile.VerdictFailed {
+		return failed(fmt.Sprintf("the reconciler's release step failed: %s (%s)", s.Summary, w.run.RunURL))
+	}
+	if s != nil {
+		for _, f := range s.Findings {
+			if f.Kind == reconcile.FindingRedRelease && strings.Contains(f.Message, tag) {
+				return failed(fmt.Sprintf("%s — %s (%s)", f.Message, f.Fix, w.run.RunURL))
+			}
+		}
+	}
+	if reason := w.awaitingPipeline(); reason != "" {
+		return undecided(reason)
+	}
 	if s == nil {
 		return pending
 	}
-	if s.Verdict == reconcile.VerdictFailed {
-		return failed(fmt.Sprintf("the reconciler's release step failed: %s (%s)", s.Summary, w.run.RunURL))
-	}
 	for _, f := range s.Findings {
-		if (f.Kind == reconcile.FindingRedRelease || f.Kind == reconcile.FindingMissedTagBuild) && strings.Contains(f.Message, tag) {
+		if f.Kind == reconcile.FindingMissedTagBuild && strings.Contains(f.Message, tag) {
 			return failed(fmt.Sprintf("%s — %s (%s)", f.Message, f.Fix, w.run.RunURL))
 		}
 	}
 	return pending
 }
+
+// awaitingPipeline is the released phase's pending reason while the
+// reconciler run's circleci step found no CircleCI pipeline (the finding
+// circleci-pipeline-missing): the reconciler holds no CircleCI identity and
+// creates none, so a member of the owning team does with their CircleCI
+// login (Write access; a repository admin where CircleCI refuses the
+// write): `devctl repo follow-circleci` at once. devctl v8.164.0 and later
+// also sets up the pending pipelines of its person's teams on a later
+// command, picking the repositories whose records carry the finding and
+// whose rows it keeps (pendingRow: a team, on GitHub, not archived, in
+// production or without a lifecycle); the reason promises that only for a
+// repository the pass picks (listedPending), so it never names a set-up
+// that will not come. The command comes first: it is what the person can
+// do now. Empty otherwise.
+func (w *watcher) awaitingPipeline() string {
+	s := w.run.Result.Step(reconcile.StepCircleCI)
+	if s == nil {
+		return ""
+	}
+	for _, f := range s.Findings {
+		if f.Kind != reconcile.FindingCircleCIPipelineMissing {
+			continue
+		}
+		slug := w.org() + "/" + w.name
+		reason := fmt.Sprintf("no CircleCI GitHub App pipeline builds %s yet, so nothing builds the release: "+
+			"`devctl repo follow-circleci %s` sets it up now, run by a member of the owning team with their CircleCI login "+
+			"(`devctl auth login --circleci-only`, Write access; a repository admin where CircleCI refuses the write)", slug, slug)
+		if w.listedPending {
+			reason += "; otherwise devctl v8.164.0 or later sets it up on such a member's later devctl command once they are " +
+				"signed in to muster (`devctl auth login --muster-only`), at most once every six hours, " +
+				"unless CI or DEVCTL_NO_CIRCLECI_PENDING is set"
+		}
+		return reason + " (" + w.run.RunURL + ")"
+	}
+	return ""
+}
+
+// readListedPending reads whether devctl's pending pass picks the
+// repository: its inventory record carries circleci-pipeline-missing, and
+// its list_repositories row is one the pass keeps (pendingRow). A read that
+// fails promises nothing.
+func (w *watcher) readListedPending(ctx context.Context) {
+	rec, err := w.t.d.Inventory.Get(ctx, w.org()+"/"+w.name)
+	w.listedPending = err == nil && hasFinding(rec, string(reconcile.FindingCircleCIPipelineMissing)) &&
+		pendingRow(row(rec, 0, time.Now()))
+}
+
+// pendingRow says whether devctl v8.164.0's pending pass keeps a
+// list_repositories row (devctl cmd/repo/followcircleci, pending.go): one
+// with a team, on GitHub and not archived, whose lifecycle is production or
+// unset. A deprecated repository, for one, is left alone.
+func pendingRow(r Row) bool {
+	return r.Team != "" && !r.Gone && !r.Archived && (r.Lifecycle == "" || r.Lifecycle == lifecycleProduction)
+}
+
+// lifecycleProduction is an entry's lifecycle in production, as devctl's
+// pending pass compares it.
+const lifecycleProduction = "production"
 
 // newestStatus is when the newest of the combined status' statuses was
 // posted.

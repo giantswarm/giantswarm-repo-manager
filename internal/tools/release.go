@@ -95,8 +95,8 @@ func ReleaseNotice(rec *inventory.Record) (Completion, bool) {
 			since = " " + minutes(w.SettledAt.Sub(w.CreatedAt)) + " after the tag"
 		}
 		return Completion{
-			Text: fmt.Sprintf("%s: release %s%s has no CircleCI pipeline%s, nothing was built or published — trigger the tag's pipeline by hand on CircleCI, %s",
-				rec.Name, w.Tag, pr, since, confirm),
+			Text: fmt.Sprintf("%s: release %s%s has no CircleCI pipeline%s, nothing was built or published — devctl repo follow-circleci %s as a member of the team runs it on the GitHub App pipeline with your CircleCI login, %s",
+				rec.Name, w.Tag, pr, since, rec.Repository, confirm),
 			Link: "https://app.circleci.com/pipelines/github/" + rec.Repository,
 		}, true
 	}

@@ -47,21 +47,21 @@ func TestCIFactsGenerated(t *testing.T) {
 	for _, j := range ci.Jobs {
 		jobs[j.Name] = j
 	}
-	for name, want := range map[string]struct{ tag, branch, anyBranch bool }{
-		setupJob:             {true, true, true},
-		goBuildJob:           {true, true, true},
-		"push-to-registries": {false, false, true},
-		releaseJobName:       {true, false, false},
-		chartTestsJob:        {false, false, true},
-		"push-chart-release": {true, false, false},
+	for name, want := range map[string]struct{ tag, branch bool }{
+		setupJob:             {true, true},
+		goBuildJob:           {true, true},
+		"push-to-registries": {false, false},
+		releaseJobName:       {true, false},
+		chartTestsJob:        {false, false},
+		"push-chart-release": {true, false},
 	} {
 		j, ok := jobs[name]
 		if !ok {
 			t.Errorf("job %s not read; jobs: %+v", name, ci.Jobs)
 			continue
 		}
-		if j.RunsOnTag("v1.2.3") != want.tag || j.RunsOnBranch(mainBranch) != want.branch || j.RunsOnBranches() != want.anyBranch {
-			t.Errorf("%s: tag %v main %v branches %v, want %+v (%+v)", name, j.RunsOnTag("v1.2.3"), j.RunsOnBranch(mainBranch), j.RunsOnBranches(), want, j)
+		if j.RunsOnTag("v1.2.3") != want.tag || j.RunsOnBranch(mainBranch) != want.branch {
+			t.Errorf("%s: tag %v main %v, want %+v (%+v)", name, j.RunsOnTag("v1.2.3"), j.RunsOnBranch(mainBranch), want, j)
 		}
 	}
 	// The same pipeline on a private repository: cosign skips it at runtime.

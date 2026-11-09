@@ -14,6 +14,7 @@ import (
 
 	"github.com/giantswarm/devctl/v8/pkg/circleciclient"
 	"github.com/giantswarm/devctl/v8/pkg/reposetup"
+	"github.com/giantswarm/mcp-toolkit/brand"
 	"github.com/giantswarm/mcp-toolkit/tooldesc"
 	"github.com/mark3labs/mcp-go/mcp"
 	mcpserver "github.com/mark3labs/mcp-go/server"
@@ -126,6 +127,7 @@ func (ts *Tools) MCPServer() *mcpserver.MCPServer {
 	d, t := ts.t.d, ts.t
 	s := mcpserver.NewMCPServer(ToolPrefix, d.Version,
 		mcpserver.WithToolCapabilities(false),
+		brand.WithGiantSwarmIcon(),
 		mcpserver.WithInstructions("Giant Swarm's repository set-up service. The team files in giantswarm/github (repositories/team-*.yaml) declare every repository's desired state; "+
 			"writes go through team-file pull requests opened as you, which the reconciler applies once merged; align_repository dispatches the reconciler "+
 			"directly and approve_change approves a pull request. The inventory (list_repositories, get_repository) "+

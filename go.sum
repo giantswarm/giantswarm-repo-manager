@@ -143,8 +143,8 @@ github.com/giantswarm/devctl/v8 v8.163.1 h1:usk+h57JK+OIH6PsvwuUzbYHW8hFT9+U8/QW
 github.com/giantswarm/devctl/v8 v8.163.1/go.mod h1:L5bP7ygI7CMKypSeGW6qJyMko3X7ZxOHAn7txAaOc6k=
 github.com/giantswarm/go-selfupdate v1.7.3 h1:36uS7arBYg16eKnPwkYuWbJfA173sz3qcChXYj0H/fk=
 github.com/giantswarm/go-selfupdate v1.7.3/go.mod h1:nqRW1Io8Ixo3x8tSnLKkpfenWn2PRf/Zcu548PZp780=
-github.com/giantswarm/mcp-toolkit v0.4.12 h1:OSV2sMNheLn6rjzLJs8eJfqRPfIiMY/1shMHCR5xl4Y=
-github.com/giantswarm/mcp-toolkit v0.4.12/go.mod h1:m8dbpEeOg25kldNTnBh/al5ux4y5PYvbg2KhfHiUinc=
+github.com/giantswarm/mcp-toolkit v0.5.2 h1:hymmDFTKJk4bMut/k4UMKUshQhw4zyjyqT9htno0RCE=
+github.com/giantswarm/mcp-toolkit v0.5.2/go.mod h1:m8dbpEeOg25kldNTnBh/al5ux4y5PYvbg2KhfHiUinc=
 github.com/giantswarm/microerror v0.4.1 h1:WMiD7HQASoUA9lZzPlPK+erCEOJ0uT4cyo18VfCXHD0=
 github.com/giantswarm/microerror v0.4.1/go.mod h1:URFj0gFCmZihjya6saQCXxslBrgctXb4NsXYHB5JdrI=
 github.com/giantswarm/micrologger v1.1.2 h1:dNmnGZgAT0rnZkpc2ivj1shJ3Stnnjsy7jIi84//Jqc=

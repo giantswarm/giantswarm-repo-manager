@@ -1,6 +1,6 @@
 dependencies:
 - name: valkey
   repository: oci://gsoci.azurecr.io/charts/giantswarm
-  version: 0.4.20
-digest: sha256:fc31456714536e6082860b9981044cb529e22c47a530feabee52968a9cbb9c70
-generated: "2026-11-06T22:48:20.66943199Z"
+  version: 0.4.22
+digest: sha256:03a4bd08ea9140573945147c08581702ac6e6ac58d2f5329ac95b9e37038de6c
+generated: "2026-11-09T12:52:49.984216819Z"

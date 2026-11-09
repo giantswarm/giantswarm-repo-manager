@@ -8,7 +8,7 @@ require (
 	github.com/alicebob/miniredis/v2 v2.40.0
 	github.com/bradleyfalzon/ghinstallation/v2 v2.19.0
 	github.com/giantswarm/devctl/v8 v8.161.3
-	github.com/giantswarm/mcp-toolkit v0.4.12
+	github.com/giantswarm/mcp-toolkit v0.5.2
 	github.com/google/go-github/v93 v93.0.0
 	github.com/mark3labs/mcp-go v1.5.0
 	github.com/sirupsen/logrus v1.10.2

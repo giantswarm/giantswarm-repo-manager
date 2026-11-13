@@ -596,11 +596,13 @@ func (c *Collector) check(ctx context.Context, r *inventory.Record, src *sources
 		c.checkFailed(r, keepOld, err)
 		return true
 	}
-	// The engine has no CircleCI client here: its circleci and release
-	// steps come from the record's own sources instead.
-	fillClientlessSteps(res, r)
 	at := c.now()
 	r.Setup.Checks, r.Setup.CheckedAt, r.Setup.CheckError = res, &at, ""
+	// The check read the CircleCI statuses now, after the reconciler's run.
+	refineCircleCI(r.CircleCI, res)
+	// The release watch read the tag's own pipeline: its answer decides the
+	// release step where it is the finer one.
+	rewriteReleaseStep(r)
 	return true
 }
 
@@ -662,6 +664,12 @@ func (c *Collector) build(name string, node *repoNode, src *sources, old *invent
 	}
 	if node != nil {
 		rec.CircleCI = circleCI(node, rec.Setup.LastRun)
+		// Checks kept from an earlier sweep or refresh read the statuses
+		// after the run did: they stand until a newer run, whether or not
+		// this pass checks again.
+		if checksAfterRun(rec.Setup) {
+			refineCircleCI(rec.CircleCI, rec.Setup.Checks)
+		}
 	}
 	return rec
 }

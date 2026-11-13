@@ -121,12 +121,11 @@ the message to the team's standup channel is rendered from (README, "Asks and me
     "has": {"renovate": true, "dependabot": false, "circleci": true, "workflows": true, "dockerfile": true, "helm": true, "readme": true, "codeowners": true}
   },
   "circleci": {                         // absent when the repository is gone; no CircleCI token is involved
-    "followed": true,                   // ci/circleci: statuses on the head, or the reconciler's circleci step found the project followed
-    "setupWorkflows": true,             // from the reconciler's run artifact only; absent and named in unknown until a run tells
-    "webhook": true,                    // CircleCI's GitHub webhook (active, push events) as the reconciler's circleci step verified it: false with its finding circleci-webhook-missing, true when a step without changes says "webhook present"; absent and named in unknown otherwise (no run, a failed step, hooks unreadable to the run's identity, a planned follow, a step with changes)
+    "followed": true,                   // ci/circleci: statuses on the head, or the reconciler's circleci step found a pipeline
+    "pipeline": "github-app",           // github-app | oauth | github-app+oauth | none: the pipeline the reconciler's circleci step found, from who posted the CircleCI statuses (circleci-app[bot] is the GitHub App's); absent and named in unknown until a run tells, or when the run could not read the statuses
     "head": {"state": "success", "contexts": ["ci/circleci: go-build", "ci/circleci: push-to-registries"], "at": "…"},  // the default branch head's ci/circleci: statuses (worst state; failed and pending list the contexts in those states)
     "source": "statuses+artifact",      // statuses | artifact | statuses+artifact: the sources that answered
-    "unknown": [],                      // the facts no source yields: setupWorkflows, webhook, followed (status contexts truncated, none CircleCI's)
+    "unknown": [],                      // the facts no source yields: pipeline, followed (status contexts truncated, none CircleCI's)
     "error": ""                         // the reconciler's circleci step failing, as its run reported it
   },
   "ci": {                               // what .circleci/config.yml, workflows.yml and custom.yml on the default branch say; absent without them
@@ -153,7 +152,7 @@ the message to the team's standup channel is rendered from (README, "Asks and me
   "catalog": {"present": true},         // giantswarm/github catalog/components.yaml
   "mapping": {"present": true, "team": "bumblebee"},   // management-cluster-bases apps-to-teams mapping
   "setup": {
-    "checks": { "…": "reconcile.Result in mode check — what devctl repo status prints; its circleci and release steps come from the record's sources (the head's statuses, lastRun), the engine having no CircleCI client" },
+    "checks": { "…": "reconcile.Result in mode check — what devctl repo status prints; its circleci and release steps read the CircleCI statuses on GitHub; the release step is the release watch's answer where it read the tag's own pipeline" },
     "checkedAt": "…",
     "checkError": "",                   // why checks is missing (no read identity, …); a refused entry has checks = the engine's Refused result
     "lastRun": {"result": {"…": "reconcile.Result"}, "runUrl": "…", "timestamp": "…", "runId": 1, "attempt": 1, "told": true,  // told: the team heard of the run (its change sentence posted, or none)
@@ -192,18 +191,15 @@ checks read past them, nothing in the entry is to fix). The
 engine's kinds pass through with `source: engine`:
 `entry-refused` and `gen-circleci-refused` (the engine refuses the entry — `setup.checks` is its `Refused` result, the
 `entry` step reported and no step run, one finding per problem naming the field to fix), `repository-missing`, `renamed`,
-`abs-prerequisite`, `default-icon`, `red-release`, `missed-tag-build`, `renovate-missing`, `archived-undeclared`,
-`pending-pull-request`, `unchecked`. `red-release` and `missed-tag-build` come from the release watch's read of the
-tag's own pipeline once it has followed the tag (`setup.release`), else from the tag commit's statuses read against
-`ci.jobs`: a status of a job the pipeline never runs on the tag is a branch pipeline's at the same commit and is
-ignored, a failed job that runs on the tag alone is the tag pipeline's failure, and a failed job that runs on branches
-too beside a branch pipeline's statuses cannot be attributed — the release reads `unchecked`, the CircleCI token
-(`circleci.existingSecret`) being the fix.
-A release cut after the record's last read of the repository is pending, not a finding: the release step reads
-`release <tag>: waiting for the inventory's read` and `converged` stays as it was. The release watch's page carries the
-latest release with its tag commit's statuses, and the watch writes them into `reality.latestRelease` in the same pass,
-so the step decides from current facts within one watch interval; a tag the watch still waits on without a status
-within its grace period reads `release <tag>: waiting for the tag's pipeline`.
+`abs-prerequisite`, `default-icon`, `red-release`, `missed-tag-build`, `circleci-pipeline-missing`,
+`circleci-oauth-follow` (advisory), `renovate-missing`, `archived-undeclared`, `pending-pull-request`, `unchecked`.
+`red-release` and `missed-tag-build` come from the release watch's read of the tag's own pipeline for the tag it
+followed (`setup.release`), else from the engine's release step, which reads the tag commit's statuses from the
+CircleCI GitHub App; a tag the watch settled unbuilt that the engine has read since is the engine's, and a watch of
+an older release than the engine's leaves the engine's step. A release published after the engine's checks is the
+watch's: its answer once it has read the tag's pipeline, `release <tag>: waiting for the tag's pipeline` until then
+— no finding, `converged` as it was. A watch that cannot read the pipeline (a private repository without a CircleCI
+token) leaves the engine's step until the next check reads the new release.
 
 ### Renovate state
 

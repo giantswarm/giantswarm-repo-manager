@@ -14,6 +14,8 @@ import (
 
 	"github.com/giantswarm/devctl/v8/pkg/reposetup/reconcile"
 	"github.com/google/go-github/v93/github"
+
+	"github.com/giantswarm/giantswarm-repo-manager/internal/inventory"
 )
 
 // The fake org's repositories as the REST surface the engine's create and
@@ -26,6 +28,7 @@ const (
 	readmeFile = "README.md"
 	// The REST field and the commit status states the fakes repeat.
 	kCreatedAtREST = "created_at"
+	kUpdatedAtREST = "updated_at"
 	stateSuccess   = "success"
 	statePending   = "pending"
 	stateFailure   = "failure"
@@ -73,7 +76,10 @@ type fakeRelease struct {
 // fakeStatus is one commit status.
 type fakeStatus struct {
 	context, state string
-	updatedAt      time.Time
+	// creator is who posted it: the CircleCI GitHub App for a ci/circleci
+	// context unless a test says otherwise.
+	creator              string
+	createdAt, updatedAt time.Time
 }
 
 func newFakeRepos() *fakeRepos { return &fakeRepos{repos: map[string]*fakeRepo{}} }
@@ -99,6 +105,21 @@ func (f *fakeRepos) publish(name, tag string) {
 	f.repos[name].release = &fakeRelease{tag: tag, publishedAt: time.Now()}
 }
 
+// postedBy makes the release commit's statuses of the contexts posted by
+// creator, d ago: an OAuth follow's (a person), or a build that started
+// before the release.
+func (f *fakeRepos) postedBy(name, creator string, d time.Duration, contexts ...string) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	r := f.repos[name]
+	for i := range r.statuses {
+		if slices.Contains(contexts, r.statuses[i].context) {
+			r.statuses[i].creator = creator
+			r.statuses[i].createdAt = r.statuses[i].createdAt.Add(-d)
+		}
+	}
+}
+
 // report posts one commit status per context on the release's tag, all in
 // state, the way CircleCI reports its jobs: a context reported before is
 // updated in place, the others stay.
@@ -107,8 +128,13 @@ func (f *fakeRepos) report(name, state string, contexts ...string) {
 	defer f.mu.Unlock()
 	r := f.repos[name]
 	for _, c := range contexts {
-		st := fakeStatus{context: c, state: state, updatedAt: time.Now()}
+		now := time.Now()
+		st := fakeStatus{context: c, state: state, creator: "cla-bot", createdAt: now, updatedAt: now}
+		if strings.HasPrefix(c, inventory.CircleCIContext) {
+			st.creator = reconcile.CircleCIAppLogin
+		}
 		if i := slices.IndexFunc(r.statuses, func(s fakeStatus) bool { return s.context == c }); i >= 0 {
+			st.createdAt = r.statuses[i].createdAt
 			r.statuses[i] = st
 			continue
 		}
@@ -255,7 +281,7 @@ func (f *fakeRepos) register(mux *http.ServeMux, g *fakeGitHub) {
 		// error, pending when any is pending (or there is none), else success.
 		state, statuses := stateSuccess, []map[string]any{}
 		for _, st := range repo.statuses {
-			statuses = append(statuses, map[string]any{kContext: st.context, kState: st.state, "updated_at": st.updatedAt.UTC().Format(time.RFC3339)})
+			statuses = append(statuses, map[string]any{kContext: st.context, kState: st.state, kUpdatedAtREST: st.updatedAt.UTC().Format(time.RFC3339)})
 			switch {
 			case st.state == stateFailure || st.state == "error":
 				state = stateFailure
@@ -267,6 +293,25 @@ func (f *fakeRepos) register(mux *http.ServeMux, g *fakeGitHub) {
 			state = statePending
 		}
 		writeJSON(w, http.StatusOK, map[string]any{kState: state, "total_count": len(statuses), "statuses": statuses, kSHA: repo.head})
+	}))
+	mux.HandleFunc("GET /api/v3/repos/{owner}/{repo}/commits/{ref}/statuses", withRepo(func(w http.ResponseWriter, r *http.Request, repo *fakeRepo) {
+		// The statuses one by one, with who posted them, newest first: the
+		// list the engine's rule reads (devctl reconcile.ListCircleCIStatuses).
+		if !asApp(r) || repo.uninstalled {
+			ghMessage(w, http.StatusForbidden, "Resource not accessible by integration")
+			return
+		}
+		if repo.release == nil || r.PathValue(kRef) != repo.release.tag {
+			ghMessage(w, http.StatusNotFound, "Not Found")
+			return
+		}
+		out := []map[string]any{}
+		for i := len(repo.statuses) - 1; i >= 0; i-- {
+			st := repo.statuses[i]
+			out = append(out, map[string]any{kContext: st.context, kState: st.state, "creator": map[string]any{"login": st.creator},
+				kCreatedAtREST: st.createdAt.UTC().Format(time.RFC3339), kUpdatedAtREST: st.updatedAt.UTC().Format(time.RFC3339)})
+		}
+		writeJSON(w, http.StatusOK, out)
 	}))
 	mux.HandleFunc("GET /api/v3/repos/{owner}/{repo}/contents/{path...}", withRepo(func(w http.ResponseWriter, r *http.Request, repo *fakeRepo) {
 		path := strings.Trim(r.PathValue("path"), "/")

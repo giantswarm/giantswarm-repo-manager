@@ -288,7 +288,8 @@ func (c *Collector) watchRelease(ctx context.Context, name string, node *release
 	}
 	w := rec.Setup.Release
 	// The page read the release with its tag commit's statuses: the record
-	// takes them, so its release step decides from current facts.
+	// takes them for the reader (reality.latestRelease.build); the release
+	// step is the engine's or the watch's.
 	read := readLatestRelease(rec, node)
 	var out watched
 	switch {
@@ -434,7 +435,7 @@ const workflowNotRun = "not_run"
 // failedJobStatuses are the CircleCI job statuses that are failures, as
 // devctl's release wait counts them.
 var failedJobStatuses = map[string]string{
-	"failed": "failed", statusError: statusError, "canceled": "canceled", "timedout": "timed out",
+	"failed": "failed", "error": "error", "canceled": "canceled", "timedout": "timed out",
 	"infrastructure_fail": "infrastructure failure", "unauthorized": "unauthorized",
 }
 

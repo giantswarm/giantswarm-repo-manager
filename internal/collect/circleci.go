@@ -18,111 +18,108 @@ var statusRank = map[string]int{"FAILURE": 0, "ERROR": 1, "PENDING": 2, "EXPECTE
 // `ci/circleci:` statuses on the default branch head (read with the
 // repository, no extra call) say whether CircleCI builds the repository; the
 // reconciler's last run — its circleci step, in the run artifact the poller
-// read — says whether the project is followed, setup workflows are on and
-// CircleCI's webhook is installed. What neither yields is named in Unknown,
-// never guessed.
+// read — says which pipeline builds it, read from who posted the CircleCI
+// statuses of the recent commits (devctl pkg/reposetup/reconcile,
+// circleCIFromStatuses): the CircleCI GitHub App, an OAuth follow, both, or
+// none. What neither yields is named in Unknown, never guessed.
 func circleCI(n *repoNode, run *inventory.LastRun) *inventory.CircleCI {
 	out := &inventory.CircleCI{Source: inventory.CircleCISourceStatuses}
 	head, truncated := headStatus(n)
 	out.Head = head
 	out.Followed = head != nil
-	setup := false
 	if run != nil {
 		if sr := run.Result.Step(reconcile.StepCircleCI); sr != nil && sr.Verdict != reconcile.VerdictSkipped {
 			out.Source = inventory.CircleCISourceBoth
-			setup = applyStep(out, run.Result.Mode, sr)
-			out.Webhook = stepWebhook(sr)
+			applyStep(out, sr)
 		}
 	}
-	if !setup {
-		out.Unknown = append(out.Unknown, inventory.CircleCIFactSetupWorkflows)
+	if out.Pipeline == "" {
+		out.Unknown = append(out.Unknown, inventory.CircleCIFactPipeline)
 	}
-	if out.Webhook == nil {
-		out.Unknown = append(out.Unknown, inventory.CircleCIFactWebhook)
-	}
-	if head == nil && truncated && out.Source == inventory.CircleCISourceStatuses {
+	if head == nil && truncated && out.Pipeline == "" {
 		out.Unknown = append(out.Unknown, inventory.CircleCIFactFollowed)
 	}
 	return out
 }
 
-// applyStep reads the reconciler's circleci step: the summary of a converged
-// step, the changes a check run would make or a repair made, the error of a
-// failed one. It returns whether the setup-workflows setting is known.
-func applyStep(out *inventory.CircleCI, mode reconcile.Mode, sr *reconcile.StepResult) bool {
-	switch sr.Verdict {
-	case reconcile.VerdictFailed:
-		out.Error = "the reconciler's circleci step failed: " + sr.Summary
-		return false
-	case reconcile.VerdictOK, reconcile.VerdictReported:
-		out.Followed = true
-		out.SetupWorkflows = ptr(true)
-		return true
-	}
-	// Drift (a check run) or repaired: the changes name what was missing.
-	follow := hasChange(sr, "follow ")
-	enable := hasChange(sr, "enable setup workflows")
-	if mode == reconcile.ModeRepair {
-		// The step follows, then reads the settings and enables what is off:
-		// after the run both hold.
-		out.Followed = true
-		out.SetupWorkflows = ptr(true)
-		return true
-	}
-	if follow {
-		// Not followed at the run: the settings do not exist yet, the step
-		// plans them without reading anything.
-		out.Followed = out.Head != nil
-		return false
-	}
-	out.Followed = true
-	out.SetupWorkflows = ptr(!enable)
-	return true
-}
-
-// webhookPresent is how the engine's converged circleci step ends its
-// summary when the repository carries CircleCI's webhook (devctl
-// pkg/reposetup/reconcile, step_circleci.go): "followed, setup workflows on,
-// checkout key present, deploy keys on GitHub: CircleCI (read-only), webhook
-// present".
-const webhookPresent = "webhook present"
-
-// stepWebhook is CircleCI's webhook as the reconciler's circleci step
-// verified it: missing when the step reports it missing (finding
-// circleci-webhook-missing), present when a step without changes says so in
-// its summary — whatever else the step could not read, the deploy keys for
-// one (finding unchecked beside a summary that ends on the webhook). Nil
-// otherwise, nothing is guessed: a failed step, an identity that could not
-// read the hooks (finding unchecked, the summary ending on their
-// unreadability), a check run that plans the follow, a step with changes,
-// whose summary names no webhook, and a run of an engine that did not
-// verify the webhook yet, whose converged summary ends at the checkout key.
-func stepWebhook(sr *reconcile.StepResult) *bool {
+// applyStep reads the reconciler's circleci step into out: the pipeline its
+// findings name — circleci-pipeline-missing none, circleci-oauth-follow an
+// OAuth follow, beside the GitHub App pipeline unless the engine says there
+// is none — a step without either the GitHub App pipeline, and the error of
+// a failed step. A step that could not read the statuses (finding
+// unchecked) leaves the pipeline unknown.
+func applyStep(out *inventory.CircleCI, sr *reconcile.StepResult) {
 	if sr.Verdict == reconcile.VerdictFailed {
-		return nil
+		out.Error = "the reconciler's circleci step failed: " + sr.Summary
+		return
 	}
-	if strings.HasSuffix(sr.Summary, webhookPresent) {
-		return ptr(true)
-	}
+	pipeline := inventory.CircleCIPipelineApp
 	for _, f := range sr.Findings {
 		switch f.Kind {
-		case reconcile.FindingCircleCIWebhookMissing:
-			return ptr(false)
 		case reconcile.FindingUnchecked:
-			return nil
+			return
+		case reconcile.FindingCircleCIPipelineMissing:
+			pipeline = inventory.CircleCIPipelineNone
+		case reconcile.FindingCircleCIOAuthFollow:
+			pipeline = inventory.CircleCIPipelineAppAndOAuth
+			if strings.HasPrefix(sr.Summary, oauthOnly) {
+				pipeline = inventory.CircleCIPipelineOAuth
+			}
 		}
 	}
-	return nil
+	out.Pipeline = pipeline
+	if pipeline != inventory.CircleCIPipelineNone {
+		out.Followed = true
+	}
 }
 
-func hasChange(sr *reconcile.StepResult, prefix string) bool {
-	for _, c := range sr.Changes {
-		if strings.HasPrefix(c, prefix) {
-			return true
+// refineCircleCI re-derives the record's pipeline from the live check's
+// circleci step: the engine ran it in this refresh or sweep, reading the
+// same statuses the reconciler's run read, but now — after a person created
+// the GitHub App pipeline, the record says so before the next nightly run.
+// A step the check skipped, failed or could not read (finding unchecked)
+// leaves what the run said; a step it read clears the run's failure, which
+// the check's answer supersedes. The source stays the statuses the check
+// read, beside the run's artifact when there is one.
+func refineCircleCI(cc *inventory.CircleCI, checks *reconcile.Result) {
+	if cc == nil || checks == nil {
+		return
+	}
+	sr := checks.Step(reconcile.StepCircleCI)
+	if sr == nil || sr.Verdict == reconcile.VerdictSkipped || sr.Verdict == reconcile.VerdictFailed {
+		return
+	}
+	live := &inventory.CircleCI{}
+	applyStep(live, sr)
+	if live.Pipeline == "" {
+		return
+	}
+	cc.Pipeline = live.Pipeline
+	cc.Followed = cc.Head != nil || live.Followed
+	cc.Error = ""
+	unknown := cc.Unknown[:0]
+	for _, u := range cc.Unknown {
+		if u != inventory.CircleCIFactPipeline && u != inventory.CircleCIFactFollowed {
+			unknown = append(unknown, u)
 		}
 	}
-	return false
+	cc.Unknown = unknown
+	if len(cc.Unknown) == 0 {
+		cc.Unknown = nil
+	}
 }
+
+// checksAfterRun says whether the set-up state's checks read the statuses
+// after the reconciler's last run did: checks and no run, or checks newer
+// than the run.
+func checksAfterRun(s inventory.Setup) bool {
+	return s.Checks != nil && s.CheckedAt != nil && (s.LastRun == nil || s.CheckedAt.After(s.LastRun.Timestamp))
+}
+
+// oauthOnly is how the engine's circleci step starts its summary when an
+// OAuth follow builds the repository and no GitHub App pipeline does (devctl
+// pkg/reposetup/reconcile, step_circleci.go).
+const oauthOnly = "OAuth follow, no GitHub App pipeline"
 
 // headStatus is the default branch head's `ci/circleci:` statuses, nil when it
 // has none; truncated says the status connection had more contexts than were

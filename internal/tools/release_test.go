@@ -34,7 +34,7 @@ func TestReleaseNotice(t *testing.T) {
 			"backstage: release v2.58.8 is red, the tag pipeline 11508 failed in go-build (failed) — rerun the workflow from failed on CircleCI, then devctl release wait giantswarm/backstage v2.58.8 confirms it",
 			pipe.URL},
 		{"unbuilt", &inventory.ReleaseWatch{Tag: "v2.58.9", CreatedAt: created, PullRequest: pr, State: inventory.ReleaseUnbuilt, SettledAt: &settled},
-			"backstage: release v2.58.9 (pull request #2567) has no CircleCI pipeline 11 minutes after the tag, nothing was built or published — trigger the tag's pipeline by hand on CircleCI, then devctl release wait giantswarm/backstage v2.58.9 confirms it",
+			"backstage: release v2.58.9 (pull request #2567) has no CircleCI pipeline 11 minutes after the tag, nothing was built or published — devctl repo follow-circleci giantswarm/backstage as a member of the team runs it on the GitHub App pipeline with your CircleCI login, then devctl release wait giantswarm/backstage v2.58.9 confirms it",
 			"https://app.circleci.com/pipelines/github/giantswarm/backstage"},
 		{"built is nothing", &inventory.ReleaseWatch{Tag: tag, State: inventory.ReleaseBuilt, Pipeline: pipe}, "", ""},
 		{"watching is nothing", &inventory.ReleaseWatch{Tag: tag, State: inventory.ReleaseWatching, Pipeline: pipe}, "", ""},

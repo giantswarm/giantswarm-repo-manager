@@ -385,7 +385,12 @@ func isReleaseTag(tag string) bool {
 // settles the release red at once; the watch keeps reading a red release,
 // and a rerun that goes green turns it built on a later pass, silently —
 // the team was told once, and hears nothing more about the tag. No pipeline within the
-// grace period settles it unbuilt. A 404 settles it unchecked: without a
+// grace period settles it unbuilt — never a release whose pipeline an
+// earlier pass found: the lookup reads the newest pipelines only, and a busy
+// project pushes the tag's out of them. A found pipeline whose workflows
+// CircleCI answers 404 (no token), or one no longer listed, is decided from
+// the tag commit's statuses (settleFromStatuses). A 404 on the project
+// settles it unchecked: without a
 // token, the project is private and the token is what is missing; with
 // one, CircleCI does not know the project. Any other error keeps the watch
 // for the next pass.
@@ -405,6 +410,11 @@ func (c *Collector) readRelease(ctx context.Context, rec *inventory.Record, w *i
 	case err != nil:
 		c.log.Warn("release watch: pipelines not read", "repository", rec.Repository, "tag", w.Tag, "error", err)
 		return
+	case p == nil && w.Pipeline != nil:
+		// An earlier pass found the tag's pipeline; it is no longer among
+		// the newest pipelines the lookup reads. Not a missed build.
+		settleFromStatuses(rec, w, now, true)
+		return
 	case p == nil:
 		if now.Sub(w.CreatedAt) >= o.Grace {
 			w.Settle(now, inventory.ReleaseUnbuilt)
@@ -414,6 +424,11 @@ func (c *Collector) readRelease(ctx context.Context, rec *inventory.Record, w *i
 	tp, err := ReadTagPipeline(ctx, o.CircleCI, org, name, p)
 	w.Pipeline = tp.Pipeline
 	switch {
+	case circleciclient.IsNotFound(err):
+		// CircleCI lists the project's pipelines without a token but
+		// answers its workflows 404 ("Pipeline run not found"): the tag
+		// commit's statuses stand in for the pipeline.
+		settleFromStatuses(rec, w, now, false)
 	case err != nil:
 		c.log.Warn("release watch: tag pipeline not read", "repository", rec.Repository, "tag", w.Tag, "error", err)
 	case tp.Red():
@@ -425,6 +440,41 @@ func (c *Collector) readRelease(ctx context.Context, rec *inventory.Record, w *i
 	}
 	// Otherwise still moving, or no workflow has started yet: a red release
 	// being rerun stays red until the rerun ends.
+}
+
+// settleFromStatuses decides a release whose tag pipeline the watch found
+// but cannot read from its tag commit's `ci/circleci:` statuses, by the rule
+// of the record's release step (readTagStatuses): built, red with the
+// failed jobs (the team hears it as from a red pipeline), unchecked when the
+// statuses cannot be attributed to the tag pipeline, still watching while a
+// job is pending or the commit carries no status yet. gone says the
+// pipeline has left the lookup's reach: then a commit without statuses, or
+// truncated ones, settles unchecked, as the watch has nothing left to read.
+func settleFromStatuses(rec *inventory.Record, w *inventory.ReleaseWatch, now time.Time, gone bool) {
+	rel := rec.Reality.LatestRelease
+	if rel == nil || rel.Tag != w.Tag || rel.Build == nil {
+		if gone || rel != nil && rel.Tag == w.Tag && rel.BuildTruncated {
+			w.Settle(now, inventory.ReleaseUnchecked)
+			w.Reason = "the tag pipeline is out of the inventory's reach and the tag commit carries no CircleCI status it can read"
+		}
+		return
+	}
+	ts := readTagStatuses(w.Tag, rel.Build, rec.CI, rec.CI.TagOnly(w.Tag, rec.Reality.DefaultBranch))
+	switch ts.verdict {
+	case tagStatusesBuilt:
+		w.FailedJobs = nil
+		w.Settle(now, inventory.ReleaseBuilt)
+	case tagStatusesRed:
+		w.FailedJobs = nil
+		for _, c := range ts.failed {
+			w.FailedJobs = append(w.FailedJobs, inventory.JobOf(c)+" (failed)")
+		}
+		w.Settle(now, inventory.ReleaseRed)
+	case tagStatusesUnattributed, tagStatusesNoTagJob:
+		w.Settle(now, inventory.ReleaseUnchecked)
+		w.Reason = "the tag commit's CircleCI statuses do not say whether the tag pipeline built it, and its workflows are out of the inventory's reach without a CircleCI token (circleci.existingSecret)"
+	}
+	// tagStatusesRunning: still watching.
 }
 
 // workflowNotRun is a workflow the pipeline's filters left out: neither

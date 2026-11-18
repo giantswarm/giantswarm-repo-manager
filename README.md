@@ -110,12 +110,18 @@ how they failed, the rerun from failed as the fix and `devctl release wait` to c
 workflow: `backstage: release v2.58.8 (pull request #2567) is red, the tag pipeline 11508 failed in
 build-image-arm64 (timed out) — rerun the workflow from failed on CircleCI, then devctl release wait
 giantswarm/backstage v2.58.8 confirms it`. A tag without a pipeline `inventory.releases.grace` (default
-10m) after its creation is the missed build, told the same way, linking the project's pipelines. What was
+10m) after its creation is the missed build, told the same way, linking the project's pipelines — never a
+tag whose pipeline an earlier pass found: the lookup reads the project's newest pipelines only, and a busy
+project pushes the tag's out of them. Without a token CircleCI lists a public project's pipelines but answers
+their workflows 404; then, and once a found pipeline is no longer listed, the tag commit's `ci/circleci:`
+statuses decide by the rule of the record's `release` step: green is built, a failure of the tag pipeline is
+red and told as above, a pending job keeps the watch, statuses a branch pipeline at the same commit may have
+posted (or none, once the pipeline is gone) read `unchecked`. What was
 told is the record's `setup.release.told`, so the team hears about a release once: a later pass over the
 same red tag says nothing, a rerun that goes green turns the record built silently, and the next tag is a
 new watch. The record's `release` step and findings (`red-release`, `missed-tag-build`) follow the watch
 once it has read the tag, so the Repositories page and `devctl repo status` say what the notice said. A
-public repository's pipeline is read without a token, as CircleCI answers it; a private one needs
+public repository's pipeline is found without a token, as CircleCI answers it; a private one needs
 `circleci.existingSecret`, and reads `unchecked` without it — nothing is posted. Both channels come from
 the team's channel file in the team-files repository, `teams/<team>.yaml` (`asks: {id, name}`,
 `notices: {id, name}`), read strictly: an unknown key, a channel without its ID or name, or a file

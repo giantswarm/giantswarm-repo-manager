@@ -31,6 +31,7 @@ const (
 	circleCIFailure = "CircleCI failure"
 	wfBuild         = "wf-build"
 	neverRebuilt    = "rerun the failed workflow from failed on CircleCI"
+	amd64Context    = "ci/circleci: " + amd64Leg
 )
 
 // fakeTagPipelines is CircleCI as the watch reads it: one project's
@@ -40,7 +41,10 @@ type fakeTagPipelines struct {
 	pipelines []circleciclient.Pipeline
 	workflows map[string][]circleciclient.Workflow
 	jobs      map[string][]circleciclient.Job
-	calls     []string
+	// anonymousWorkflows answers the workflow listing 404 as CircleCI
+	// does without a token.
+	anonymousWorkflows bool
+	calls              []string
 }
 
 func (f *fakeTagPipelines) handler() http.Handler {
@@ -60,6 +64,11 @@ func (f *fakeTagPipelines) handler() http.Handler {
 	})
 	mux.HandleFunc("GET /api/v2/pipeline/{id}/workflow", func(w http.ResponseWriter, r *http.Request) {
 		f.calls = append(f.calls, r.URL.Path)
+		if f.anonymousWorkflows {
+			w.WriteHeader(http.StatusNotFound)
+			write(w, map[string]string{"message": "Pipeline run not found."})
+			return
+		}
 		write(w, map[string]any{kItems: f.workflows[r.PathValue("id")]})
 	})
 	mux.HandleFunc("GET /api/v2/workflow/{id}/job", func(w http.ResponseWriter, r *http.Request) {
@@ -87,14 +96,65 @@ func TestReadReleaseDecidesFromTheTagPipeline(t *testing.T) {
 	redJobs := []circleciclient.Job{{Name: "node-build", Status: stateSuccess}, {Name: amd64Leg, Status: statusTimedOut}, {Name: "build-image-arm64", Status: statusTimedOut}, {Name: releaseJobName, Status: "not_run"}}
 	branchRed := circleciclient.Workflow{ID: "wf-branch", Name: workflowBuild, Status: statusFailed, PipelineNumber: 11509, CreatedAt: t0.Add(2 * time.Minute)}
 
+	found := &inventory.ReleasePipeline{Number: 11508, URL: backstage11508}
+	statuses := func(state string, failed, pending []string) *inventory.HeadStatus {
+		return &inventory.HeadStatus{State: state, Contexts: []string{amd64Context, "ci/circleci: node-build"}, Failed: failed, Pending: pending, At: t0.Add(5 * time.Minute)}
+	}
 	cases := []struct {
 		name      string
 		fake      *fakeTagPipelines
 		anonymous bool
 		createdAt time.Time
-		want      inventory.ReleaseWatch
-		calls     int
+		// found is the pipeline an earlier pass found; build the tag
+		// commit's statuses as the record read them.
+		found *inventory.ReleasePipeline
+		build *inventory.HeadStatus
+		want  inventory.ReleaseWatch
+		calls int
 	}{
+		{
+			name:      "built from the statuses: CircleCI answers the workflows 404 without a token",
+			fake:      &fakeTagPipelines{project: org + "/" + name, pipelines: []circleciclient.Pipeline{tagPipeline}, anonymousWorkflows: true},
+			anonymous: true,
+			build:     statuses(stateSuccess, nil, nil),
+			want:      inventory.ReleaseWatch{State: inventory.ReleaseBuilt, Pipeline: found},
+			calls:     2,
+		},
+		{
+			name:      "red from the statuses: the failed jobs named",
+			fake:      &fakeTagPipelines{project: org + "/" + name, pipelines: []circleciclient.Pipeline{tagPipeline}, anonymousWorkflows: true},
+			anonymous: true,
+			build:     statuses(stateFailure, []string{amd64Context}, nil),
+			want:      inventory.ReleaseWatch{State: inventory.ReleaseRed, FailedJobs: []string{"build-image-amd64 (failed)"}, Pipeline: found},
+			calls:     2,
+		},
+		{
+			name:      "watching: a status still pending, the workflows 404",
+			fake:      &fakeTagPipelines{project: org + "/" + name, pipelines: []circleciclient.Pipeline{tagPipeline}, anonymousWorkflows: true},
+			anonymous: true,
+			build:     statuses("pending", nil, []string{amd64Context}),
+			want:      inventory.ReleaseWatch{State: inventory.ReleaseWatching, Pipeline: found},
+			calls:     2,
+		},
+		{
+			name:      "built: the pipeline an earlier pass found left the newest pipelines, not unbuilt",
+			fake:      &fakeTagPipelines{project: org + "/" + name, pipelines: []circleciclient.Pipeline{branchPipeline}},
+			anonymous: true,
+			createdAt: now.Add(-8 * 24 * time.Hour),
+			found:     found,
+			build:     statuses(stateSuccess, nil, nil),
+			want:      inventory.ReleaseWatch{State: inventory.ReleaseBuilt, Pipeline: found},
+			calls:     1,
+		},
+		{
+			name:      "unchecked: the pipeline left the newest pipelines and the commit carries no status",
+			fake:      &fakeTagPipelines{project: org + "/" + name, pipelines: []circleciclient.Pipeline{branchPipeline}},
+			anonymous: true,
+			createdAt: now.Add(-8 * 24 * time.Hour),
+			found:     found,
+			want:      inventory.ReleaseWatch{State: inventory.ReleaseUnchecked, Reason: "the tag pipeline is out of the inventory's reach and the tag commit carries no CircleCI status it can read", Pipeline: found},
+			calls:     1,
+		},
 		{
 			name: "red: the failed jobs and how, the failed workflow linked",
 			fake: &fakeTagPipelines{project: org + "/" + name, pipelines: []circleciclient.Pipeline{branchPipeline, tagPipeline},
@@ -198,8 +258,9 @@ func TestReadReleaseDecidesFromTheTagPipeline(t *testing.T) {
 			if createdAt.IsZero() {
 				createdAt = t0.Add(-time.Minute)
 			}
-			w := &inventory.ReleaseWatch{Tag: tag, CreatedAt: createdAt, State: inventory.ReleaseWatching}
-			rec := &inventory.Record{Repository: org + "/" + name, Name: name}
+			w := &inventory.ReleaseWatch{Tag: tag, CreatedAt: createdAt, State: inventory.ReleaseWatching, Pipeline: tc.found}
+			rec := &inventory.Record{Repository: org + "/" + name, Name: name,
+				Reality: &inventory.Reality{DefaultBranch: "main", LatestRelease: &inventory.Release{Tag: tag, Build: tc.build}}}
 			c.readRelease(context.Background(), rec, w, now)
 			if w.State != tc.want.State || w.Reason != tc.want.Reason || strings.Join(w.FailedJobs, ",") != strings.Join(tc.want.FailedJobs, ",") {
 				t.Errorf("state=%s reason=%q failedJobs=%v, want %s %q %v", w.State, w.Reason, w.FailedJobs, tc.want.State, tc.want.Reason, tc.want.FailedJobs)

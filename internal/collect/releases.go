@@ -415,7 +415,14 @@ func (c *Collector) readRelease(ctx context.Context, rec *inventory.Record, w *i
 		// An earlier pass found the tag's pipeline; it is no longer among
 		// the newest pipelines the lookup lists. Not a missed build: its
 		// workflows are read through the tag commit's statuses.
-		tp, err := ReadTagPipelineByTargets(ctx, o.CircleCI, org, name, w.Pipeline.Number, tagTargets(rec, w.Tag))
+		targets := tagTargets(rec, w.Tag)
+		if len(targets) == 0 && targetsUnread(rec, w.Tag) {
+			// The record read the statuses before their target URLs were
+			// kept (before v0.39.0): the next read of the repository
+			// brings them.
+			return
+		}
+		tp, err := ReadTagPipelineByTargets(ctx, o.CircleCI, org, name, w.Pipeline.Number, targets)
 		c.settle(rec, w, tp, err, now, true)
 		return
 	case p == nil:
@@ -465,6 +472,14 @@ func tagTargets(rec *inventory.Record, tag string) []string {
 		return nil
 	}
 	return rel.Build.Targets
+}
+
+// targetsUnread says whether the record read tag's commit statuses without
+// their target URLs: a read from before v0.39.0, as CircleCI's statuses
+// always carry one.
+func targetsUnread(rec *inventory.Record, tag string) bool {
+	rel := rec.Reality.LatestRelease
+	return rel != nil && rel.Tag == tag && rel.Build != nil && len(rel.Build.Contexts) > 0 && len(rel.Build.Targets) == 0
 }
 
 // workflowNotRun is a workflow the pipeline's filters left out: neither

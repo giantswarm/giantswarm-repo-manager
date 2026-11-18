@@ -152,8 +152,11 @@ func TestReadReleaseDecidesFromTheTagPipeline(t *testing.T) {
 		// URLs of the tag commit's statuses as the record read them.
 		found   *inventory.ReleasePipeline
 		targets []string
-		want    inventory.ReleaseWatch
-		calls   int
+		// noStatus: the tag commit carries no CircleCI status; legacy: the
+		// record read its statuses before their target URLs were kept.
+		noStatus, legacy bool
+		want             inventory.ReleaseWatch
+		calls            int
 	}{
 		{
 			name: "built: the workflows listing is 404 without a token, the statuses' jobs lead to the tag pipeline's workflow, the branch pipeline's red one left out",
@@ -192,12 +195,23 @@ func TestReadReleaseDecidesFromTheTagPipeline(t *testing.T) {
 			calls:     4,
 		},
 		{
-			name:      "unchecked: the pipeline left the newest pipelines and no status leads to it",
+			name:      "unchecked: the pipeline left the newest pipelines and the tag commit carries no status",
 			fake:      &fakeTagPipelines{project: org + "/" + name, pipelines: []circleciclient.Pipeline{branchPipeline}},
 			anonymous: true,
 			createdAt: now.Add(-8 * 24 * time.Hour),
 			found:     found,
+			noStatus:  true,
 			want:      inventory.ReleaseWatch{State: inventory.ReleaseUnchecked, Reason: "the tag pipeline 11508 is no longer among the pipelines CircleCI lists first, and no CircleCI status on the tag commit leads to its workflows", Pipeline: found},
+			calls:     1,
+		},
+		{
+			name:      "watching: the pipeline left the newest pipelines, the record read the statuses before their target URLs were kept",
+			fake:      &fakeTagPipelines{project: org + "/" + name, pipelines: []circleciclient.Pipeline{branchPipeline}},
+			anonymous: true,
+			createdAt: now.Add(-8 * 24 * time.Hour),
+			found:     found,
+			legacy:    true,
+			want:      inventory.ReleaseWatch{State: inventory.ReleaseWatching, Pipeline: found},
 			calls:     1,
 		},
 		{
@@ -306,6 +320,13 @@ func TestReadReleaseDecidesFromTheTagPipeline(t *testing.T) {
 			w := &inventory.ReleaseWatch{Tag: tag, CreatedAt: createdAt, State: inventory.ReleaseWatching, Pipeline: tc.found}
 			rec := &inventory.Record{Repository: org + "/" + name, Name: name,
 				Reality: &inventory.Reality{DefaultBranch: "main", LatestRelease: &inventory.Release{Tag: tag, Build: &inventory.HeadStatus{State: stateSuccess, Contexts: []string{"ci/circleci: node-build"}, Targets: tc.targets}}}}
+			switch {
+			case tc.noStatus:
+				rec.Reality.LatestRelease.Build = nil
+			case tc.found != nil && !tc.legacy && tc.targets == nil:
+				// A status that leads nowhere this case serves.
+				rec.Reality.LatestRelease.Build.Targets = []string{"https://circleci.com/gh/giantswarm/backstage/9999"}
+			}
 			c.readRelease(context.Background(), rec, w, now)
 			if w.State != tc.want.State || w.Reason != tc.want.Reason || strings.Join(w.FailedJobs, ",") != strings.Join(tc.want.FailedJobs, ",") {
 				t.Errorf("state=%s reason=%q failedJobs=%v, want %s %q %v", w.State, w.Reason, w.FailedJobs, tc.want.State, tc.want.Reason, tc.want.FailedJobs)

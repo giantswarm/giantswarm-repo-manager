@@ -399,9 +399,13 @@ func (w *ReleaseWatch) Settled() bool { return w != nil && w.State != ReleaseWat
 
 // Following says whether the watch still reads the release's pipeline: one
 // not settled yet, and a red one — a rerun from failed may turn it built,
-// silently — until the next release replaces it.
+// silently — until the next release replaces it. An unbuilt release whose
+// pipeline was found is followed too: the watch settled such releases
+// before v0.39.0, when the found pipeline left the newest ones it lists
+// (crossplane-fn-irsa v0.4.0, pipeline 1025 green); it no longer does, and
+// reads them again. The team, told then, is not told again (Told stays).
 func (w *ReleaseWatch) Following() bool {
-	return w != nil && (w.State == ReleaseWatching || w.State == ReleaseRed)
+	return w != nil && (w.State == ReleaseWatching || w.State == ReleaseRed || w.State == ReleaseUnbuilt && w.Pipeline != nil)
 }
 
 // Untold says whether the release is one the team hears about — red or

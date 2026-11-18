@@ -778,6 +778,12 @@ func TestWatchRepositoryReadsTheStatusesWhereNoTagPipelineIsRead(t *testing.T) {
 		!strings.Contains(w.PendingReason, "released once unchanged for "+watchSettle.String()) {
 		t.Fatalf("public, statuses that lead to no workflow, settling: %+v", w)
 	}
+	// One status still a branch pipeline's workflow, the others the tag's
+	// OAuth jobs: the statuses decide.
+	st.ghs.repos.reportLinking(shinyService, stateSuccess, "https://app.circleci.com/workflow/"+branchWf+"/job/0f1d", circleSetup)
+	if w := st.watch(t, c, pr, settling); w.Ready || w.Pending != tools.PhaseReleased || !strings.HasPrefix(w.PendingReason, "the CircleCI statuses on "+firstTag+": ") {
+		t.Fatalf("public, a branch workflow's status beside the tag's OAuth jobs: %+v", w)
+	}
 	st.ghs.repos.setPrivate(shinyService, true)
 	st.ghs.repos.report(shinyService, stateSuccess, greenRelease...)
 	if w := st.watch(t, c, pr, settling); w.Ready || w.Pending != tools.PhaseReleased || !strings.HasPrefix(w.PendingReason, "the CircleCI statuses on "+firstTag+": ") ||

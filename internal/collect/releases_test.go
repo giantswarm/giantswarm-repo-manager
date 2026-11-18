@@ -156,8 +156,12 @@ func TestReadReleaseDecidesFromTheTagPipeline(t *testing.T) {
 		// record carries its statuses without their target URLs, written
 		// before the collector started, or after it with readAfterStart.
 		noStatus, legacy, readAfterStart bool
-		want                             inventory.ReleaseWatch
-		calls                            int
+		// overwritten: the commit also carries a status of
+		// build-image-amd64, a job the declaration runs on the tag, that
+		// another pipeline posted: no workflow the read saw has it.
+		overwritten bool
+		want        inventory.ReleaseWatch
+		calls       int
 	}{
 		{
 			name: "built: the workflows listing is 404 without a token, the statuses' jobs lead to the tag pipeline's workflow, the branch pipeline's red one left out",
@@ -177,6 +181,27 @@ func TestReadReleaseDecidesFromTheTagPipeline(t *testing.T) {
 			want: inventory.ReleaseWatch{State: inventory.ReleaseRed, FailedJobs: []string{amd64TimedOut, arm64TimedOut},
 				Pipeline: &inventory.ReleasePipeline{Number: 11508, URL: backstage11508, Workflow: backstage11508 + "/workflows/" + wfBuild}},
 			calls: 4,
+		},
+		{
+			name: "watching: a status of a tag job is another pipeline's, the tag workflow that ran it not seen",
+			fake: &fakeTagPipelines{project: org + "/" + name, pipelines: []circleciclient.Pipeline{tagPipeline}, anonymousWorkflows: true,
+				workflows: anonymousRuns, jobs: anonymousJobs},
+			anonymous:   true,
+			targets:     []string{"https://app.circleci.com/workflow/" + wfOK + "/job/0f1e"},
+			overwritten: true,
+			want:        inventory.ReleaseWatch{State: inventory.ReleaseWatching, Pipeline: found},
+			calls:       4,
+		},
+		{
+			name:        "unchecked: the pipeline left the newest pipelines, a status of a tag job is another pipeline's",
+			fake:        &fakeTagPipelines{project: org + "/" + name, pipelines: []circleciclient.Pipeline{branchPipeline}, workflows: anonymousRuns, jobs: anonymousJobs},
+			anonymous:   true,
+			createdAt:   now.Add(-8 * 24 * time.Hour),
+			found:       found,
+			targets:     []string{"https://app.circleci.com/workflow/" + wfOK + "/job/0f1e"},
+			overwritten: true,
+			want:        inventory.ReleaseWatch{State: inventory.ReleaseUnchecked, Reason: "the tag pipeline 11508 is no longer among the pipelines CircleCI lists first, and another pipeline's statuses on the tag commit hide its jobs " + amd64Leg, Pipeline: found},
+			calls:       3,
 		},
 		{
 			name:      "watching: the workflows listing is 404 and no status on the tag commit yet",
@@ -336,6 +361,11 @@ func TestReadReleaseDecidesFromTheTagPipeline(t *testing.T) {
 			rec.RefreshedAt = started.Add(-time.Hour)
 			if tc.readAfterStart {
 				rec.RefreshedAt = started.Add(time.Minute)
+			}
+			if tc.overwritten {
+				b := rec.Reality.LatestRelease.Build
+				b.Contexts = append(b.Contexts, amd64Context)
+				rec.CI = &inventory.CI{Jobs: []inventory.CIJob{{Name: nodeBuild, TagsOnly: []string{"/^v.*/"}}, {Name: amd64Leg, TagsOnly: []string{"/^v.*/"}}}}
 			}
 			switch {
 			case tc.noStatus:

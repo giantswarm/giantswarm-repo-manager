@@ -113,10 +113,11 @@ giantswarm/backstage v2.58.8 confirms it`. A tag without a pipeline `inventory.r
 10m) after its creation is the missed build, told the same way, linking the project's pipelines — never a
 tag whose pipeline an earlier pass found: the lookup reads the project's newest pipelines only, and a busy
 project pushes the tag's out of them. Without a token CircleCI lists a public project's pipelines but answers
-their workflows 404; then, and once a found pipeline is no longer listed, the tag commit's `ci/circleci:`
-statuses decide by the rule of the record's `release` step: green is built, a failure of the tag pipeline is
-red and told as above, a pending job keeps the watch, statuses a branch pipeline at the same commit may have
-posted (or none, once the pipeline is gone) read `unchecked`. What was
+their workflows 404; it answers a job and a workflow by id. Then, and once a found pipeline is no longer
+listed, the watch follows the target URLs of the tag commit's `ci/circleci:` statuses (an OAuth follow's job,
+whose workflow it reads; a GitHub App pipeline's workflow) and keeps the workflows of the tag's own pipeline
+by its number, so a branch or candidate pipeline's statuses at the same commit change nothing. A pipeline no
+longer listed that no status leads to reads `unchecked`, and nothing is told. What was
 told is the record's `setup.release.told`, so the team hears about a release once: a later pass over the
 same red tag says nothing, a rerun that goes green turns the record built silently, and the next tag is a
 new watch. The record's `release` step and findings (`red-release`, `missed-tag-build`) follow the watch

@@ -50,33 +50,34 @@ const (
 // built and names the job.
 func statusesReleaseStep(slug, tag string, b *inventory.HeadStatus, ci *inventory.CI, tagOnly []string) reconcile.StepResult {
 	sr := reconcile.StepResult{Step: reconcile.StepRelease}
-	ts := readTagStatuses(tag, b, ci, tagOnly)
-	own, failed := ts.own, ts.failed
+	own, foreign := splitStatuses(b, ci, func(j inventory.CIJob) bool { return j.RunsOnTag(tag) })
+	failed, pending := statesOf(b, own)
+	failed, published := unpublished(failed)
 	count := fmt.Sprintf("%s, %s", plural(len(own), "job"), b.At.UTC().Format(time.RFC3339))
 	notes := ""
-	if len(ts.foreign) > 0 {
-		notes = fmt.Sprintf("; %s of a branch pipeline at the commit ignored", plural(len(ts.foreign), "status"))
+	if len(foreign) > 0 {
+		notes = fmt.Sprintf("; %s of a branch pipeline at the commit ignored", plural(len(foreign), "status"))
 	}
-	if len(ts.published) > 0 {
-		notes += fmt.Sprintf("; %s failed, the GitHub release it publishes exists", jobNames(ts.published))
+	if len(published) > 0 {
+		notes += fmt.Sprintf("; %s failed, the GitHub release it publishes exists", jobNames(published))
 	}
-	switch ts.verdict {
-	case tagStatusesUnattributed:
+	switch {
+	case len(failed) > 0 && len(foreign) > 0 && !anyTagOnly(failed, ci, tag):
 		sr.Verdict = reconcile.VerdictReported
 		sr.Summary = fmt.Sprintf("release %s: two pipelines' statuses on its commit, %s failed (%s)", tag, jobNames(failed), count)
 		sr.Findings = []reconcile.Finding{finding(reconcile.FindingUnchecked,
 			fmt.Sprintf("whether CircleCI built the tag %s of %s is out of the inventory's reach: %s failed on the release commit, but a branch pipeline built the commit too and a commit status does not say whose job it was", tag, slug, jobNames(failed)),
 			fmt.Sprintf("configure a CircleCI token (`circleci.existingSecret`) so the release watch reads the tag's own pipeline; `devctl release wait %s %s` tells now", slug, tag))}
-	case tagStatusesRed:
+	case len(failed) > 0:
 		sr.Verdict = reconcile.VerdictReported
 		sr.Summary = fmt.Sprintf("release %s: CircleCI failure in %s (%s)%s", tag, jobNames(failed), count, notes)
 		sr.Findings = []reconcile.Finding{finding(reconcile.FindingRedRelease,
 			fmt.Sprintf("the tag pipeline of %s %s failed in %s", slug, tag, jobNames(failed)),
 			fmt.Sprintf("nothing was published for %s: rerun the failed workflow from failed on CircleCI, then `devctl release wait %s %s` confirms the images and chart; when the cause is in the code, the next tag is the release", tag, slug, tag))}
-	case tagStatusesRunning:
+	case len(pending) > 0:
 		sr.Verdict = reconcile.VerdictOK
 		sr.Summary = fmt.Sprintf("release %s: CircleCI pipeline running (%s)%s", tag, count, notes)
-	case tagStatusesNoTagJob:
+	case len(tagOnly) > 0 && !inventory.Reported(own, tagOnly):
 		sr.Verdict = reconcile.VerdictReported
 		sr.Summary = fmt.Sprintf("release %s: none of the tag pipeline's own jobs (%s) on its commit (%s)%s", tag, strings.Join(tagOnly, ", "), count, notes)
 		sr.Findings = []reconcile.Finding{finding(reconcile.FindingUnchecked,
@@ -87,58 +88,6 @@ func statusesReleaseStep(slug, tag string, b *inventory.HeadStatus, ci *inventor
 		sr.Summary = fmt.Sprintf("release %s built: CircleCI success (%s)%s", tag, count, notes)
 	}
 	return sr
-}
-
-// tagStatusesVerdict is what a tag commit's statuses say about the release,
-// by the rules of statusesReleaseStep.
-type tagStatusesVerdict int
-
-const (
-	// tagStatusesBuilt: every own job green, a tag-only job among them when
-	// the declaration has one.
-	tagStatusesBuilt tagStatusesVerdict = iota
-	// tagStatusesRed: a failed job that is the tag pipeline's.
-	tagStatusesRed
-	// tagStatusesRunning: a job still pending, none failed.
-	tagStatusesRunning
-	// tagStatusesUnattributed: a failed job a branch pipeline at the same
-	// commit may have posted.
-	tagStatusesUnattributed
-	// tagStatusesNoTagJob: green, but none of the jobs only the tag
-	// pipeline runs has reported.
-	tagStatusesNoTagJob
-)
-
-// tagStatuses is a tag commit's statuses read against the declaration: own
-// and foreign contexts (splitStatuses), the own failed ones that leave the
-// release unpublished and those whose output is the GitHub release itself,
-// and the verdict.
-type tagStatuses struct {
-	own, foreign, failed, published []string
-	verdict                         tagStatusesVerdict
-}
-
-// readTagStatuses reads the statuses b of tag's commit: the rule of
-// statusesReleaseStep, shared with the release watch when it cannot read
-// the tag's pipeline.
-func readTagStatuses(tag string, b *inventory.HeadStatus, ci *inventory.CI, tagOnly []string) tagStatuses {
-	ts := tagStatuses{}
-	ts.own, ts.foreign = splitStatuses(b, ci, func(j inventory.CIJob) bool { return j.RunsOnTag(tag) })
-	failed, pending := statesOf(b, ts.own)
-	ts.failed, ts.published = unpublished(failed)
-	switch {
-	case len(ts.failed) > 0 && len(ts.foreign) > 0 && !anyTagOnly(ts.failed, ci, tag):
-		ts.verdict = tagStatusesUnattributed
-	case len(ts.failed) > 0:
-		ts.verdict = tagStatusesRed
-	case len(pending) > 0:
-		ts.verdict = tagStatusesRunning
-	case len(tagOnly) > 0 && !inventory.Reported(ts.own, tagOnly):
-		ts.verdict = tagStatusesNoTagJob
-	default:
-		ts.verdict = tagStatusesBuilt
-	}
-	return ts
 }
 
 // splitStatuses divides a commit's statuses by the declaration: own are the

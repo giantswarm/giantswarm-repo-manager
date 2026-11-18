@@ -915,7 +915,7 @@ fragment RepoFields on Repository {
   primaryLanguage { name }
   repositoryTopics(first: 20) { nodes { topic { name } } }
   latestRelease { tagName publishedAt tagCommit { statusCheckRollup { state contexts(first: 40) {
-    pageInfo { hasNextPage } nodes { ... on StatusContext { context state createdAt } }
+    pageInfo { hasNextPage } nodes { ... on StatusContext { context state createdAt targetUrl } }
   } } } }
   openIssues: issues(states: OPEN) { totalCount }
   oldestIssues: issues(states: OPEN, first: 5, orderBy: {field: CREATED_AT, direction: ASC}) { nodes { number title } }
@@ -1058,12 +1058,17 @@ type statusRollup struct {
 		PageInfo struct {
 			HasNextPage bool `json:"hasNextPage"`
 		} `json:"pageInfo"`
-		Nodes []struct {
-			Context   string    `json:"context"`
-			State     string    `json:"state"`
-			CreatedAt time.Time `json:"createdAt"`
-		} `json:"nodes"`
+		Nodes []statusContextNode `json:"nodes"`
 	} `json:"contexts"`
+}
+
+// statusContextNode is one StatusContext of a status rollup.
+type statusContextNode struct {
+	Context   string    `json:"context"`
+	State     string    `json:"state"`
+	CreatedAt time.Time `json:"createdAt"`
+	// TargetURL is read for a release's tag commit only.
+	TargetURL string `json:"targetUrl"`
 }
 
 type idNode struct {

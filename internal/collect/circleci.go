@@ -154,12 +154,15 @@ func rollupStatus(rollup *statusRollup) (*inventory.HeadStatus, bool) {
 		return nil, false
 	}
 	worst, at := "", time.Time{}
-	var contexts, failed, pending []string
+	var contexts, failed, pending, targets []string
 	for _, c := range rollup.Contexts.Nodes {
 		if !strings.HasPrefix(c.Context, inventory.CircleCIContext) {
 			continue
 		}
 		contexts = append(contexts, c.Context)
+		if c.TargetURL != "" {
+			targets = append(targets, c.TargetURL)
+		}
 		switch c.State {
 		case "FAILURE", "ERROR":
 			failed = append(failed, c.Context)
@@ -179,7 +182,8 @@ func rollupStatus(rollup *statusRollup) (*inventory.HeadStatus, bool) {
 	sort.Strings(contexts)
 	sort.Strings(failed)
 	sort.Strings(pending)
-	return &inventory.HeadStatus{State: strings.ToLower(worst), Contexts: contexts, Failed: failed, Pending: pending, At: at}, rollup.Contexts.PageInfo.HasNextPage
+	sort.Strings(targets)
+	return &inventory.HeadStatus{State: strings.ToLower(worst), Contexts: contexts, Failed: failed, Pending: pending, Targets: targets, At: at}, rollup.Contexts.PageInfo.HasNextPage
 }
 
 func ptr[T any](v T) *T { return &v }

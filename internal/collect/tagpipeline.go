@@ -3,6 +3,8 @@ package collect
 import (
 	"context"
 	"fmt"
+	"net/url"
+	"strings"
 
 	"github.com/giantswarm/devctl/v8/pkg/circleciclient"
 	"github.com/giantswarm/devctl/v8/pkg/reposetup/reconcile"
@@ -43,18 +45,124 @@ func (p *TagPipeline) Built() bool { return !p.Red() && !p.Running && p.Succeede
 // jobs of a failed one: one workflow listing, one job listing per failed
 // workflow. The pipeline comes back named even when a read fails.
 func ReadTagPipeline(ctx context.Context, cc *circleciclient.Client, org, name string, p *circleciclient.Pipeline) (*TagPipeline, error) {
-	tp := &TagPipeline{Pipeline: &inventory.ReleasePipeline{Number: p.Number, URL: circleciclient.PipelineURL(org, name, p.Number)}}
+	tp := newTagPipeline(org, name, p.Number)
 	runs, err := cc.ListPipelineWorkflows(ctx, p.ID)
 	if err != nil {
 		return tp, fmt.Errorf("the workflows of pipeline %d: %w", p.Number, err)
 	}
+	return tp, tp.read(ctx, cc, org, name, runs)
+}
+
+// ReadTagPipelineByTargets reads the workflows of org/name's tag pipeline
+// number that the target URLs of the tag commit's CircleCI statuses lead to,
+// by the rule of ReadTagPipeline. It is the read where the pipeline's
+// workflow listing is out of reach: CircleCI answers that listing 404
+// without a token, but answers a job, a workflow and a workflow's jobs of a
+// public project (the job of an OAuth follow's status, `circleci.com/gh/
+// <org>/<repo>/<job>`, names its workflow; a GitHub App pipeline's status
+// names the workflow, `app.circleci.com/workflow/<id>/job/<id>`), and it
+// reads a pipeline no longer among the newest ones the lookup lists. A
+// status names its job, not its pipeline: a workflow of another pipeline at
+// the same commit (a branch's, a candidate tag's) is left out by its
+// pipeline number. A workflow none of whose jobs has posted a status yet is
+// not seen; no workflow at all leaves the TagPipeline without Workflows.
+func ReadTagPipelineByTargets(ctx context.Context, cc *circleciclient.Client, org, name string, number int64, targets []string) (*TagPipeline, error) {
+	tp := newTagPipeline(org, name, number)
+	ids, err := targetWorkflows(ctx, cc, org, name, number, targets)
+	if err != nil {
+		return tp, fmt.Errorf("the workflows of pipeline %d from the tag's statuses: %w", number, err)
+	}
+	var runs []circleciclient.Workflow
+	for _, id := range ids {
+		wd, err := cc.GetWorkflow(ctx, id)
+		switch {
+		case circleciclient.IsNotFound(err):
+			continue
+		case err != nil:
+			return tp, fmt.Errorf("workflow %s of pipeline %d: %w", id, number, err)
+		case wd.PipelineNumber == number:
+			runs = append(runs, wd.Workflow)
+		}
+	}
+	return tp, tp.read(ctx, cc, org, name, runs)
+}
+
+// targetWorkflows are the ids of the workflows the target URLs lead to, in
+// the order first met: a workflow URL names its own; a pipeline URL of
+// another pipeline than number is skipped; a job URL is read for its
+// workflow, whose jobs are then listed so that the statuses of its other
+// jobs are not read one by one. A job CircleCI does not know is skipped.
+func targetWorkflows(ctx context.Context, cc *circleciclient.Client, org, name string, number int64, targets []string) ([]string, error) {
+	var ids []string
+	seen, known := map[string]bool{}, map[int64]bool{}
+	add := func(id string) bool {
+		if id == "" || seen[id] {
+			return false
+		}
+		seen[id] = true
+		ids = append(ids, id)
+		return true
+	}
+	for _, raw := range targets {
+		u, err := url.Parse(raw)
+		if err != nil {
+			continue
+		}
+		parts := strings.Split(strings.Trim(u.Path, "/"), "/")
+		if u.Host == "app.circleci.com" && len(parts) >= 2 && parts[0] == "workflow" {
+			add(parts[1])
+			continue
+		}
+		t, ok := circleciclient.ParseStatusTarget(raw)
+		if !ok || t.Org != org || t.Repo != name {
+			continue
+		}
+		if t.Pipeline > 0 {
+			if t.Pipeline == number && len(parts) >= 7 && parts[5] == "workflows" {
+				add(parts[6])
+			}
+			continue
+		}
+		if known[t.Job] {
+			continue
+		}
+		job, err := cc.GetProjectJob(ctx, org, name, t.Job)
+		switch {
+		case circleciclient.IsNotFound(err):
+			continue
+		case err != nil:
+			return nil, fmt.Errorf("job %d: %w", t.Job, err)
+		}
+		known[t.Job] = true
+		if !add(job.LatestWorkflow.ID) {
+			continue
+		}
+		jobs, err := cc.ListWorkflowJobs(ctx, job.LatestWorkflow.ID)
+		if err != nil {
+			return nil, fmt.Errorf("the jobs of workflow %s: %w", job.LatestWorkflow.ID, err)
+		}
+		for _, j := range jobs {
+			known[j.JobNumber] = true
+		}
+	}
+	return ids, nil
+}
+
+func newTagPipeline(org, name string, number int64) *TagPipeline {
+	return &TagPipeline{Pipeline: &inventory.ReleasePipeline{Number: number, URL: circleciclient.PipelineURL(org, name, number)}}
+}
+
+// read reads runs, the workflows of the pipeline, into tp: the newest run of
+// every name, and the jobs of a failed one.
+func (tp *TagPipeline) read(ctx context.Context, cc *circleciclient.Client, org, name string, runs []circleciclient.Workflow) error {
+	p := tp.Pipeline
 	for _, run := range circleciclient.NewestWorkflows(runs) {
 		tp.Workflows = append(tp.Workflows, run.Name+" ("+run.Status+")")
 		switch {
 		case circleciclient.WorkflowFailed(run.Status):
 			jobs, err := cc.ListWorkflowJobs(ctx, run.ID)
 			if err != nil {
-				return tp, fmt.Errorf("the jobs of workflow %s of pipeline %d: %w", run.Name, p.Number, err)
+				return fmt.Errorf("the jobs of workflow %s of pipeline %d: %w", run.Name, p.Number, err)
 			}
 			if releaseOnly(jobs) {
 				tp.Succeeded++
@@ -75,7 +183,7 @@ func ReadTagPipeline(ctx context.Context, cc *circleciclient.Client, org, name s
 			tp.Running = true
 		}
 	}
-	return tp, nil
+	return nil
 }
 
 // releaseOnly says whether a failed workflow's failed jobs all leave nothing

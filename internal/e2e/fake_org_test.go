@@ -75,6 +75,8 @@ const (
 	presentTag = "v1.0.0"
 	// stateSuccessGQL is GraphQL's spelling of a green status.
 	stateSuccessGQL = "SUCCESS"
+	stateFailureGQL = "FAILURE"
+	kStatus         = "status"
 )
 
 var teamFile = `# yaml-language-server: $schema=../repositories.schema.json
@@ -134,6 +136,17 @@ type fakeLatestRelease struct {
 	createdAt   time.Time
 	publishedAt time.Time
 	pr          int
+	// statuses are the tag commit's status contexts, nodes of its rollup.
+	statuses []map[string]any
+}
+
+// releaseStatuses sets the status contexts on a release's tag commit.
+func (o *fakeOrg) releaseStatuses(name string, nodes ...map[string]any) {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	rel := o.releases[name]
+	rel.statuses = nodes
+	o.releases[name] = rel
 }
 
 // release sets a repository's latest release for the release watch's page.
@@ -180,6 +193,9 @@ func (o *fakeOrg) releasePage() []map[string]any {
 			var rollup map[string]any
 			if name == repoLegacy && o.private[repoLegacy] {
 				rollup = o.mixedRollup()
+			}
+			if rel.statuses != nil {
+				rollup = map[string]any{kState: stateFailureGQL, kContexts: map[string]any{kPageInfo: map[string]any{kHasNextPage: false}, kNodes: rel.statuses}}
 			}
 			n["latestRelease"] = map[string]any{kTagName: rel.tag, kCreatedAt: rel.createdAt.UTC().Format(time.RFC3339), kPublishedAt: rel.publishedAt.UTC().Format(time.RFC3339),
 				kTagCommit: map[string]any{kOID: "a80db8ff", "associatedPullRequests": map[string]any{kNodes: prs}, kStatusRollup: rollup}}

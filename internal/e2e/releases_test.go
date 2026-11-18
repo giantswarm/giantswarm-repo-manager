@@ -279,9 +279,9 @@ func TestReleaseWatchReadsTheTagPipelineWithoutAToken(t *testing.T) {
 	now := st.now()
 	st.cc.anonymousWorkflows = true
 	st.ghs.org.release(repoPresent, "v7.4.3", now.Add(-20*time.Minute), 42)
-	st.cc.pipeline(repoPresent, circleciclient.PipelineVCS{Tag: "v7.4.3", Revision: "7c71aa85"}, now.Add(-19*time.Minute), conclusionSuccess,
+	st.cc.pipeline(repoPresent, circleciclient.PipelineVCS{Tag: "v7.4.3", Revision: tagCommitSHA}, now.Add(-19*time.Minute), conclusionSuccess,
 		circleciclient.Job{Name: jobPushRelease, Status: conclusionSuccess, JobNumber: 3689})
-	st.cc.pipeline(repoPresent, circleciclient.PipelineVCS{Branch: "main", Revision: "7c71aa85"}, now.Add(-18*time.Minute), "failed",
+	st.cc.pipeline(repoPresent, circleciclient.PipelineVCS{Branch: "main", Revision: tagCommitSHA}, now.Add(-18*time.Minute), "failed",
 		circleciclient.Job{Name: "go-test", Status: "failed", JobNumber: 3701})
 	at := now.Add(-15 * time.Minute).Format(time.RFC3339)
 	st.ghs.org.releaseStatuses(repoPresent,
@@ -299,5 +299,47 @@ func TestReleaseWatchReadsTheTagPipelineWithoutAToken(t *testing.T) {
 	}
 	if _, n := st.gw.posted(); len(n) != 0 {
 		t.Errorf("a built release tells nothing: %v", n)
+	}
+}
+
+// TestReleaseWatchRereadsAnUnbuiltReleaseWithItsPipeline: before v0.39.0 the
+// watch settled a release unbuilt once its found pipeline left the newest
+// pipelines (crossplane-fn-irsa v0.4.0, pipeline 1025 green, told 11270
+// minutes after the tag). The watch reads such a release again from the
+// store after a start: it settles built, and the team hears nothing more.
+func TestReleaseWatchRereadsAnUnbuiltReleaseWithItsPipeline(t *testing.T) {
+	st := newStack(t)
+	ctx := context.Background()
+	if _, err := st.col.Sweep(ctx); err != nil {
+		t.Fatalf("sweep: %v", err)
+	}
+	now := st.now()
+	st.cc.anonymousWorkflows = true
+	st.cc.pipeline(repoPresent, circleciclient.PipelineVCS{Tag: presentTag, Revision: tagCommitSHA}, now.AddDate(0, -1, 0), conclusionSuccess,
+		circleciclient.Job{Name: jobPushRelease, Status: conclusionSuccess, JobNumber: 4001})
+	rec, err := st.store.Get(ctx, org+"/"+repoPresent)
+	if err != nil {
+		t.Fatal(err)
+	}
+	const told = "present: release v1.0.0 has no CircleCI pipeline 11270 minutes after the tag"
+	settled := now.Add(-time.Hour)
+	rec.Setup.Release = &inventory.ReleaseWatch{Tag: presentTag, CreatedAt: now.AddDate(0, -1, 0), State: inventory.ReleaseUnbuilt,
+		Pipeline: &inventory.ReleasePipeline{Number: 11501}, CheckedAt: settled, SettledAt: &settled, Told: told, ToldAt: &settled}
+	rec.Reality.LatestRelease.Build.Targets = []string{"https://circleci.com/gh/" + org + "/" + repoPresent + "/4001"}
+	if err := st.store.Put(ctx, rec); err != nil {
+		t.Fatal(err)
+	}
+	if p := st.watchReleases(t); p.Settled != 1 || p.Told != 0 || p.Watching != 0 {
+		t.Fatalf("an unbuilt release with its pipeline read again: %+v", p)
+	}
+	rec, err = st.store.Get(ctx, org+"/"+repoPresent)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if w := rec.Setup.Release; w.State != inventory.ReleaseBuilt || w.Told != told {
+		t.Errorf("built, the sentence told then kept: %+v", w)
+	}
+	if _, n := st.gw.posted(); len(n) != 0 {
+		t.Errorf("the team is not told again: %v", n)
 	}
 }

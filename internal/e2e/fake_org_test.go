@@ -73,6 +73,8 @@ const (
 	circlePush      = "ci/circleci: push-to-registries"
 	// presentTag is the present repository's latest release.
 	presentTag = "v1.0.0"
+	// tagCommitSHA is the commit the release tests tag.
+	tagCommitSHA = "7c71aa85"
 	// stateSuccessGQL is GraphQL's spelling of a green status.
 	stateSuccessGQL = "SUCCESS"
 	stateFailureGQL = "FAILURE"

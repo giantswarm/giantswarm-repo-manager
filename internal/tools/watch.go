@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"net/url"
 	"strings"
 	"time"
 
@@ -47,8 +48,9 @@ const contextImagePush = "push-to-registries"
 // carries the scaffold, the reconciler run of that pull request has
 // reported, and the
 // first release exists with its tag pipeline's workflows green — or, where
-// the manager reads no tag pipeline, its CircleCI statuses green, complete
-// for the declaration and settled. A repository whose release workflow is
+// the manager reads no tag pipeline or its read finds no workflow (an OAuth
+// follow without a token), its CircleCI statuses green, complete for the
+// declaration and settled. A repository whose release workflow is
 // not auto-release (withoutRelease) has no release to wait for: it is ready
 // once set up. One without CI (withoutCI) whose auto-release still cuts a
 // release is released once the release exists: no pipeline builds it.
@@ -91,7 +93,8 @@ type Watch struct {
 	// last read — a read GitHub or CircleCI refused, the statuses no
 	// identity reads, or, once CircleCI builds the release, the tag
 	// pipeline's workflows and their states (the statuses reported and what
-	// is still awaited, where the manager reads no tag pipeline); empty when
+	// is still awaited, where the manager reads no tag pipeline or its read
+	// finds no workflow, an OAuth follow without a token); empty when
 	// the phase is simply not reached yet.
 	PendingReason string `json:"pendingReason,omitempty"`
 	// Failure names the phase that failed and why; the phases before it are
@@ -486,7 +489,8 @@ func (w *watcher) withoutRelease() bool {
 
 // released: the first release exists (read as the caller) and, where the
 // manager reads the tag pipeline on CircleCI (readsTagPipeline), its
-// workflows decide (tagPipelineVerdict). Elsewhere the CircleCI statuses on
+// workflows decide (tagPipelineVerdict). Elsewhere, and where that read
+// finds no workflow (an OAuth follow without a token), the CircleCI statuses on
 // its commit must be green, complete and settled — read as the
 // inventory App, the identity of the unattended reads: the caller's token
 // through the App giantswarm-repo-manager has no statuses permission. A
@@ -580,8 +584,9 @@ func (w *watcher) tagPipelineVerdict(ctx context.Context, tag string) (o outcome
 		if serr != nil {
 			return undecided(fmt.Sprintf("read the statuses of %s/%s@%s as the inventory App: %v", w.org(), w.name, tag, serr)), true
 		}
-		tp, err = collect.ReadTagPipelineByTargets(ctx, cc, w.org(), w.name, w.pipeline.Number, circleCITargets(st))
-		if err == nil && len(tp.Workflows) == 0 {
+		targets := circleCITargets(st)
+		tp, err = collect.ReadTagPipelineByTargets(ctx, cc, w.org(), w.name, w.pipeline.Number, targets)
+		if err == nil && len(tp.Workflows) == 0 && !namesWorkflow(targets) {
 			return outcome{}, false
 		}
 	}
@@ -600,6 +605,24 @@ func (w *watcher) tagPipelineVerdict(ctx context.Context, tag string) (o outcome
 		return undecided(line + ": no workflow yet"), true
 	}
 	return undecided(fmt.Sprintf("%s: %s — no workflow has run yet", line, strings.Join(tp.Workflows, ", "))), true
+}
+
+// namesWorkflow says whether a target URL names its CircleCI workflow (a
+// GitHub App pipeline's status): such statuses that led to no workflow of
+// the tag pipeline are another pipeline's, and the tag pipeline has not
+// reported yet; an OAuth follow's job URL names no workflow.
+func namesWorkflow(targets []string) bool {
+	for _, raw := range targets {
+		u, err := url.Parse(raw)
+		if err != nil || u.Host != "app.circleci.com" {
+			continue
+		}
+		parts := strings.Split(strings.Trim(u.Path, "/"), "/")
+		if len(parts) >= 2 && parts[0] == "workflow" || len(parts) >= 7 && parts[0] == "pipelines" && parts[5] == "workflows" {
+			return true
+		}
+	}
+	return false
 }
 
 // circleCITargets are the target URLs of the `ci/circleci:` statuses of a

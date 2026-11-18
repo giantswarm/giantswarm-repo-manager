@@ -764,6 +764,11 @@ func TestWatchRepositoryReadsTheStatusesWhereNoTagPipelineIsRead(t *testing.T) {
 	st.cc.anonymousWorkflows = true
 	wf := st.cc.pipeline(shinyService, circleciclient.PipelineVCS{Tag: firstTag}, time.Now(), workflowRunning)
 	st.ghs.repos.setPrivate(shinyService, false)
+	branchWf := st.cc.pipeline(shinyService, circleciclient.PipelineVCS{Branch: mainBranch}, time.Now(), stateSuccess)
+	st.ghs.repos.reportLinking(shinyService, stateSuccess, "https://app.circleci.com/workflow/"+branchWf+"/job/0f1d", greenRelease...)
+	if w := st.watch(t, c, pr, settling); w.Ready || w.Pending != tools.PhaseReleased || w.PendingReason != tagPipelineLine()+": no workflow yet" {
+		t.Fatalf("public, statuses of a branch pipeline's workflow only: %+v", w)
+	}
 	st.ghs.repos.reportLinking(shinyService, stateSuccess, "https://app.circleci.com/workflow/"+wf+"/job/0f1e", greenRelease...)
 	if w := st.watch(t, c, pr, settling); w.Ready || w.Pending != tools.PhaseReleased || w.PendingReason != tagPipelineLine()+": build (running) — waiting for the running workflows" {
 		t.Fatalf("public, read through its statuses' workflow: %+v", w)

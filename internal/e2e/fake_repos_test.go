@@ -74,6 +74,8 @@ type fakeRelease struct {
 type fakeStatus struct {
 	context, state string
 	updatedAt      time.Time
+	// targetURL is the CircleCI job or workflow the status links.
+	targetURL string
 }
 
 func newFakeRepos() *fakeRepos { return &fakeRepos{repos: map[string]*fakeRepo{}} }
@@ -103,11 +105,16 @@ func (f *fakeRepos) publish(name, tag string) {
 // state, the way CircleCI reports its jobs: a context reported before is
 // updated in place, the others stay.
 func (f *fakeRepos) report(name, state string, contexts ...string) {
+	f.reportLinking(name, state, "", contexts...)
+}
+
+// reportLinking posts the statuses like report does, each linking target.
+func (f *fakeRepos) reportLinking(name, state, target string, contexts ...string) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	r := f.repos[name]
 	for _, c := range contexts {
-		st := fakeStatus{context: c, state: state, updatedAt: time.Now()}
+		st := fakeStatus{context: c, state: state, updatedAt: time.Now(), targetURL: target}
 		if i := slices.IndexFunc(r.statuses, func(s fakeStatus) bool { return s.context == c }); i >= 0 {
 			r.statuses[i] = st
 			continue
@@ -255,7 +262,7 @@ func (f *fakeRepos) register(mux *http.ServeMux, g *fakeGitHub) {
 		// error, pending when any is pending (or there is none), else success.
 		state, statuses := stateSuccess, []map[string]any{}
 		for _, st := range repo.statuses {
-			statuses = append(statuses, map[string]any{kContext: st.context, kState: st.state, "updated_at": st.updatedAt.UTC().Format(time.RFC3339)})
+			statuses = append(statuses, map[string]any{kContext: st.context, kState: st.state, "updated_at": st.updatedAt.UTC().Format(time.RFC3339), "target_url": st.targetURL})
 			switch {
 			case st.state == stateFailure || st.state == "error":
 				state = stateFailure

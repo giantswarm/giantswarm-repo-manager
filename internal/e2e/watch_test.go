@@ -751,17 +751,27 @@ func TestWatchRepositoryFailsReleasedOnARedTagPipeline(t *testing.T) {
 }
 
 // TestWatchRepositoryReadsTheStatusesWhereNoTagPipelineIsRead: an anonymous
-// CircleCI client reads the pipelines of public repositories alone — a
-// public repository's running tag pipeline keeps the phase pending, green
-// statuses notwithstanding; the same repository private is decided by the
-// statuses rule, unchanged: settling, then ready although the pipeline
-// still runs.
+// CircleCI client lists the pipelines of public repositories alone, and
+// CircleCI answers their workflow listing 404 without a token. A public
+// repository's tag pipeline is read through the workflow its statuses link
+// (a GitHub App pipeline's): running keeps the phase pending, green
+// statuses notwithstanding. Statuses that lead to no workflow (an OAuth
+// follow's job, which CircleCI does not answer without a token) and a
+// private repository are decided by the statuses rule, unchanged:
+// settling, then ready although the pipeline still runs.
 func TestWatchRepositoryReadsTheStatusesWhereNoTagPipelineIsRead(t *testing.T) {
 	st, c, pr := releasedWithTagPipelines(t, tools.TagPipelinesAnonymous)
-	st.cc.pipeline(shinyService, circleciclient.PipelineVCS{Tag: firstTag}, time.Now(), workflowRunning)
+	st.cc.anonymousWorkflows = true
+	wf := st.cc.pipeline(shinyService, circleciclient.PipelineVCS{Tag: firstTag}, time.Now(), workflowRunning)
 	st.ghs.repos.setPrivate(shinyService, false)
+	st.ghs.repos.reportLinking(shinyService, stateSuccess, "https://app.circleci.com/workflow/"+wf+"/job/0f1e", greenRelease...)
 	if w := st.watch(t, c, pr, settling); w.Ready || w.Pending != tools.PhaseReleased || w.PendingReason != tagPipelineLine()+": build (running) — waiting for the running workflows" {
-		t.Fatalf("public, read anonymously: %+v", w)
+		t.Fatalf("public, read through its statuses' workflow: %+v", w)
+	}
+	st.ghs.repos.reportLinking(shinyService, stateSuccess, "https://circleci.com/gh/"+org+"/"+shinyService+"/9999", greenRelease...)
+	if w := st.watch(t, c, pr, settling); w.Ready || w.Pending != tools.PhaseReleased || !strings.HasPrefix(w.PendingReason, "the CircleCI statuses on "+firstTag+": ") ||
+		!strings.Contains(w.PendingReason, "released once unchanged for "+watchSettle.String()) {
+		t.Fatalf("public, statuses that lead to no workflow, settling: %+v", w)
 	}
 	st.ghs.repos.setPrivate(shinyService, true)
 	st.ghs.repos.report(shinyService, stateSuccess, greenRelease...)

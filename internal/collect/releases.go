@@ -80,7 +80,7 @@ query($org: String!, $first: Int!) {
         latestRelease { tagName createdAt publishedAt tagCommit {
           oid associatedPullRequests(first: 1) { nodes { number url } }
           statusCheckRollup { state contexts(first: 40) {
-            pageInfo { hasNextPage } nodes { ... on StatusContext { context state createdAt } }
+            pageInfo { hasNextPage } nodes { ... on StatusContext { context state createdAt targetUrl } }
           } }
         } }
       }
@@ -385,7 +385,13 @@ func isReleaseTag(tag string) bool {
 // settles the release red at once; the watch keeps reading a red release,
 // and a rerun that goes green turns it built on a later pass, silently —
 // the team was told once, and hears nothing more about the tag. No pipeline within the
-// grace period settles it unbuilt. A 404 settles it unchecked: without a
+// grace period settles it unbuilt — never a release whose pipeline an
+// earlier pass found: the lookup reads the newest pipelines only, and a busy
+// project pushes the tag's out of them. A found pipeline whose workflows
+// CircleCI answers 404 (no token), or one no longer listed, is read through
+// the jobs and workflows its tag commit's statuses name
+// (ReadTagPipelineByTargets). A 404 on the project
+// settles it unchecked: without a
 // token, the project is private and the token is what is missing; with
 // one, CircleCI does not know the project. Any other error keeps the watch
 // for the next pass.
@@ -405,6 +411,13 @@ func (c *Collector) readRelease(ctx context.Context, rec *inventory.Record, w *i
 	case err != nil:
 		c.log.Warn("release watch: pipelines not read", "repository", rec.Repository, "tag", w.Tag, "error", err)
 		return
+	case p == nil && w.Pipeline != nil:
+		// An earlier pass found the tag's pipeline; it is no longer among
+		// the newest pipelines the lookup lists. Not a missed build: its
+		// workflows are read through the tag commit's statuses.
+		tp, err := ReadTagPipelineByTargets(ctx, o.CircleCI, org, name, w.Pipeline.Number, tagTargets(rec, w.Tag))
+		c.settle(rec, w, tp, err, now, true)
+		return
 	case p == nil:
 		if now.Sub(w.CreatedAt) >= o.Grace {
 			w.Settle(now, inventory.ReleaseUnbuilt)
@@ -412,6 +425,22 @@ func (c *Collector) readRelease(ctx context.Context, rec *inventory.Record, w *i
 		return
 	}
 	tp, err := ReadTagPipeline(ctx, o.CircleCI, org, name, p)
+	if circleciclient.IsNotFound(err) {
+		// CircleCI lists a public project's pipelines without a token but
+		// answers their workflows 404 ("Pipeline run not found"); it
+		// answers the jobs and workflows the tag commit's statuses name.
+		tp, err = ReadTagPipelineByTargets(ctx, o.CircleCI, org, name, p.Number, tagTargets(rec, w.Tag))
+	}
+	c.settle(rec, w, tp, err, now, false)
+}
+
+// settle writes what the read of the tag's pipeline says into w: red with
+// the failed jobs, built, or — still moving, or no workflow started yet —
+// nothing, a red release being rerun staying red until the rerun ends. A
+// failed read keeps the watch for the next pass. gone says the pipeline has
+// left the lookup's listing: no workflow found then settles the release
+// unchecked, as nothing will reach the watch any more.
+func (c *Collector) settle(rec *inventory.Record, w *inventory.ReleaseWatch, tp *TagPipeline, err error, now time.Time, gone bool) {
 	w.Pipeline = tp.Pipeline
 	switch {
 	case err != nil:
@@ -422,9 +451,20 @@ func (c *Collector) readRelease(ctx context.Context, rec *inventory.Record, w *i
 	case tp.Built():
 		w.FailedJobs = nil
 		w.Settle(now, inventory.ReleaseBuilt)
+	case gone && len(tp.Workflows) == 0:
+		w.Settle(now, inventory.ReleaseUnchecked)
+		w.Reason = fmt.Sprintf("the tag pipeline %d is no longer among the pipelines CircleCI lists first, and no CircleCI status on the tag commit leads to its workflows", tp.Pipeline.Number)
 	}
-	// Otherwise still moving, or no workflow has started yet: a red release
-	// being rerun stays red until the rerun ends.
+}
+
+// tagTargets are the target URLs of tag's commit statuses as the record
+// read them; nil before the record has read the release.
+func tagTargets(rec *inventory.Record, tag string) []string {
+	rel := rec.Reality.LatestRelease
+	if rel == nil || rel.Tag != tag || rel.Build == nil {
+		return nil
+	}
+	return rel.Build.Targets
 }
 
 // workflowNotRun is a workflow the pipeline's filters left out: neither

@@ -264,3 +264,40 @@ func TestReleaseWatchFindsGitHubAppPipelines(t *testing.T) {
 		t.Errorf("a built release tells nothing: %v", n)
 	}
 }
+
+// TestReleaseWatchReadsTheTagPipelineWithoutAToken: without a token CircleCI
+// answers a pipeline's workflow listing 404 (crossplane-fn-irsa v0.4.0,
+// pipeline 1025): the watch follows the target URLs of the tag commit's
+// statuses to the tag pipeline's own workflows. A branch pipeline's red job
+// at the same commit is left out: the release is built, and nobody is told.
+func TestReleaseWatchReadsTheTagPipelineWithoutAToken(t *testing.T) {
+	st := newStack(t)
+	ctx := context.Background()
+	if _, err := st.col.Sweep(ctx); err != nil {
+		t.Fatalf("sweep: %v", err)
+	}
+	now := st.now()
+	st.cc.anonymousWorkflows = true
+	st.ghs.org.release(repoPresent, "v7.4.3", now.Add(-20*time.Minute), 42)
+	st.cc.pipeline(repoPresent, circleciclient.PipelineVCS{Tag: "v7.4.3", Revision: "7c71aa85"}, now.Add(-19*time.Minute), conclusionSuccess,
+		circleciclient.Job{Name: jobPushRelease, Status: conclusionSuccess, JobNumber: 3689})
+	st.cc.pipeline(repoPresent, circleciclient.PipelineVCS{Branch: "main", Revision: "7c71aa85"}, now.Add(-18*time.Minute), "failed",
+		circleciclient.Job{Name: "go-test", Status: "failed", JobNumber: 3701})
+	at := now.Add(-15 * time.Minute).Format(time.RFC3339)
+	st.ghs.org.releaseStatuses(repoPresent,
+		map[string]any{kContext: "ci/circleci: " + jobPushRelease, kState: stateSuccessGQL, kCreatedAt: at, "targetUrl": "https://circleci.com/gh/" + org + "/" + repoPresent + "/3689"},
+		map[string]any{kContext: "ci/circleci: go-test", kState: stateFailureGQL, kCreatedAt: at, "targetUrl": "https://circleci.com/gh/" + org + "/" + repoPresent + "/3701"})
+	if p := st.watchReleases(t); p.Started != 1 || p.Settled != 1 || p.Told != 0 || p.Watching != 0 {
+		t.Fatalf("a tag pipeline read through its statuses: %+v", p)
+	}
+	rec, err := st.store.Get(ctx, org+"/"+repoPresent)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if w := rec.Setup.Release; w == nil || w.Tag != "v7.4.3" || w.State != inventory.ReleaseBuilt || w.Pipeline == nil || w.Pipeline.Number != 11501 {
+		t.Errorf("built on the tag pipeline: %+v", rec.Setup.Release)
+	}
+	if _, n := st.gw.posted(); len(n) != 0 {
+		t.Errorf("a built release tells nothing: %v", n)
+	}
+}

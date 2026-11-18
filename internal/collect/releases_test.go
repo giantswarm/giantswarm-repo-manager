@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -31,6 +32,13 @@ const (
 	circleCIFailure = "CircleCI failure"
 	wfBuild         = "wf-build"
 	neverRebuilt    = "rerun the failed workflow from failed on CircleCI"
+	amd64Context    = "ci/circleci: " + amd64Leg
+	kMessage        = "message"
+	nodeBuild       = "node-build"
+	wfBranch        = "wf-branch"
+	wfOK            = "wf-ok"
+	amd64TimedOut   = "build-image-amd64 (timed out)"
+	arm64TimedOut   = "build-image-arm64 (timed out)"
 )
 
 // fakeTagPipelines is CircleCI as the watch reads it: one project's
@@ -40,7 +48,10 @@ type fakeTagPipelines struct {
 	pipelines []circleciclient.Pipeline
 	workflows map[string][]circleciclient.Workflow
 	jobs      map[string][]circleciclient.Job
-	calls     []string
+	// anonymousWorkflows answers the workflow listing 404 as CircleCI
+	// does without a token.
+	anonymousWorkflows bool
+	calls              []string
 }
 
 func (f *fakeTagPipelines) handler() http.Handler {
@@ -53,18 +64,50 @@ func (f *fakeTagPipelines) handler() http.Handler {
 		f.calls = append(f.calls, r.URL.Path)
 		if r.PathValue("org")+"/"+r.PathValue("repo") != f.project {
 			w.WriteHeader(http.StatusNotFound)
-			write(w, map[string]string{"message": "Project not found"})
+			write(w, map[string]string{kMessage: "Project not found"})
 			return
 		}
 		write(w, map[string]any{kItems: f.pipelines, "next_page_token": nil})
 	})
 	mux.HandleFunc("GET /api/v2/pipeline/{id}/workflow", func(w http.ResponseWriter, r *http.Request) {
 		f.calls = append(f.calls, r.URL.Path)
+		if f.anonymousWorkflows {
+			w.WriteHeader(http.StatusNotFound)
+			write(w, map[string]string{kMessage: "Pipeline run not found."})
+			return
+		}
 		write(w, map[string]any{kItems: f.workflows[r.PathValue("id")]})
 	})
 	mux.HandleFunc("GET /api/v2/workflow/{id}/job", func(w http.ResponseWriter, r *http.Request) {
 		f.calls = append(f.calls, r.URL.Path)
 		write(w, map[string]any{kItems: f.jobs[r.PathValue("id")]})
+	})
+	// A job and a workflow by id, which CircleCI answers without a token.
+	mux.HandleFunc("GET /api/v2/project/gh/{org}/{repo}/job/{number}", func(w http.ResponseWriter, r *http.Request) {
+		f.calls = append(f.calls, r.URL.Path)
+		for wf, jobs := range f.jobs {
+			for _, j := range jobs {
+				if strconv.FormatInt(j.JobNumber, 10) == r.PathValue("number") {
+					write(w, map[string]any{"number": j.JobNumber, "name": j.Name, "status": j.Status, "latest_workflow": map[string]string{"id": wf}})
+					return
+				}
+			}
+		}
+		w.WriteHeader(http.StatusNotFound)
+		write(w, map[string]string{kMessage: "Job not found"})
+	})
+	mux.HandleFunc("GET /api/v2/workflow/{id}", func(w http.ResponseWriter, r *http.Request) {
+		f.calls = append(f.calls, r.URL.Path)
+		for _, runs := range f.workflows {
+			for _, run := range runs {
+				if run.ID == r.PathValue("id") {
+					write(w, run)
+					return
+				}
+			}
+		}
+		w.WriteHeader(http.StatusNotFound)
+		write(w, map[string]string{kMessage: "Workflow not found"})
 	})
 	return mux
 }
@@ -84,31 +127,93 @@ func TestReadReleaseDecidesFromTheTagPipeline(t *testing.T) {
 	branchPipeline := circleciclient.Pipeline{ID: pipelineBranch, Number: 11509, CreatedAt: t0.Add(2 * time.Minute), VCS: circleciclient.PipelineVCS{Branch: "changesets-ghcommit-temp/changeset-release/main", Revision: sha}}
 	failedBuild := circleciclient.Workflow{ID: wfBuild, Name: workflowBuild, Status: statusFailed, PipelineNumber: 11508, CreatedAt: t0}
 	greenSetup := circleciclient.Workflow{ID: "wf-setup", Name: setupJob, Status: stateSuccess, PipelineNumber: 11508, CreatedAt: t0}
-	redJobs := []circleciclient.Job{{Name: "node-build", Status: stateSuccess}, {Name: amd64Leg, Status: statusTimedOut}, {Name: "build-image-arm64", Status: statusTimedOut}, {Name: releaseJobName, Status: "not_run"}}
-	branchRed := circleciclient.Workflow{ID: "wf-branch", Name: workflowBuild, Status: statusFailed, PipelineNumber: 11509, CreatedAt: t0.Add(2 * time.Minute)}
+	redJobs := []circleciclient.Job{{Name: nodeBuild, Status: stateSuccess}, {Name: amd64Leg, Status: statusTimedOut}, {Name: "build-image-arm64", Status: statusTimedOut}, {Name: releaseJobName, Status: "not_run"}}
+	branchRed := circleciclient.Workflow{ID: wfBranch, Name: workflowBuild, Status: statusFailed, PipelineNumber: 11509, CreatedAt: t0.Add(2 * time.Minute)}
 
+	// Without a token: the statuses on the tag commit are the tag
+	// pipeline's green build job (7001) and a branch pipeline's red one at
+	// the same commit (7101); a GitHub App pipeline's status names its
+	// workflow.
+	found := &inventory.ReleasePipeline{Number: 11508, URL: backstage11508}
+	tagGreen := circleciclient.Workflow{ID: wfOK, Name: workflowBuild, Status: stateSuccess, PipelineNumber: 11508, CreatedAt: t0}
+	anonymousJobs := map[string][]circleciclient.Job{
+		wfOK:     {{Name: nodeBuild, Status: stateSuccess, JobNumber: 7001}},
+		wfBranch: {{Name: nodeBuild, Status: statusFailed, JobNumber: 7101}},
+		wfBuild:  redJobs,
+	}
+	anonymousRuns := map[string][]circleciclient.Workflow{pipelineTag: {tagGreen, failedBuild}, pipelineBranch: {branchRed}}
+	oauthTargets := []string{"https://circleci.com/gh/giantswarm/backstage/7001", "https://circleci.com/gh/giantswarm/backstage/7101"}
 	cases := []struct {
 		name      string
 		fake      *fakeTagPipelines
 		anonymous bool
 		createdAt time.Time
-		want      inventory.ReleaseWatch
-		calls     int
+		// found is the pipeline an earlier pass found; targets the target
+		// URLs of the tag commit's statuses as the record read them.
+		found   *inventory.ReleasePipeline
+		targets []string
+		want    inventory.ReleaseWatch
+		calls   int
 	}{
+		{
+			name: "built: the workflows listing is 404 without a token, the statuses' jobs lead to the tag pipeline's workflow, the branch pipeline's red one left out",
+			fake: &fakeTagPipelines{project: org + "/" + name, pipelines: []circleciclient.Pipeline{tagPipeline}, anonymousWorkflows: true,
+				workflows: map[string][]circleciclient.Workflow{pipelineTag: {tagGreen}, pipelineBranch: {branchRed}}, jobs: anonymousJobs},
+			anonymous: true,
+			targets:   oauthTargets,
+			want:      inventory.ReleaseWatch{State: inventory.ReleaseBuilt, Pipeline: found},
+			calls:     8,
+		},
+		{
+			name: "red: a GitHub App status names the failed workflow, read without a token",
+			fake: &fakeTagPipelines{project: org + "/" + name, pipelines: []circleciclient.Pipeline{tagPipeline}, anonymousWorkflows: true,
+				workflows: anonymousRuns, jobs: anonymousJobs},
+			anonymous: true,
+			targets:   []string{"https://app.circleci.com/workflow/" + wfBuild + "/job/0f1e"},
+			want: inventory.ReleaseWatch{State: inventory.ReleaseRed, FailedJobs: []string{amd64TimedOut, arm64TimedOut},
+				Pipeline: &inventory.ReleasePipeline{Number: 11508, URL: backstage11508, Workflow: backstage11508 + "/workflows/" + wfBuild}},
+			calls: 4,
+		},
+		{
+			name:      "watching: the workflows listing is 404 and no status on the tag commit yet",
+			fake:      &fakeTagPipelines{project: org + "/" + name, pipelines: []circleciclient.Pipeline{tagPipeline}, anonymousWorkflows: true},
+			anonymous: true,
+			want:      inventory.ReleaseWatch{State: inventory.ReleaseWatching, Pipeline: found},
+			calls:     2,
+		},
+		{
+			name:      "built: the pipeline an earlier pass found left the newest pipelines, not unbuilt",
+			fake:      &fakeTagPipelines{project: org + "/" + name, pipelines: []circleciclient.Pipeline{branchPipeline}, workflows: anonymousRuns, jobs: anonymousJobs},
+			anonymous: true,
+			createdAt: now.Add(-8 * 24 * time.Hour),
+			found:     found,
+			targets:   oauthTargets[:1],
+			want:      inventory.ReleaseWatch{State: inventory.ReleaseBuilt, Pipeline: found},
+			calls:     4,
+		},
+		{
+			name:      "unchecked: the pipeline left the newest pipelines and no status leads to it",
+			fake:      &fakeTagPipelines{project: org + "/" + name, pipelines: []circleciclient.Pipeline{branchPipeline}},
+			anonymous: true,
+			createdAt: now.Add(-8 * 24 * time.Hour),
+			found:     found,
+			want:      inventory.ReleaseWatch{State: inventory.ReleaseUnchecked, Reason: "the tag pipeline 11508 is no longer among the pipelines CircleCI lists first, and no CircleCI status on the tag commit leads to its workflows", Pipeline: found},
+			calls:     1,
+		},
 		{
 			name: "red: the failed jobs and how, the failed workflow linked",
 			fake: &fakeTagPipelines{project: org + "/" + name, pipelines: []circleciclient.Pipeline{branchPipeline, tagPipeline},
 				workflows: map[string][]circleciclient.Workflow{pipelineTag: {greenSetup, failedBuild}, pipelineBranch: {branchRed}},
 				jobs:      map[string][]circleciclient.Job{wfBuild: redJobs}},
-			want: inventory.ReleaseWatch{State: inventory.ReleaseRed, FailedJobs: []string{"build-image-amd64 (timed out)", "build-image-arm64 (timed out)"},
+			want: inventory.ReleaseWatch{State: inventory.ReleaseRed, FailedJobs: []string{amd64TimedOut, arm64TimedOut},
 				Pipeline: &inventory.ReleasePipeline{Number: 11508, URL: backstage11508, Workflow: backstage11508 + "/workflows/" + wfBuild}},
 			calls: 3,
 		},
 		{
 			name: "built: a green tag pipeline beside a red branch pipeline at the same commit",
 			fake: &fakeTagPipelines{project: org + "/" + name, pipelines: []circleciclient.Pipeline{branchPipeline, tagPipeline},
-				workflows: map[string][]circleciclient.Workflow{pipelineTag: {greenSetup, {ID: "wf-ok", Name: workflowBuild, Status: stateSuccess, CreatedAt: t0}}, pipelineBranch: {branchRed}},
-				jobs:      map[string][]circleciclient.Job{"wf-branch": redJobs}},
+				workflows: map[string][]circleciclient.Workflow{pipelineTag: {greenSetup, {ID: wfOK, Name: workflowBuild, Status: stateSuccess, CreatedAt: t0}}, pipelineBranch: {branchRed}},
+				jobs:      map[string][]circleciclient.Job{wfBranch: redJobs}},
 			want:  inventory.ReleaseWatch{State: inventory.ReleaseBuilt, Pipeline: &inventory.ReleasePipeline{Number: 11508, URL: backstage11508}},
 			calls: 2,
 		},
@@ -149,7 +254,7 @@ func TestReadReleaseDecidesFromTheTagPipeline(t *testing.T) {
 			fake: &fakeTagPipelines{project: org + "/" + name, pipelines: []circleciclient.Pipeline{tagPipeline},
 				workflows: map[string][]circleciclient.Workflow{pipelineTag: {failedBuild, {ID: "wf-run", Name: setupJob, Status: statusRunning, CreatedAt: t0}}},
 				jobs:      map[string][]circleciclient.Job{wfBuild: redJobs}},
-			want: inventory.ReleaseWatch{State: inventory.ReleaseRed, FailedJobs: []string{"build-image-amd64 (timed out)", "build-image-arm64 (timed out)"},
+			want: inventory.ReleaseWatch{State: inventory.ReleaseRed, FailedJobs: []string{amd64TimedOut, arm64TimedOut},
 				Pipeline: &inventory.ReleasePipeline{Number: 11508, URL: backstage11508, Workflow: backstage11508 + "/workflows/" + wfBuild}},
 			calls: 3,
 		},
@@ -198,8 +303,9 @@ func TestReadReleaseDecidesFromTheTagPipeline(t *testing.T) {
 			if createdAt.IsZero() {
 				createdAt = t0.Add(-time.Minute)
 			}
-			w := &inventory.ReleaseWatch{Tag: tag, CreatedAt: createdAt, State: inventory.ReleaseWatching}
-			rec := &inventory.Record{Repository: org + "/" + name, Name: name}
+			w := &inventory.ReleaseWatch{Tag: tag, CreatedAt: createdAt, State: inventory.ReleaseWatching, Pipeline: tc.found}
+			rec := &inventory.Record{Repository: org + "/" + name, Name: name,
+				Reality: &inventory.Reality{DefaultBranch: "main", LatestRelease: &inventory.Release{Tag: tag, Build: &inventory.HeadStatus{State: stateSuccess, Contexts: []string{"ci/circleci: node-build"}, Targets: tc.targets}}}}
 			c.readRelease(context.Background(), rec, w, now)
 			if w.State != tc.want.State || w.Reason != tc.want.Reason || strings.Join(w.FailedJobs, ",") != strings.Join(tc.want.FailedJobs, ",") {
 				t.Errorf("state=%s reason=%q failedJobs=%v, want %s %q %v", w.State, w.Reason, w.FailedJobs, tc.want.State, tc.want.Reason, tc.want.FailedJobs)
@@ -260,7 +366,7 @@ func TestReleaseStepFromTheWatch(t *testing.T) {
 		fix     string
 	}{
 		{"built", watch(inventory.ReleaseBuilt), reconcile.VerdictOK, "release v1.2.0 built: the tag's pipeline 11508 succeeded", "", ""},
-		{"red", watch(inventory.ReleaseRed, "build-image-arm64 (timed out)"), reconcile.VerdictReported, redPipeline11508, reconcile.FindingRedRelease, "rerun the workflow from failed on CircleCI, then `devctl release wait giantswarm/x v1.2.0` confirms it"},
+		{"red", watch(inventory.ReleaseRed, arm64TimedOut), reconcile.VerdictReported, redPipeline11508, reconcile.FindingRedRelease, "rerun the workflow from failed on CircleCI, then `devctl release wait giantswarm/x v1.2.0` confirms it"},
 		{"unbuilt", &inventory.ReleaseWatch{Tag: tag, State: inventory.ReleaseUnbuilt, CheckedAt: at}, reconcile.VerdictReported, noTagPipeline, reconcile.FindingMissedTagBuild, "`devctl repo follow-circleci giantswarm/x` as a member of the owning team"},
 		{"running", watch(inventory.ReleaseWatching), reconcile.VerdictOK, "the tag's pipeline 11508 is running", "", ""},
 	}

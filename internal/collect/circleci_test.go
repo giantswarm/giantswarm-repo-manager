@@ -29,11 +29,7 @@ func TestCircleCIDerivation(t *testing.T) {
 			if strings.HasSuffix(c, "!") {
 				c, state = strings.TrimSuffix(c, "!"), "FAILURE"
 			}
-			r.Contexts.Nodes = append(r.Contexts.Nodes, struct {
-				Context   string    `json:"context"`
-				State     string    `json:"state"`
-				CreatedAt time.Time `json:"createdAt"`
-			}{Context: c, State: state, CreatedAt: now.Add(time.Duration(i) * time.Minute)})
+			r.Contexts.Nodes = append(r.Contexts.Nodes, statusContextNode{Context: c, State: state, CreatedAt: now.Add(time.Duration(i) * time.Minute)})
 		}
 		return n
 	}

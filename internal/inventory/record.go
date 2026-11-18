@@ -254,6 +254,11 @@ type HeadStatus struct {
 	// read before they were kept.
 	Failed  []string `json:"failed,omitempty"`
 	Pending []string `json:"pending,omitempty"`
+	// Targets are the target URLs of the contexts, sorted: each names the
+	// CircleCI job or workflow that posted it, which is how the release
+	// watch finds the tag pipeline's workflows without a token. Read for a
+	// release's tag commit only.
+	Targets []string `json:"targets,omitempty"`
 	// At is when the newest of them was posted.
 	At time.Time `json:"at"`
 }

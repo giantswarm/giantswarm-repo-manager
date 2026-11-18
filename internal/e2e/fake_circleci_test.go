@@ -23,7 +23,10 @@ type fakeCircleCI struct {
 	// app marks the pipelines the CircleCI GitHub App started: served without
 	// vcs, what they built in trigger_parameters.git, as CircleCI serves them.
 	app map[string]bool
-	seq int
+	// anonymousWorkflows answers a pipeline's workflow listing 404, as
+	// CircleCI does without a token; a job and a workflow by id it answers.
+	anonymousWorkflows bool
+	seq                int
 	// reads counts the requests, the watch's CircleCI budget.
 	reads int
 }
@@ -47,7 +50,39 @@ func newFakeCircleCI(t *testing.T) *fakeCircleCI {
 		f.mu.Lock()
 		defer f.mu.Unlock()
 		f.reads++
+		if f.anonymousWorkflows {
+			writeJSON(w, http.StatusNotFound, map[string]any{kMessage: "Pipeline run not found."})
+			return
+		}
 		writeJSON(w, http.StatusOK, map[string]any{kItems: f.workflows[r.PathValue("id")]})
+	})
+	mux.HandleFunc("GET /api/v2/project/gh/{org}/{repo}/job/{number}", func(w http.ResponseWriter, r *http.Request) {
+		f.mu.Lock()
+		defer f.mu.Unlock()
+		f.reads++
+		for wf, jobs := range f.jobs {
+			for _, j := range jobs {
+				if j.JobNumber != 0 && itoa(int(j.JobNumber)) == r.PathValue("number") {
+					writeJSON(w, http.StatusOK, map[string]any{kNumber: j.JobNumber, kName: j.Name, kStatus: j.Status, "latest_workflow": map[string]string{"id": wf}})
+					return
+				}
+			}
+		}
+		writeJSON(w, http.StatusNotFound, map[string]any{kMessage: "Job not found"})
+	})
+	mux.HandleFunc("GET /api/v2/workflow/{id}", func(w http.ResponseWriter, r *http.Request) {
+		f.mu.Lock()
+		defer f.mu.Unlock()
+		f.reads++
+		for _, runs := range f.workflows {
+			for _, run := range runs {
+				if run.ID == r.PathValue("id") {
+					writeJSON(w, http.StatusOK, run)
+					return
+				}
+			}
+		}
+		writeJSON(w, http.StatusNotFound, map[string]any{kMessage: "Workflow not found"})
 	})
 	mux.HandleFunc("GET /api/v2/workflow/{id}/job", func(w http.ResponseWriter, r *http.Request) {
 		f.mu.Lock()

@@ -795,6 +795,46 @@ func TestWatchRepositoryReadsTheStatusesWhereNoTagPipelineIsRead(t *testing.T) {
 	}
 }
 
+// TestWatchRepositoryWaitsWhereAnotherPipelineHidesATagJob: without a token
+// the released phase reads the tag pipeline through its statuses' target
+// URLs. The tag pipeline ran a green build workflow and a failed publish
+// workflow; a later branch pipeline at the same commit posted push-chart,
+// a job the declaration runs on the tag, over the tag's status. The read
+// sees the green workflow only, so the phase waits and names push-chart
+// rather than read the release done. Once the status links the tag's own
+// workflow again, its failure fails the phase.
+func TestWatchRepositoryWaitsWhereAnotherPipelineHidesATagJob(t *testing.T) {
+	st := newStackWith(t, "", withTagPipelines(tools.TagPipelinesAnonymous))
+	c := st.as(t, aliceToken)
+	created, prURL := st.createShiny(t, c)
+	pr := created.PullRequest.Number
+	st.ghs.repos.put(shinyService, ".circleci/workflows.yml", fakeCIChartWorkflows)
+	st.declared(pr, "- name: "+shinyService+"\n  componentType: service\n  gen:\n    language: go\n    flavours: [app]\n    ci:\n      generate: true\n")
+	st.reported(t, pr, prURL, reconcile.StepResult{Step: reconcile.StepRelease, Verdict: reconcile.VerdictRepaired, Summary: "trigger the missed tag build for " + firstTag})
+	if rec := st.record(t, shinyService); rec.CI == nil || len(rec.CI.Jobs) != 3 {
+		t.Fatalf("the record's CI jobs: %+v", rec.CI)
+	}
+	st.ghs.repos.setPrivate(shinyService, false)
+	st.ghs.repos.publish(shinyService, firstTag)
+	st.cc.anonymousWorkflows = true
+	build := st.cc.pipeline(shinyService, circleciclient.PipelineVCS{Tag: firstTag}, time.Now(), stateSuccess,
+		circleciclient.Job{Name: "go-build", Status: stateSuccess}, circleciclient.Job{Name: "build-chart", Status: stateSuccess})
+	st.cc.workflow(shinyService, "publish", workflowFailed)
+	publish := strings.TrimSuffix(build, "-build") + "-publish"
+	st.cc.jobs[publish] = []circleciclient.Job{{Name: "push-chart", Status: workflowFailed}}
+	branch := st.cc.pipeline(shinyService, circleciclient.PipelineVCS{Branch: mainBranch}, time.Now(), stateSuccess, circleciclient.Job{Name: "push-chart", Status: stateSuccess})
+	st.ghs.repos.reportLinking(shinyService, stateSuccess, "https://app.circleci.com/workflow/"+build+"/job/0f1a", "ci/circleci: go-build", "ci/circleci: build-chart")
+	st.ghs.repos.reportLinking(shinyService, stateSuccess, "https://app.circleci.com/workflow/"+branch+"/job/0f1b", "ci/circleci: push-chart")
+	if w := st.watch(t, c, pr, settling); w.Ready || w.Failure != nil || w.Pending != tools.PhaseReleased ||
+		!strings.Contains(w.PendingReason, "another pipeline's statuses on the commit hide its jobs push-chart") {
+		t.Fatalf("push-chart's status a branch pipeline's: %+v", w)
+	}
+	st.ghs.repos.reportLinking(shinyService, stateFailure, "https://app.circleci.com/workflow/"+publish+"/job/0f1c", "ci/circleci: push-chart")
+	if w := st.watch(t, c, pr, settling); w.Ready || w.Failure == nil || w.Failure.Phase != tools.PhaseReleased || !strings.Contains(w.Failure.Reason, "push-chart (failed)") {
+		t.Fatalf("push-chart's status the tag's own again: %+v failure=%+v", w, w.Failure)
+	}
+}
+
 // TestWatchRepositoryDecidesReleasedFromAGitHubAppTagPipeline: the same
 // release decided from a tag pipeline the CircleCI GitHub App started, which
 // CircleCI serves without vcs: the watch reads the tag from the trigger's ref

@@ -219,17 +219,16 @@ func CompletionText(rec *inventory.Record) string {
 // of that kind are the ones told — none when the finding was fixed in
 // between, and in the live check's words when it stands, so the sentence
 // describes the state now. When the live check did not run the step — it was
-// skipped for want of a client, it failed, the checks did not run at all —
-// the run's findings stand: an installation whose manager has no CircleCI
-// client skips the release step, and silence about a missed tag build would
-// be worse than a sentence from minutes ago. A kind the live check reports
+// skipped, it failed, the checks did not run at all — the run's findings
+// stand: silence about a missed tag build would be worse than a sentence
+// from minutes ago. A kind the live check reports
 // and the run did not is left to the run that reports it.
 func verified(checks *reconcile.Result, st reconcile.StepResult) []reconcile.Finding {
 	live, ran := liveStep(checks, st.Step)
 	var out []reconcile.Finding
 	done := make(map[reconcile.FindingKind]bool, len(st.Findings))
 	for _, f := range st.Findings {
-		if !tellable(f.Kind) {
+		if !tellable(f) {
 			continue
 		}
 		if !ran {
@@ -252,9 +251,18 @@ func verified(checks *reconcile.Result, st reconcile.StepResult) []reconcile.Fin
 	return out
 }
 
-// tellable says whether a finding of the kind is the team's news at all.
-func tellable(k reconcile.FindingKind) bool {
-	switch k {
+// tellable says whether the finding is the team's news at all. An advisory
+// finding is not: it does not keep the repository from converging, and
+// some are on most of the org at once (circleci-oauth-follow, on every
+// repository still built by an OAuth follow), so telling them would post on
+// every person-made change. The record and get_repository still carry them.
+// The artifact marks a finding advisory; the kind decides for an artifact
+// written before it did.
+func tellable(f reconcile.Finding) bool {
+	if f.Advisory || f.Kind.Advisory() {
+		return false
+	}
+	switch f.Kind {
 	case reconcile.FindingUnchecked, reconcile.FindingPendingPullRequest:
 		return false
 	}

@@ -645,6 +645,103 @@ func TestWatchRepositoryReportsATagNoPipelineBuilt(t *testing.T) {
 	}
 }
 
+// TestWatchRepositoryWaitsForTheGitHubAppPipeline: the reconciler holds no
+// CircleCI identity and creates no pipeline, so the run after the creation
+// finds none (circleci-pipeline-missing) and the scaffold's tag unbuilt
+// (missed-tag-build). The released phase waits instead of failing, saying
+// that a member of the owning team creates the GitHub App pipeline with
+// their own CircleCI login, `devctl repo follow-circleci` at once or their
+// devctl on a later command; creating it runs the tag. Once the tag
+// pipeline's own jobs report, the release is ready.
+func TestWatchRepositoryWaitsForTheGitHubAppPipeline(t *testing.T) {
+	st := newStack(t)
+	c := st.as(t, aliceToken)
+	created, prURL := st.createShiny(t, c)
+	pr := created.PullRequest.Number
+	st.ghs.repos.put(shinyService, ".circleci/workflows.yml", fakeCIChartWorkflows)
+	st.declared(pr, "- name: "+shinyService+"\n  componentType: service\n  gen:\n    language: go\n    flavours: [app]\n    ci:\n      generate: true\n")
+	cmd := "`devctl repo follow-circleci " + org + "/" + shinyService + "`"
+	follow := cmd + " as a member of the owning team: it creates the GitHub App pipeline with your CircleCI login"
+	automatic := cmd + " sets it up now, run by a member of the owning team with their CircleCI login " +
+		"(`devctl auth login --circleci-only`, Write access; a repository admin where CircleCI refuses the write); " +
+		"otherwise devctl v8.164.0 or later sets it up on such a member's later devctl command once they are signed in " +
+		"to muster (`devctl auth login --muster-only`), at most once every six hours, unless CI or " +
+		"DEVCTL_NO_CIRCLECI_PENDING is set"
+	// The engine's live check finds no pipeline either: the record carries
+	// circleci-pipeline-missing, which devctl's pending pass reads.
+	st.checker.unbuild(shinyService)
+	st.reported(t, pr, prURL,
+		reconcile.StepResult{Step: reconcile.StepCircleCI, Verdict: reconcile.VerdictReported, Summary: engineNoPipeline,
+			Findings: []reconcile.Finding{{Kind: reconcile.FindingCircleCIPipelineMissing, Message: "no CircleCI pipeline builds it", Fix: follow}}},
+		reconcile.StepResult{Step: reconcile.StepRelease, Verdict: reconcile.VerdictReported, Summary: "release " + firstTag + ": no tag build",
+			Findings: []reconcile.Finding{{Kind: reconcile.FindingMissedTagBuild, Message: "release " + firstTag + " carries no CircleCI status", Fix: follow}}})
+	st.ghs.repos.publish(shinyService, firstTag)
+
+	w := st.watch(t, c, pr, 0.3)
+	if w.Ready || w.Failure != nil || w.Pending != tools.PhaseReleased || names(w.Phases) != throughSetUp ||
+		!strings.Contains(w.PendingReason, "no CircleCI GitHub App pipeline builds "+org+"/"+shinyService+" yet") || !strings.Contains(w.PendingReason, automatic) {
+		t.Fatalf("no GitHub App pipeline yet: %+v failure=%+v", w, w.Failure)
+	}
+	// An OAuth follow built the tag, its chart jobs (which only the tag
+	// pipeline runs) among the statuses: still no GitHub App pipeline.
+	oauth := []string{circleSetup, circleBuild, circleChart, circlePushChart}
+	st.ghs.repos.report(shinyService, stateSuccess, oauth...)
+	st.ghs.repos.postedBy(shinyService, alice, 0, oauth...)
+	if w = st.watch(t, c, pr, 0.3); w.Ready || w.Pending != tools.PhaseReleased || !strings.Contains(w.PendingReason, automatic) {
+		t.Fatalf("an OAuth follow's tag build: %+v failure=%+v", w, w.Failure)
+	}
+	st.ghs.repos.postedBy(shinyService, reconcile.CircleCIAppLogin, 0, oauth...)
+
+	if w = st.watch(t, c, pr, 3); !w.Ready || w.Failure != nil || w.PendingReason != "" || names(w.Phases) != allPhases {
+		t.Fatalf("the person created the pipeline, the tag built: %+v failure=%+v", w, w.Failure)
+	}
+}
+
+// TestWatchRepositoryFinishesOnceThePersonCreatedThePipeline: the run that
+// set the repository up found no pipeline, and the watch keeps that run. Once
+// the person has created the GitHub App pipeline and it built the tag, the
+// commit's statuses decide, even where the declaration has no job only the
+// tag pipeline runs: the run's finding does not keep the phase waiting.
+func TestWatchRepositoryFinishesOnceThePersonCreatedThePipeline(t *testing.T) {
+	st := newStack(t)
+	c := st.as(t, aliceToken)
+	created, prURL := st.createShiny(t, c)
+	pr := created.PullRequest.Number
+	st.ghs.files.merge(pr)
+	follow := "`devctl repo follow-circleci " + org + "/" + shinyService + "`"
+	st.reported(t, pr, prURL,
+		reconcile.StepResult{Step: reconcile.StepCircleCI, Verdict: reconcile.VerdictReported, Summary: engineNoPipeline,
+			Findings: []reconcile.Finding{{Kind: reconcile.FindingCircleCIPipelineMissing, Message: "no CircleCI pipeline builds it", Fix: follow}}})
+	st.ghs.repos.publish(shinyService, firstTag)
+	// The record's live check found the pipeline already (the run predates
+	// it): no automatic set-up is promised, the command is named.
+	if w := st.watch(t, c, pr, 0.3); w.Ready || w.Pending != tools.PhaseReleased || !strings.Contains(w.PendingReason, follow) ||
+		strings.Contains(w.PendingReason, "later devctl command") {
+		t.Fatalf("before the pipeline: %+v", w)
+	}
+	// Another system's status on the commit, an OAuth follow's CircleCI
+	// statuses, the GitHub App's branch build that started before the
+	// release: none is a build of the tag on the GitHub App pipeline, and the
+	// phase still waits for it.
+	st.ghs.repos.report(shinyService, stateSuccess, "license/cla")
+	if w := st.watch(t, c, pr, 0.3); w.Ready || w.Pending != tools.PhaseReleased || !strings.Contains(w.PendingReason, follow) {
+		t.Fatalf("a non-CircleCI status before the pipeline: %+v", w)
+	}
+	st.ghs.repos.report(shinyService, stateSuccess, greenRelease...)
+	st.ghs.repos.postedBy(shinyService, alice, 0, greenRelease...)
+	if w := st.watch(t, c, pr, 0.3); w.Ready || w.Pending != tools.PhaseReleased || !strings.Contains(w.PendingReason, follow) {
+		t.Fatalf("an OAuth follow's statuses: %+v", w)
+	}
+	st.ghs.repos.postedBy(shinyService, reconcile.CircleCIAppLogin, time.Hour, greenRelease...)
+	if w := st.watch(t, c, pr, 0.3); w.Ready || w.Pending != tools.PhaseReleased || !strings.Contains(w.PendingReason, follow) {
+		t.Fatalf("the App's branch build from before the release: %+v", w)
+	}
+	st.ghs.repos.postedBy(shinyService, reconcile.CircleCIAppLogin, -time.Hour, greenRelease...)
+	if w := st.watch(t, c, pr, 3); !w.Ready || w.Failure != nil || w.PendingReason != "" {
+		t.Fatalf("the tag built on the person's pipeline: %+v failure=%+v", w, w.Failure)
+	}
+}
+
 // TestWatchRepositoryReportsARefusedRead: the inventory App's installation
 // does not cover the repository: GitHub refuses the statuses read with 403,
 // and the watch reports the released phase pending with the refusal — a fact

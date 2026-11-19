@@ -46,22 +46,6 @@ func (j CIJob) RunsOnTag(tag string) bool {
 	return !matchesAny(j.TagsIgnore, tag)
 }
 
-// RunsOnBranches says whether some branch pipeline runs the job: every job
-// does, unless its `branches.ignore` is the catch-all the generated pipeline
-// writes on a tag-only job (`/.*/`) and no `branches.only` opens some.
-func (j CIJob) RunsOnBranches() bool {
-	if len(j.BranchesOnly) > 0 {
-		return true
-	}
-	for _, p := range j.BranchesIgnore {
-		switch strings.TrimSpace(p) {
-		case "/.*/", "/.+/", "/^.*$/", "/^.+$/":
-			return false
-		}
-	}
-	return true
-}
-
 // TagOnly are the names of the jobs the pipeline runs on tag and not on
 // branch: a status of one of them on a commit both name — a release cut on
 // the default branch head — can only be the tag pipeline's. Nil without a

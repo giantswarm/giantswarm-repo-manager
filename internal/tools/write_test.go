@@ -423,7 +423,7 @@ func TestParseEntriesWritesThePrivateDefault(t *testing.T) {
 // reviews), or a check from the team alone for an undeclared repository.
 func TestAlignWarningNamesTheRepositoryAndItsOptIn(t *testing.T) {
 	const repo = "giantswarm/example-service"
-	head := "Align now changes " + repo + " on GitHub and CircleCI to its declared set-up and the company baseline: " + alignChanges + ". It runs as you. "
+	head := "Align now changes " + repo + " on GitHub to its declared set-up and the company baseline: " + alignChanges + ". It runs as you. "
 	cases := []struct {
 		name              string
 		team              string

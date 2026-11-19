@@ -16,10 +16,11 @@ import (
 // same steps `devctl repo status` reports, run as the read identity. The
 // reported-checks rule comes from devctl's githubclient, built on the
 // identity's current token per run (the installation token rotates). The
-// runner gets no CircleCI client — this server holds no CircleCI token — so
-// it skips its circleci and release steps; the collector writes those two
-// from the record's own sources, the head's statuses and the reconciler's
-// run (fillClientlessSteps), so the result reads like the reconciler's.
+// runner gets no CircleCI client — this server holds no CircleCI token —
+// and needs none: its circleci and release steps read the CircleCI statuses
+// on GitHub, as the reconciler's do. The collector replaces the release step
+// with the release watch's answer where the watch read the tag's own
+// pipeline (rewriteReleaseStep).
 // The runner gets no devctl App id by default: GitHub shows a ruleset's bypass
 // actors to identities that administer the repository, and the read identity
 // reads, so the protection step compares the ruleset's rules alone and says

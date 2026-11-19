@@ -250,3 +250,26 @@ func releaseOnly(jobs []circleciclient.Job) bool {
 	}
 	return len(red) > 0 && len(reconcile.UnpublishedJobs(red)) == 0
 }
+
+// jobIndex is the declaration's jobs by name; a name used by several
+// workflows keeps every use.
+func jobIndex(ci *inventory.CI) map[string][]inventory.CIJob {
+	idx := map[string][]inventory.CIJob{}
+	if ci == nil {
+		return idx
+	}
+	for _, j := range ci.Jobs {
+		idx[j.Name] = append(idx[j.Name], j)
+	}
+	return idx
+}
+
+// runsAny says whether runs holds for one of jobs.
+func runsAny(jobs []inventory.CIJob, runs func(inventory.CIJob) bool) bool {
+	for _, j := range jobs {
+		if runs(j) {
+			return true
+		}
+	}
+	return false
+}

@@ -28,6 +28,9 @@ func TestReleaseWatchTellsTheTeamOnce(t *testing.T) {
 	if _, err := st.col.Sweep(ctx); err != nil {
 		t.Fatalf("sweep: %v", err)
 	}
+	// The releases below are published after the sweep's checks ran: a check
+	// reads the latest release there is.
+	st.advance(time.Hour)
 	o := st.ghs.org
 	sha := circleciclient.PipelineVCS{Revision: "a80db8ff"}
 	tag := func(v string) circleciclient.PipelineVCS {
@@ -126,8 +129,9 @@ func TestReleaseWatchTellsTheTeamOnce(t *testing.T) {
 		t.Errorf("a recovered release clears its finding and posts nothing: findings=%+v notices=%d", rec.Findings, len(notices()))
 	}
 
-	// A tag without a pipeline: watched within the grace period, a missed
-	// build after it, told once.
+	// A tag without a pipeline, published after the refresh's checks:
+	// watched within the grace period, a missed build after it, told once.
+	st.advance(5 * time.Minute)
 	o.release(repoPresent, "v1.3.0", st.now().Add(-2*time.Minute), 43)
 	if p := st.watchReleases(t); p.Started != 1 || p.Settled != 0 || p.Watching != 1 || p.Told != 0 {
 		t.Errorf("no pipeline yet: %+v", p)
@@ -143,7 +147,7 @@ func TestReleaseWatchTellsTheTeamOnce(t *testing.T) {
 		t.Errorf("missed build: %+v", p)
 	}
 	n = notices()
-	if len(n) != 2 || !strings.HasPrefix(n[1]["text"].(string), repoPresent+": release v1.3.0 (pull request #43) has no CircleCI pipeline 12 minutes after the tag, nothing was built or published — trigger the tag's pipeline by hand on CircleCI, then devctl release wait "+key+" v1.3.0 confirms it") || n[1]["link"] != "https://app.circleci.com/pipelines/github/"+key {
+	if len(n) != 2 || !strings.HasPrefix(n[1]["text"].(string), repoPresent+": release v1.3.0 (pull request #43) has no CircleCI pipeline 12 minutes after the tag, nothing was built or published — devctl repo follow-circleci "+key+" as a member of the team runs it on the GitHub App pipeline with your CircleCI login, then devctl release wait "+key+" v1.3.0 confirms it") || n[1]["link"] != "https://app.circleci.com/pipelines/github/"+key {
 		t.Fatalf("the missed build's notice: %v", n)
 	}
 	if p := st.watchReleases(t); p.Told != 0 || p.Watching != 0 {
@@ -211,16 +215,15 @@ func TestReleaseWatchTellsTheTeamOnce(t *testing.T) {
 	if len(notices()) != 2 {
 		t.Errorf("a private repository without a token posts nothing: %v", notices())
 	}
-	// Its release step stands in with the tag commit's statuses, read
-	// against the declaration: the two failed legs of a branch pipeline at
-	// the commit are another pipeline's, the tag pipeline's four jobs are
-	// green, so the release reads built and no red-release is found.
+	// Its release step is the engine's: an OAuth follow builds it, whose
+	// statuses cannot say the tag's build from a branch's, so the engine
+	// skips naming the tag; an unchecked watch has no answer to put there,
+	// and no red-release is found.
 	if legacy.Setup.Checks == nil {
 		t.Fatal("the private repository has no checks")
 	}
-	if sr := legacy.Setup.Checks.Step(reconcile.StepRelease); sr == nil || sr.Verdict != reconcile.VerdictOK ||
-		!strings.Contains(sr.Summary, "release "+legacyTag+" built: CircleCI success (4 jobs") || !strings.Contains(sr.Summary, "2 statuses of a branch pipeline at the commit ignored") {
-		t.Errorf("the private release from its commit's statuses: %+v", sr)
+	if sr := legacy.Setup.Checks.Step(reconcile.StepRelease); sr == nil || sr.Verdict != reconcile.VerdictSkipped || !strings.Contains(sr.Summary, ": built on an OAuth follow") {
+		t.Errorf("the private release from the engine: %+v", sr)
 	}
 	for _, f := range legacy.Findings {
 		if f.Kind == string(reconcile.FindingRedRelease) || f.Kind == string(reconcile.FindingMissedTagBuild) {

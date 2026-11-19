@@ -640,8 +640,12 @@ func (w *watcher) tagPipelineVerdict(ctx context.Context, tag string) (o outcome
 		}
 		targets := circleCITargets(st)
 		tp, err = collect.ReadTagPipelineByTargets(ctx, cc, w.org(), w.name, w.pipeline.Number, targets)
-		if err == nil && len(tp.Workflows) == 0 && !namesWorkflow(targets) {
+		if err == nil && len(tp.Workflows) == 0 && !allNameWorkflows(targets) {
 			return outcome{}, false
+		}
+		if unseen := tp.Unseen(circleCIContexts(st), w.ci, tag); err == nil && !tp.Red() && len(unseen) > 0 {
+			return undecided(fmt.Sprintf("the tag pipeline of %s, pipeline %d (%s): another pipeline's statuses on the commit hide its jobs %s — waiting for the tag pipeline's own",
+				tag, tp.Pipeline.Number, tp.Pipeline.URL, strings.Join(unseen, ", "))), true
 		}
 	}
 	if err != nil {
@@ -661,22 +665,36 @@ func (w *watcher) tagPipelineVerdict(ctx context.Context, tag string) (o outcome
 	return undecided(fmt.Sprintf("%s: %s — no workflow has run yet", line, strings.Join(tp.Workflows, ", "))), true
 }
 
-// namesWorkflow says whether a target URL names its CircleCI workflow (a
-// GitHub App pipeline's status): such statuses that led to no workflow of
-// the tag pipeline are another pipeline's, and the tag pipeline has not
-// reported yet; an OAuth follow's job URL names no workflow.
-func namesWorkflow(targets []string) bool {
+// allNameWorkflows says whether every target URL names its CircleCI
+// workflow (a GitHub App pipeline's status), and there is one at least:
+// such statuses that led to no workflow of the tag pipeline are another
+// pipeline's, and the tag pipeline has not reported yet. An OAuth follow's
+// job URL names no workflow, and CircleCI does not answer it without a
+// token: where one is among the targets, the statuses decide.
+func allNameWorkflows(targets []string) bool {
 	for _, raw := range targets {
 		u, err := url.Parse(raw)
 		if err != nil || u.Host != "app.circleci.com" {
-			continue
+			return false
 		}
 		parts := strings.Split(strings.Trim(u.Path, "/"), "/")
-		if len(parts) >= 2 && parts[0] == "workflow" || len(parts) >= 7 && parts[0] == "pipelines" && parts[5] == "workflows" {
-			return true
+		namesOne := len(parts) >= 2 && parts[0] == "workflow" || len(parts) >= 7 && parts[0] == "pipelines" && parts[5] == "workflows"
+		if !namesOne {
+			return false
 		}
 	}
-	return false
+	return len(targets) > 0
+}
+
+// circleCIContexts are the `ci/circleci:` status contexts of a commit.
+func circleCIContexts(st *github.CombinedStatus) []string {
+	var out []string
+	for _, s := range st.Statuses {
+		if strings.HasPrefix(s.GetContext(), inventory.CircleCIContext) {
+			out = append(out, s.GetContext())
+		}
+	}
+	return out
 }
 
 // circleCITargets are the target URLs of the `ci/circleci:` statuses of a

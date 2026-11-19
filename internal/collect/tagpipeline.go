@@ -33,6 +33,37 @@ type TagPipeline struct {
 	// ones.
 	Running   bool
 	Succeeded int
+	// ByTargets says the workflows were read through the tag commit's
+	// status target URLs (ReadTagPipelineByTargets), and Jobs are the jobs
+	// of those workflows: the statuses the read saw.
+	ByTargets bool
+	Jobs      []string
+}
+
+// Unseen are the jobs of contexts, the `ci/circleci:` statuses on the tag's
+// commit, that the declaration runs on tag and that no workflow the read
+// through the targets saw has: a pipeline that posted to the commit after
+// the tag's overwrote their statuses, so the read missed a workflow of the
+// tag pipeline, a red one maybe. A job that never ran posts no status and
+// is not asked for. Nil after a read of the pipeline's own workflow
+// listing, and without a declaration: nothing to compare.
+func (p *TagPipeline) Unseen(contexts []string, ci *inventory.CI, tag string) []string {
+	if !p.ByTargets || ci == nil {
+		return nil
+	}
+	seen := map[string]bool{}
+	for _, j := range p.Jobs {
+		seen[j] = true
+	}
+	jobs := jobIndex(ci)
+	var out []string
+	for _, c := range contexts {
+		job := inventory.JobOf(c)
+		if !seen[job] && runsAny(jobs[job], func(j inventory.CIJob) bool { return j.RunsOnTag(tag) }) {
+			out = append(out, job)
+		}
+	}
+	return out
 }
 
 // Red says a workflow of the pipeline failed.
@@ -50,7 +81,7 @@ func ReadTagPipeline(ctx context.Context, cc *circleciclient.Client, org, name s
 	if err != nil {
 		return tp, fmt.Errorf("the workflows of pipeline %d: %w", p.Number, err)
 	}
-	return tp, tp.read(ctx, cc, org, name, runs)
+	return tp, tp.read(ctx, cc, org, name, runs, nil)
 }
 
 // ReadTagPipelineByTargets reads the workflows of org/name's tag pipeline
@@ -69,7 +100,8 @@ func ReadTagPipeline(ctx context.Context, cc *circleciclient.Client, org, name s
 // not seen; no workflow at all leaves the TagPipeline without Workflows.
 func ReadTagPipelineByTargets(ctx context.Context, cc *circleciclient.Client, org, name string, number int64, targets []string) (*TagPipeline, error) {
 	tp := newTagPipeline(org, name, number)
-	ids, err := targetWorkflows(ctx, cc, org, name, number, targets)
+	jobsOf := map[string][]circleciclient.Job{}
+	ids, err := targetWorkflows(ctx, cc, org, name, number, targets, jobsOf)
 	if err != nil {
 		return tp, fmt.Errorf("the workflows of pipeline %d from the tag's statuses: %w", number, err)
 	}
@@ -85,7 +117,20 @@ func ReadTagPipelineByTargets(ctx context.Context, cc *circleciclient.Client, or
 			runs = append(runs, wd.Workflow)
 		}
 	}
-	return tp, tp.read(ctx, cc, org, name, runs)
+	tp.ByTargets = true
+	for _, run := range runs {
+		jobs, ok := jobsOf[run.ID]
+		if !ok {
+			if jobs, err = cc.ListWorkflowJobs(ctx, run.ID); err != nil {
+				return tp, fmt.Errorf("the jobs of workflow %s of pipeline %d: %w", run.Name, number, err)
+			}
+			jobsOf[run.ID] = jobs
+		}
+		for _, j := range jobs {
+			tp.Jobs = append(tp.Jobs, j.Name)
+		}
+	}
+	return tp, tp.read(ctx, cc, org, name, runs, jobsOf)
 }
 
 // targetWorkflows are the ids of the workflows the target URLs lead to, in
@@ -93,7 +138,7 @@ func ReadTagPipelineByTargets(ctx context.Context, cc *circleciclient.Client, or
 // another pipeline than number is skipped; a job URL is read for its
 // workflow, whose jobs are then listed so that the statuses of its other
 // jobs are not read one by one. A job CircleCI does not know is skipped.
-func targetWorkflows(ctx context.Context, cc *circleciclient.Client, org, name string, number int64, targets []string) ([]string, error) {
+func targetWorkflows(ctx context.Context, cc *circleciclient.Client, org, name string, number int64, targets []string, jobsOf map[string][]circleciclient.Job) ([]string, error) {
 	var ids []string
 	seen, known := map[string]bool{}, map[int64]bool{}
 	add := func(id string) bool {
@@ -142,6 +187,7 @@ func targetWorkflows(ctx context.Context, cc *circleciclient.Client, org, name s
 		if err != nil {
 			return nil, fmt.Errorf("the jobs of workflow %s: %w", job.LatestWorkflow.ID, err)
 		}
+		jobsOf[job.LatestWorkflow.ID] = jobs
 		for _, j := range jobs {
 			known[j.JobNumber] = true
 		}
@@ -154,14 +200,19 @@ func newTagPipeline(org, name string, number int64) *TagPipeline {
 }
 
 // read reads runs, the workflows of the pipeline, into tp: the newest run of
-// every name, and the jobs of a failed one.
-func (tp *TagPipeline) read(ctx context.Context, cc *circleciclient.Client, org, name string, runs []circleciclient.Workflow) error {
+// every name, and the jobs of a failed one; jobsOf holds the job listings
+// already read, by workflow id (nil: none).
+func (tp *TagPipeline) read(ctx context.Context, cc *circleciclient.Client, org, name string, runs []circleciclient.Workflow, jobsOf map[string][]circleciclient.Job) error {
 	p := tp.Pipeline
 	for _, run := range circleciclient.NewestWorkflows(runs) {
 		tp.Workflows = append(tp.Workflows, run.Name+" ("+run.Status+")")
 		switch {
 		case circleciclient.WorkflowFailed(run.Status):
-			jobs, err := cc.ListWorkflowJobs(ctx, run.ID)
+			jobs, ok := jobsOf[run.ID]
+			var err error
+			if !ok {
+				jobs, err = cc.ListWorkflowJobs(ctx, run.ID)
+			}
 			if err != nil {
 				return fmt.Errorf("the jobs of workflow %s of pipeline %d: %w", run.Name, p.Number, err)
 			}
@@ -198,4 +249,27 @@ func releaseOnly(jobs []circleciclient.Job) bool {
 		}
 	}
 	return len(red) > 0 && len(reconcile.UnpublishedJobs(red)) == 0
+}
+
+// jobIndex is the declaration's jobs by name; a name used by several
+// workflows keeps every use.
+func jobIndex(ci *inventory.CI) map[string][]inventory.CIJob {
+	idx := map[string][]inventory.CIJob{}
+	if ci == nil {
+		return idx
+	}
+	for _, j := range ci.Jobs {
+		idx[j.Name] = append(idx[j.Name], j)
+	}
+	return idx
+}
+
+// runsAny says whether runs holds for one of jobs.
+func runsAny(jobs []inventory.CIJob, runs func(inventory.CIJob) bool) bool {
+	for _, j := range jobs {
+		if runs(j) {
+			return true
+		}
+	}
+	return false
 }

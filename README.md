@@ -120,7 +120,10 @@ their workflows 404; it answers a workflow by id, and no job (404 since 2026-11-
 pipeline is no longer listed, the watch follows the target URLs of the tag commit's `ci/circleci:` statuses
 (a GitHub App pipeline's status names its workflow; an OAuth follow's names a job, read for its workflow
 only where CircleCI answers it) and keeps the workflows of the tag's own pipeline by its number, so a branch
-or candidate pipeline's statuses at the same commit change nothing. Without a token an OAuth follow's tag
+or candidate pipeline's statuses at the same commit change nothing. A status of a job the declaration runs on
+the tag that none of the read workflows has is another pipeline's, posted over the tag's: the release is not
+built from such a read (it keeps watching, and reads `unchecked` once the pipeline is gone), and
+`watch_repository` keeps waiting. Without a token an OAuth follow's tag
 pipeline is therefore not read: the release keeps watching while the pipeline is listed, then reads
 `unchecked`, and the record's `release` step falls back to the tag commit's statuses; nothing is told, a red
 pipeline included. `watch_repository` reads the `released` phase the same way, and decides from the

@@ -457,6 +457,13 @@ func (c *Collector) settle(rec *inventory.Record, w *inventory.ReleaseWatch, tp 
 	case tp.Red():
 		w.FailedJobs = tp.Failed
 		w.Settle(now, inventory.ReleaseRed)
+	case tp.Built() && len(tp.Unseen(tagContexts(rec, w.Tag), rec.CI, w.Tag)) > 0:
+		// Another pipeline posted over some of the tag pipeline's
+		// statuses: a workflow of it was not read, so built is not known.
+		if gone {
+			w.Settle(now, inventory.ReleaseUnchecked)
+			w.Reason = fmt.Sprintf("the tag pipeline %d is no longer among the pipelines CircleCI lists first, and another pipeline's statuses on the tag commit hide its jobs %s", tp.Pipeline.Number, strings.Join(tp.Unseen(tagContexts(rec, w.Tag), rec.CI, w.Tag), ", "))
+		}
 	case tp.Built():
 		w.FailedJobs = nil
 		w.Settle(now, inventory.ReleaseBuilt)
@@ -474,6 +481,16 @@ func tagTargets(rec *inventory.Record, tag string) []string {
 		return nil
 	}
 	return rel.Build.Targets
+}
+
+// tagContexts are the `ci/circleci:` status contexts of tag's commit as the
+// record read them; nil before the record has read the release.
+func tagContexts(rec *inventory.Record, tag string) []string {
+	rel := rec.Reality.LatestRelease
+	if rel == nil || rel.Tag != tag || rel.Build == nil {
+		return nil
+	}
+	return rel.Build.Contexts
 }
 
 // targetsUnread says whether the record carries tag's commit statuses

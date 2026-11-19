@@ -77,7 +77,7 @@ func engineStep(t *testing.T, step reconcile.Step, posters []string) *reconcile.
 		w.Header().Set("Content-Type", "application/json")
 		switch r.URL.Path {
 		case "/repos/giantswarm/x":
-			_ = json.NewEncoder(w).Encode(map[string]any{"name": "x", "full_name": "giantswarm/x", "default_branch": mainBranch, "size": 10})
+			_ = json.NewEncoder(w).Encode(map[string]any{kName: "x", "full_name": "giantswarm/x", "default_branch": mainBranch, "size": 10})
 		case "/repos/giantswarm/x/commits":
 			_ = json.NewEncoder(w).Encode([]map[string]any{{"sha": "head"}})
 		case "/repos/giantswarm/x/releases/latest":

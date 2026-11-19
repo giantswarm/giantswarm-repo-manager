@@ -34,6 +34,7 @@ const (
 	neverRebuilt    = "rerun the failed workflow from failed on CircleCI"
 	amd64Context    = "ci/circleci: " + amd64Leg
 	kMessage        = "message"
+	kName           = "name"
 	nodeBuild       = "node-build"
 	wfBranch        = "wf-branch"
 	wfOK            = "wf-ok"
@@ -88,7 +89,7 @@ func (f *fakeTagPipelines) handler() http.Handler {
 		for wf, jobs := range f.jobs {
 			for _, j := range jobs {
 				if strconv.FormatInt(j.JobNumber, 10) == r.PathValue("number") {
-					write(w, map[string]any{"number": j.JobNumber, "name": j.Name, "status": j.Status, "latest_workflow": map[string]string{"id": wf}})
+					write(w, map[string]any{"number": j.JobNumber, kName: j.Name, "status": j.Status, "latest_workflow": map[string]string{"id": wf}})
 					return
 				}
 			}

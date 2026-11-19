@@ -60,7 +60,7 @@ func TestFetchReleasesReadsTwoPagesOfFifty(t *testing.T) {
 				end := min(start+req.Variables.First, tc.repos)
 				nodes := []map[string]any{}
 				for i := start; i < end; i++ {
-					nodes = append(nodes, map[string]any{"name": "r" + strconv.Itoa(i)})
+					nodes = append(nodes, map[string]any{kName: "r" + strconv.Itoa(i)})
 				}
 				_ = json.NewEncoder(w).Encode(map[string]any{"data": map[string]any{"organization": map[string]any{"repositories": map[string]any{
 					"pageInfo": map[string]any{"hasNextPage": end < tc.repos, "endCursor": "c" + strconv.Itoa(end)},

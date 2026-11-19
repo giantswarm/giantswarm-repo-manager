@@ -57,10 +57,11 @@ func ReadTagPipeline(ctx context.Context, cc *circleciclient.Client, org, name s
 // number that the target URLs of the tag commit's CircleCI statuses lead to,
 // by the rule of ReadTagPipeline. It is the read where the pipeline's
 // workflow listing is out of reach: CircleCI answers that listing 404
-// without a token, but answers a job, a workflow and a workflow's jobs of a
-// public project (the job of an OAuth follow's status, `circleci.com/gh/
-// <org>/<repo>/<job>`, names its workflow; a GitHub App pipeline's status
-// names the workflow, `app.circleci.com/workflow/<id>/job/<id>`), and it
+// without a token, but answers a workflow and a workflow's jobs of a public
+// project (a GitHub App pipeline's status names the workflow,
+// `app.circleci.com/workflow/<id>/job/<id>`; an OAuth follow's names its
+// job, `circleci.com/gh/<org>/<repo>/<job>`, which is read for its workflow
+// where CircleCI answers it: without a token it answers 404), and it
 // reads a pipeline no longer among the newest ones the lookup lists. A
 // status names its job, not its pipeline: a workflow of another pipeline at
 // the same commit (a branch's, a candidate tag's) is left out by its

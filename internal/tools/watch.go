@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"net/url"
 	"strings"
 	"time"
 
@@ -47,8 +48,9 @@ const contextImagePush = "push-to-registries"
 // carries the scaffold, the reconciler run of that pull request has
 // reported, and the
 // first release exists with its tag pipeline's workflows green — or, where
-// the manager reads no tag pipeline, its CircleCI statuses green, complete
-// for the declaration and settled. A repository whose release workflow is
+// the manager reads no tag pipeline or its read finds no workflow (an OAuth
+// follow without a token), its CircleCI statuses green, complete for the
+// declaration and settled. A repository whose release workflow is
 // not auto-release (withoutRelease) has no release to wait for: it is ready
 // once set up. One without CI (withoutCI) whose auto-release still cuts a
 // release is released once the release exists: no pipeline builds it.
@@ -91,7 +93,8 @@ type Watch struct {
 	// last read — a read GitHub or CircleCI refused, the statuses no
 	// identity reads, or, once CircleCI builds the release, the tag
 	// pipeline's workflows and their states (the statuses reported and what
-	// is still awaited, where the manager reads no tag pipeline); empty when
+	// is still awaited, where the manager reads no tag pipeline or its read
+	// finds no workflow, an OAuth follow without a token); empty when
 	// the phase is simply not reached yet.
 	PendingReason string `json:"pendingReason,omitempty"`
 	// Failure names the phase that failed and why; the phases before it are
@@ -495,7 +498,8 @@ func (w *watcher) withoutRelease() bool {
 
 // released: the first release exists (read as the caller) and, where the
 // manager reads the tag pipeline on CircleCI (readsTagPipeline), its
-// workflows decide (tagPipelineVerdict). Elsewhere the CircleCI statuses on
+// workflows decide (tagPipelineVerdict). Elsewhere, and where that read
+// finds no workflow (an OAuth follow without a token), the CircleCI statuses on
 // its commit must be green, complete and settled — read as the
 // inventory App, the identity of the unattended reads: the caller's token
 // through the App giantswarm-repo-manager has no statuses permission. A
@@ -526,7 +530,10 @@ func (w *watcher) released(ctx context.Context) (outcome, error) {
 		return done(rel.GetPublishedAt().Time), nil
 	}
 	if w.readsTagPipeline() {
-		return w.tagPipelineVerdict(ctx, tag), nil
+		if o, ok := w.tagPipelineVerdict(ctx, tag); ok {
+			return o, nil
+		}
+		// CircleCI hid the tag pipeline's workflows: the statuses decide.
 	}
 	if w.t.d.App == nil {
 		if o := w.releaseStepVerdict(tag); o.decided() {
@@ -601,38 +608,87 @@ func (w *watcher) readsTagPipeline() bool {
 // states. Before CircleCI has a pipeline for the tag, the reconciler run's
 // release step decides: a tag no pipeline built fails the phase with its
 // fix, anything else keeps waiting. A read CircleCI refuses keeps the phase
-// pending with the refusal.
-func (w *watcher) tagPipelineVerdict(ctx context.Context, tag string) outcome {
+// pending with the refusal — except the workflow listing CircleCI answers
+// 404 without a token: then the workflows are read through the target URLs
+// of the release commit's statuses (collect.ReadTagPipelineByTargets), as
+// the inventory App reads them. ok false says that read found no workflow
+// (an OAuth follow's job, which CircleCI does not answer without a token,
+// or no status yet): the statuses decide the phase instead.
+func (w *watcher) tagPipelineVerdict(ctx context.Context, tag string) (o outcome, ok bool) {
 	cc, slug := w.t.d.CircleCI, w.org()+"/"+w.name
 	if w.pipeline == nil || w.pipeline.VCS.Tag != tag {
 		p, err := cc.FindPipelineByTag(ctx, w.org(), w.name, tag)
 		switch {
 		case err != nil:
-			return undecided(fmt.Sprintf("read the pipelines of %s on CircleCI: %v", slug, err))
+			return undecided(fmt.Sprintf("read the pipelines of %s on CircleCI: %v", slug, err)), true
 		case p == nil:
 			if o := w.releaseStepVerdict(tag); o.decided() {
-				return o
+				return o, true
 			}
-			return undecided(fmt.Sprintf("CircleCI has no pipeline for %s of %s yet", tag, slug))
+			return undecided(fmt.Sprintf("CircleCI has no pipeline for %s of %s yet", tag, slug)), true
 		}
 		w.pipeline = p
 	}
 	tp, err := collect.ReadTagPipeline(ctx, cc, w.org(), w.name, w.pipeline)
+	if circleciclient.IsNotFound(err) {
+		if w.t.d.App == nil {
+			return outcome{}, false
+		}
+		st, _, serr := w.t.d.App.Installation().Repositories.GetCombinedStatus(ctx, w.org(), w.name, tag, &github.ListOptions{PerPage: 100})
+		if serr != nil {
+			return undecided(fmt.Sprintf("read the statuses of %s/%s@%s as the inventory App: %v", w.org(), w.name, tag, serr)), true
+		}
+		targets := circleCITargets(st)
+		tp, err = collect.ReadTagPipelineByTargets(ctx, cc, w.org(), w.name, w.pipeline.Number, targets)
+		if err == nil && len(tp.Workflows) == 0 && !namesWorkflow(targets) {
+			return outcome{}, false
+		}
+	}
 	if err != nil {
-		return undecided(fmt.Sprintf("read the tag pipeline of %s on CircleCI (%s): %v", tag, tp.Pipeline.URL, err))
+		return undecided(fmt.Sprintf("read the tag pipeline of %s on CircleCI (%s): %v", tag, tp.Pipeline.URL, err)), true
 	}
 	line := fmt.Sprintf("the tag pipeline of %s, pipeline %d (%s)", tag, tp.Pipeline.Number, tp.Pipeline.URL)
 	switch {
 	case tp.Red():
-		return failed(fmt.Sprintf("%s is red: %s — failed %s (%s)", line, strings.Join(tp.Workflows, ", "), strings.Join(tp.Failed, ", "), tp.Pipeline.Workflow))
+		return failed(fmt.Sprintf("%s is red: %s — failed %s (%s)", line, strings.Join(tp.Workflows, ", "), strings.Join(tp.Failed, ", "), tp.Pipeline.Workflow)), true
 	case tp.Built():
-		return done(time.Now())
+		return done(time.Now()), true
 	case tp.Running:
-		return undecided(fmt.Sprintf("%s: %s — waiting for the running workflows", line, strings.Join(tp.Workflows, ", ")))
+		return undecided(fmt.Sprintf("%s: %s — waiting for the running workflows", line, strings.Join(tp.Workflows, ", "))), true
 	case len(tp.Workflows) == 0:
-		return undecided(line + ": no workflow yet")
+		return undecided(line + ": no workflow yet"), true
 	}
-	return undecided(fmt.Sprintf("%s: %s — no workflow has run yet", line, strings.Join(tp.Workflows, ", ")))
+	return undecided(fmt.Sprintf("%s: %s — no workflow has run yet", line, strings.Join(tp.Workflows, ", "))), true
+}
+
+// namesWorkflow says whether a target URL names its CircleCI workflow (a
+// GitHub App pipeline's status): such statuses that led to no workflow of
+// the tag pipeline are another pipeline's, and the tag pipeline has not
+// reported yet; an OAuth follow's job URL names no workflow.
+func namesWorkflow(targets []string) bool {
+	for _, raw := range targets {
+		u, err := url.Parse(raw)
+		if err != nil || u.Host != "app.circleci.com" {
+			continue
+		}
+		parts := strings.Split(strings.Trim(u.Path, "/"), "/")
+		if len(parts) >= 2 && parts[0] == "workflow" || len(parts) >= 7 && parts[0] == "pipelines" && parts[5] == "workflows" {
+			return true
+		}
+	}
+	return false
+}
+
+// circleCITargets are the target URLs of the `ci/circleci:` statuses of a
+// commit.
+func circleCITargets(st *github.CombinedStatus) []string {
+	var out []string
+	for _, s := range st.Statuses {
+		if strings.HasPrefix(s.GetContext(), inventory.CircleCIContext) && s.GetTargetURL() != "" {
+			out = append(out, s.GetTargetURL())
+		}
+	}
+	return out
 }
 
 // tagPipelineReported says whether a status on the release's commit is the

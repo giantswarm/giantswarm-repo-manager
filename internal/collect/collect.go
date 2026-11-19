@@ -170,6 +170,9 @@ type Collector struct {
 	// passes; nil until the first pass seeds it from the store.
 	watchMu  sync.Mutex
 	watching map[string]bool
+	// started is when the collector was built: a record written before it
+	// may come from a manager that did not keep status target URLs.
+	started time.Time
 }
 
 // New builds a collector; checker may be nil.
@@ -179,7 +182,7 @@ func New(opts Options, reader *gh.Reader, store *inventory.Store, checker Checke
 		log = slog.Default()
 	}
 	return &Collector{opts: opts, reader: reader, gql: newGraphQL(reader.GraphQLURL(), reader.HTTP(), opts.BudgetFloor), store: store, checker: checker, log: log, now: opts.Now,
-		blobs: &http.Client{Timeout: 90 * time.Second}, wake: make(chan struct{}, 1), holder: leaseHolder()}
+		blobs: &http.Client{Timeout: 90 * time.Second}, wake: make(chan struct{}, 1), holder: leaseHolder(), started: opts.Now()}
 }
 
 // Options are the collector's options.

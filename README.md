@@ -116,11 +116,15 @@ giantswarm/backstage v2.58.8 confirms it`. A tag without a pipeline `inventory.r
 10m) after its creation is the missed build, told the same way, linking the project's pipelines — never a
 tag whose pipeline an earlier pass found: the lookup reads the project's newest pipelines only, and a busy
 project pushes the tag's out of them. Without a token CircleCI lists a public project's pipelines but answers
-their workflows 404; it answers a job and a workflow by id. Then, and once a found pipeline is no longer
-listed, the watch follows the target URLs of the tag commit's `ci/circleci:` statuses (an OAuth follow's job,
-whose workflow it reads; a GitHub App pipeline's workflow) and keeps the workflows of the tag's own pipeline
-by its number, so a branch or candidate pipeline's statuses at the same commit change nothing. A pipeline no
-longer listed that no status leads to reads `unchecked`, and nothing is told. What was
+their workflows 404; it answers a workflow by id, and no job (404 since 2026-11-18). Then, and once a found
+pipeline is no longer listed, the watch follows the target URLs of the tag commit's `ci/circleci:` statuses
+(a GitHub App pipeline's status names its workflow; an OAuth follow's names a job, read for its workflow
+only where CircleCI answers it) and keeps the workflows of the tag's own pipeline by its number, so a branch
+or candidate pipeline's statuses at the same commit change nothing. Without a token an OAuth follow's tag
+pipeline is therefore not read: the release keeps watching while the pipeline is listed, then reads
+`unchecked`, and the record's `release` step falls back to the tag commit's statuses; nothing is told, a red
+pipeline included. `watch_repository` reads the `released` phase the same way, and decides from the
+statuses where no status leads to a workflow. What was
 told is the record's `setup.release.told`, so the team hears about a release once: a later pass over the
 same red tag says nothing, a rerun that goes green turns the record built silently, and the next tag is a
 new watch. The record's `release` step and findings (`red-release`, `missed-tag-build`) follow the watch

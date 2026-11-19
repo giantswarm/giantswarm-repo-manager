@@ -80,6 +80,8 @@ type fakeStatus struct {
 	// context unless a test says otherwise.
 	creator              string
 	createdAt, updatedAt time.Time
+	// targetURL is the CircleCI job or workflow the status links.
+	targetURL string
 }
 
 func newFakeRepos() *fakeRepos { return &fakeRepos{repos: map[string]*fakeRepo{}} }
@@ -124,12 +126,17 @@ func (f *fakeRepos) postedBy(name, creator string, d time.Duration, contexts ...
 // state, the way CircleCI reports its jobs: a context reported before is
 // updated in place, the others stay.
 func (f *fakeRepos) report(name, state string, contexts ...string) {
+	f.reportLinking(name, state, "", contexts...)
+}
+
+// reportLinking posts the statuses like report does, each linking target.
+func (f *fakeRepos) reportLinking(name, state, target string, contexts ...string) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	r := f.repos[name]
 	for _, c := range contexts {
 		now := time.Now()
-		st := fakeStatus{context: c, state: state, creator: "cla-bot", createdAt: now, updatedAt: now}
+		st := fakeStatus{context: c, state: state, creator: "cla-bot", createdAt: now, updatedAt: now, targetURL: target}
 		if strings.HasPrefix(c, inventory.CircleCIContext) {
 			st.creator = reconcile.CircleCIAppLogin
 		}
@@ -281,7 +288,7 @@ func (f *fakeRepos) register(mux *http.ServeMux, g *fakeGitHub) {
 		// error, pending when any is pending (or there is none), else success.
 		state, statuses := stateSuccess, []map[string]any{}
 		for _, st := range repo.statuses {
-			statuses = append(statuses, map[string]any{kContext: st.context, kState: st.state, kUpdatedAtREST: st.updatedAt.UTC().Format(time.RFC3339)})
+			statuses = append(statuses, map[string]any{kContext: st.context, kState: st.state, kUpdatedAtREST: st.updatedAt.UTC().Format(time.RFC3339), "target_url": st.targetURL})
 			switch {
 			case st.state == stateFailure || st.state == "error":
 				state = stateFailure

@@ -44,11 +44,16 @@ const (
 	// existed, or while the manager was down — is the sweep's to read, not
 	// news.
 	releaseLookback = 6 * time.Hour
-	// releasePage is how many of the most recently pushed repositories one
+	// releaseRepos is how many of the most recently pushed repositories one
 	// pass reads: a tag follows the push of its commit within minutes, so
-	// every repository with a fresh release is among them. One GraphQL
-	// query per pass, whatever the org's size.
-	releasePage = 100
+	// every repository with a fresh release is among them. Two GraphQL
+	// queries per pass, whatever the org's size.
+	releaseRepos = 100
+	// releasePage is how many repositories one query reads: GitHub stops a
+	// GraphQL query after about ten seconds and answers 502, and 100
+	// repositories with their tag commits' statuses take about ten (50
+	// take about four, measured 2026-11-19).
+	releasePage = 50
 )
 
 func (o *ReleaseOptions) defaults() {
@@ -66,15 +71,16 @@ type ReleasePoll struct {
 	Seen, Started, Watching, Settled, Told int
 }
 
-// releasesQuery is the pass's one GraphQL query: the most recently pushed
+// releasesQuery is one page of the pass's GraphQL read: the most recently pushed
 // repositories with their latest release, its tag commit — its statuses, as
 // the inventory's read of the repository has them — and the pull request
 // behind it. Ordered by push because a tag is cut minutes after its commit
 // was pushed; archived repositories are left out at the source.
 const releasesQuery = `
-query($org: String!, $first: Int!) {
+query($org: String!, $first: Int!, $after: String) {
   organization(login: $org) {
-    repositories(first: $first, isArchived: false, orderBy: {field: PUSHED_AT, direction: DESC}) {
+    repositories(first: $first, after: $after, isArchived: false, orderBy: {field: PUSHED_AT, direction: DESC}) {
+      pageInfo { hasNextPage endCursor }
       nodes {
         name visibility pushedAt
         latestRelease { tagName createdAt publishedAt tagCommit {
@@ -204,8 +210,8 @@ func (c *Collector) RunReleaseWatch(ctx context.Context) {
 // WatchReleases is one pass: the page of recently pushed repositories, a
 // release not settled yet on a declared repository followed on CircleCI by
 // the tag's own pipeline, the record written with what the watch knows, the
-// team told once when nothing was published. The budget of a pass: one
-// GraphQL query, one store read per candidate, and for every release still
+// team told once when nothing was published. The budget of a pass: two
+// GraphQL queries, one store read per candidate, and for every release still
 // running one pipeline listing, one workflow listing and the jobs of a
 // failed workflow on CircleCI.
 func (c *Collector) WatchReleases(ctx context.Context) (*ReleasePoll, error) {
@@ -533,20 +539,35 @@ func failureWord(status string) string {
 
 // fetchReleases reads the pass's page.
 func (c *Collector) fetchReleases(ctx context.Context) ([]releaseNode, error) {
-	var data struct {
-		Organization *struct {
-			Repositories struct {
-				Nodes []releaseNode `json:"nodes"`
-			} `json:"repositories"`
-		} `json:"organization"`
+	var nodes []releaseNode
+	var after any
+	for len(nodes) < releaseRepos {
+		var data struct {
+			Organization *struct {
+				Repositories struct {
+					PageInfo struct {
+						HasNextPage bool   `json:"hasNextPage"`
+						EndCursor   string `json:"endCursor"`
+					} `json:"pageInfo"`
+					Nodes []releaseNode `json:"nodes"`
+				} `json:"repositories"`
+			} `json:"organization"`
+		}
+		vars := map[string]any{varOrg: c.opts.Org, "first": min(releasePage, releaseRepos-len(nodes)), "after": after}
+		if _, err := c.gql.do(ctx, releasesQuery, vars, &data); err != nil {
+			return nil, fmt.Errorf("release watch: %w", err)
+		}
+		if data.Organization == nil {
+			return nil, fmt.Errorf("release watch: organization %s not resolved", c.opts.Org)
+		}
+		repos := data.Organization.Repositories
+		nodes = append(nodes, repos.Nodes...)
+		if !repos.PageInfo.HasNextPage || repos.PageInfo.EndCursor == "" {
+			break
+		}
+		after = repos.PageInfo.EndCursor
 	}
-	if _, err := c.gql.do(ctx, releasesQuery, map[string]any{varOrg: c.opts.Org, "first": releasePage}, &data); err != nil {
-		return nil, fmt.Errorf("release watch: %w", err)
-	}
-	if data.Organization == nil {
-		return nil, fmt.Errorf("release watch: organization %s not resolved", c.opts.Org)
-	}
-	return data.Organization.Repositories.Nodes, nil
+	return nodes, nil
 }
 
 // seedWatching fills the set of repositories the watch follows from the

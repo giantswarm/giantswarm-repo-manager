@@ -102,8 +102,9 @@ findings alone.
 
 **A release nothing was published for is told once, within minutes.** The release watch
 (`inventory.releases.interval`, default 5m) follows the latest release of every declared repository from
-its tag to the end of the tag's own CircleCI pipeline: one GraphQL query per pass over the most recently
-pushed repositories (a tag follows the push of its commit within minutes), and for every release still
+its tag to the end of the tag's own CircleCI pipeline: per pass, two GraphQL queries of 50 over the 100 most
+recently pushed repositories (a tag follows the push of its commit within minutes; GitHub stops a query after
+about ten seconds, and 100 repositories in one query take about that long), and for every release still
 running the tag's pipeline on CircleCI — found by its tag (`vcs.tag`, or the trigger's ref of a pipeline the
 CircleCI GitHub App started, which carries no `vcs`), never a branch pipeline at the same commit, which the
 commit's statuses cannot tell apart — its workflows (the newest run per name: a rerun

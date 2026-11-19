@@ -192,7 +192,7 @@
                         },
                         "interval": {
                             "type": "string",
-                            "description": "Follow the latest release of every declared repository from its tag to the end of the tag's own CircleCI pipeline, reading every interval (a Go duration): one GraphQL query over the most recently pushed repositories per pass, and CircleCI reads for the releases still running. A red pipeline, or none within `grace`, is one notice to the owning team's `notices` channel, told once; a rerun that goes green is silent. `\"0\"` turns the watch off. Public repositories are read without a token; a private one needs `circleci.existingSecret`, else its release reads `unchecked`."
+                            "description": "Follow the latest release of every declared repository from its tag to the end of the tag's own CircleCI pipeline, reading every interval (a Go duration): two GraphQL queries of 50 over the 100 most recently pushed repositories per pass, and CircleCI reads for the releases still running. A red pipeline, or none within `grace`, is one notice to the owning team's `notices` channel, told once; a rerun that goes green is silent. `\"0\"` turns the watch off. Public repositories are read without a token; a private one needs `circleci.existingSecret`, else its release reads `unchecked`."
                         }
                     }
                 },

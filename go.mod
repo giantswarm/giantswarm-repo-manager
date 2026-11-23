@@ -8,7 +8,7 @@ require (
 	github.com/alicebob/miniredis/v2 v2.40.0
 	github.com/bradleyfalzon/ghinstallation/v2 v2.19.0
 	github.com/giantswarm/devctl/v8 v8.168.3
-	github.com/giantswarm/mcp-toolkit v0.5.5
+	github.com/giantswarm/mcp-toolkit v0.7.0
 	github.com/google/go-github/v93 v93.0.0
 	github.com/mark3labs/mcp-go v1.6.0
 	github.com/sirupsen/logrus v1.10.2
@@ -100,7 +100,7 @@ require (
 	github.com/google/go-containerregistry v0.22.1 // indirect
 	github.com/google/go-github/v88 v88.0.0 // indirect
 	github.com/google/go-querystring v1.2.0 // indirect
-	github.com/google/jsonschema-go v0.4.2 // indirect
+	github.com/google/jsonschema-go v0.4.3 // indirect
 	github.com/google/uuid v1.6.0 // indirect
 	github.com/grpc-ecosystem/grpc-gateway/v2 v2.31.0 // indirect
 	github.com/hashicorp/go-cleanhttp v0.5.2 // indirect

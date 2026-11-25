@@ -5,7 +5,7 @@ go 1.27.0
 toolchain go1.27.4
 
 require (
-	github.com/alicebob/miniredis/v2 v2.40.0
+	github.com/alicebob/miniredis/v2 v2.41.0
 	github.com/bradleyfalzon/ghinstallation/v2 v2.19.0
 	github.com/giantswarm/devctl/v8 v8.169.5
 	github.com/giantswarm/mcp-toolkit v0.7.0

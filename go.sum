@@ -139,8 +139,8 @@ github.com/fsnotify/fsnotify v1.10.1 h1:b0/UzAf9yR5rhf3RPm9gf3ehBPpf0oZKIjtpKrx5
 github.com/fsnotify/fsnotify v1.10.1/go.mod h1:TLheqan6HD6GBK6PrDWyDPBaEV8LspOxvPSjC+bVfgo=
 github.com/fxamacker/cbor/v2 v2.10.0 h1:HVF3T5vYwLqO81ebPirWEPNv2SMrUMD3HLnKgEr6uWE=
 github.com/fxamacker/cbor/v2 v2.10.0/go.mod h1:uSwlToFuT9BZAKRxxVm3qQC8DR4tlWl7D6pf20iRYH4=
-github.com/giantswarm/devctl/v8 v8.170.2 h1:bOVX6bNoYsionF1dTGrKUIBvtRYetlg7O+E0p5N1k6c=
-github.com/giantswarm/devctl/v8 v8.170.2/go.mod h1:9ZHuCwO+UUA60fQ93h1bmWVp7eQxWiD76jyrdzx3Jy0=
+github.com/giantswarm/devctl/v8 v8.170.3 h1:OE4RxILe58Vres5+0+y1EJdry7UZjMY3I8ls5CfPxSg=
+github.com/giantswarm/devctl/v8 v8.170.3/go.mod h1:KdjtjkV6a6PI3BlEH8Mk/bgz5/Uh7YhDum++nNWbzXM=
 github.com/giantswarm/go-selfupdate v1.7.7 h1:VU9EUr+VRlnd/XRPNLy4SVnObdqwuXE7Fnz5mBE88SQ=
 github.com/giantswarm/go-selfupdate v1.7.7/go.mod h1:nqRW1Io8Ixo3x8tSnLKkpfenWn2PRf/Zcu548PZp780=
 github.com/giantswarm/mcp-toolkit v0.7.0 h1:qaToPE0WkBauqNGpY7JoV6KSFT5Z6x3W8w63MXYVnQA=
